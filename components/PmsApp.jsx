@@ -840,7 +840,10 @@ export default function PmsApp() {
   const [tab, setTab] = useState("overview");
 
   useEffect(() => {
-    if (!projects.length) return;
+    if (!projects.length) {
+      setSelectedId(null);
+      return;
+    }
     setSelectedId((prev) => (prev && projects.some((project) => project.id === prev) ? prev : projects[0].id));
   }, [projects]);
 
@@ -903,14 +906,18 @@ export default function PmsApp() {
     setTab("overview");
   };
 
-  if (!selectedProject) {
-    return (
-      <div style={{ padding: 24 }}>
-        <div style={{ fontWeight: 800, marginBottom: 8 }}>프로젝트 로딩 중...</div>
-        <SyncBadge syncState={syncState} />
-      </div>
-    );
-  }
+  const deleteProject = (projectId) => {
+    const target = projects.find((project) => project.id === projectId);
+    if (!target) return;
+    if (!window.confirm(`"${target.name}" 프로젝트를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
+
+    const remaining = projects.filter((project) => project.id !== projectId);
+    setProjects(normalizeProjects(remaining));
+    setSelectedId((prev) => (prev === projectId ? (remaining[0]?.id || null) : prev));
+    if (remaining.length === 0) {
+      setTab("overview");
+    }
+  };
 
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
@@ -928,7 +935,7 @@ export default function PmsApp() {
           {projects.map((project) => {
             const launch = project.tasks[project.tasks.length - 1];
             const dDay = diff(TODAY, launch?.scheduledEnd || TODAY);
-            const active = project.id === selectedProject.id;
+            const active = project.id === selectedId;
             return (
               <button
                 key={project.id}
@@ -956,159 +963,204 @@ export default function PmsApp() {
       <main style={{ flex: 1, padding: 16, minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12 }}>
           <div>
-            <div style={{ fontSize: 22, fontWeight: 900 }}>{selectedProject.name}</div>
-            <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-              담당: {selectedProject.manager} · 시작일: {fmt(selectedProject.start)} · 카테고리: {selectedProject.category}
-            </div>
+            {selectedProject ? (
+              <>
+                <div style={{ fontSize: 22, fontWeight: 900 }}>{selectedProject.name}</div>
+                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                  담당: {selectedProject.manager} · 시작일: {fmt(selectedProject.start)} · 카테고리: {selectedProject.category}
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 22, fontWeight: 900 }}>프로젝트 없음</div>
+                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                  새 프로젝트를 생성해서 일정/소통/의사결정 기록을 시작하세요.
+                </div>
+              </>
+            )}
           </div>
-          <SyncBadge syncState={syncState} />
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+            <SyncBadge syncState={syncState} />
+            {selectedProject && (
+              <button
+                onClick={() => deleteProject(selectedProject.id)}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                  border: "1px solid #fecaca",
+                  background: "#fef2f2",
+                  color: "#dc2626",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 700
+                }}
+              >
+                프로젝트 삭제
+              </button>
+            )}
+          </div>
         </div>
 
-        <ProjectMetaEditor
-          project={selectedProject}
-          onSave={({ manager, category }) => {
-            updateProject(selectedProject.id, (project) => {
-              const nextManager = manager.trim();
-              const nextCategory = category;
-              if (project.manager === nextManager && project.category === nextCategory) return project;
+        {selectedProject ? (
+          <>
+            <ProjectMetaEditor
+              project={selectedProject}
+              onSave={({ manager, category }) => {
+                updateProject(selectedProject.id, (project) => {
+                  const nextManager = manager.trim();
+                  const nextCategory = category;
+                  if (project.manager === nextManager && project.category === nextCategory) return project;
 
-              const historyParts = [];
-              if (project.manager !== nextManager) historyParts.push(`담당자: ${project.manager} → ${nextManager}`);
-              if (project.category !== nextCategory) historyParts.push(`카테고리: ${project.category} → ${nextCategory}`);
+                  const historyParts = [];
+                  if (project.manager !== nextManager) historyParts.push(`담당자: ${project.manager} → ${nextManager}`);
+                  if (project.category !== nextCategory) historyParts.push(`카테고리: ${project.category} → ${nextCategory}`);
 
-              return {
-                ...project,
-                manager: nextManager,
-                category: nextCategory,
-                changeLog: [
-                  ...(project.changeLog || []),
-                  {
-                    id: Date.now(),
-                    type: "project_meta",
-                    taskId: "_project_meta",
-                    taskName: "프로젝트 기본정보",
-                    date: TODAY,
-                    reason: historyParts.join(" / ")
-                  }
-                ]
-              };
-            });
-          }}
-        />
-
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-          {[
-            ["overview", "개요"],
-            ["tasks", "태스크 관리"],
-            ["communication", "업체 소통 기록"],
-            ["decision", "의사결정 기록"],
-            ["backup", "백업/복원"]
-          ].map(([id, label]) => (
-            <button key={id} onClick={() => setTab(id)} style={tabButtonStyle(tab === id)}>
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {tab === "overview" && <OverviewTab project={selectedProject} />}
-
-        {tab === "tasks" && (
-          <TasksTab
-            project={selectedProject}
-            onTaskSave={(task, patch) => {
-              updateProject(selectedProject.id, (project) => {
-                let tasks = project.tasks.map((currentTask) => (
-                  currentTask.id === task.id
-                    ? {
-                        ...currentTask,
-                        progress: patch.progress,
-                        taskStatus: patch.taskStatus,
-                        notes: patch.notes,
-                        duration: patch.duration
+                  return {
+                    ...project,
+                    manager: nextManager,
+                    category: nextCategory,
+                    changeLog: [
+                      ...(project.changeLog || []),
+                      {
+                        id: Date.now(),
+                        type: "project_meta",
+                        taskId: "_project_meta",
+                        taskName: "프로젝트 기본정보",
+                        date: TODAY,
+                        reason: historyParts.join(" / ")
                       }
-                    : currentTask
-                ));
+                    ]
+                  };
+                });
+              }}
+            />
 
-                if (patch.delayDays > 0) tasks = applyDelay(tasks, task.id, patch.delayDays);
-                if (patch.duration !== task.duration) tasks = applyDurationChange(tasks, task.id, patch.duration);
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+              {[
+                ["overview", "개요"],
+                ["tasks", "태스크 관리"],
+                ["communication", "업체 소통 기록"],
+                ["decision", "의사결정 기록"],
+                ["backup", "백업/복원"]
+              ].map(([id, label]) => (
+                <button key={id} onClick={() => setTab(id)} style={tabButtonStyle(tab === id)}>
+                  {label}
+                </button>
+              ))}
+            </div>
 
-                const developTask = tasks.find((currentTask) => currentTask.id === DEVELOP_TASK_ID);
-                const developSubTimeline = normalizeDevelopSubTimeline(
-                  project.developSubTimeline,
-                  developTask?.duration || 1
-                );
+            {tab === "overview" && <OverviewTab project={selectedProject} />}
 
-                return {
-                  ...project,
-                  tasks,
-                  developSubTimeline,
-                  changeLog: [
-                    ...(project.changeLog || []),
-                    {
-                      id: Date.now(),
-                      taskId: task.id,
-                      taskName: task.name,
-                      date: TODAY,
-                      reason: patch.notes || "수정",
-                      delayDays: patch.delayDays,
-                      duration: patch.duration
-                    }
-                  ]
-                };
-              });
-            }}
-            onDevelopSubTimelineUpdate={(nextTimeline) => {
-              updateProject(selectedProject.id, (project) => ({
-                ...project,
-                developSubTimeline: nextTimeline,
-                changeLog: [
-                  ...(project.changeLog || []),
-                  {
-                    id: Date.now(),
-                    taskId: DEVELOP_TASK_ID,
-                    taskName: "제품 개발 부수 일정",
-                    date: TODAY,
-                    reason: "하위 구성요소 기간/위치 변경"
-                  }
-                ]
-              }));
-            }}
-          />
-        )}
+            {tab === "tasks" && (
+              <TasksTab
+                project={selectedProject}
+                onTaskSave={(task, patch) => {
+                  updateProject(selectedProject.id, (project) => {
+                    let tasks = project.tasks.map((currentTask) => (
+                      currentTask.id === task.id
+                        ? {
+                            ...currentTask,
+                            progress: patch.progress,
+                            taskStatus: patch.taskStatus,
+                            notes: patch.notes,
+                            duration: patch.duration
+                          }
+                        : currentTask
+                    ));
 
-        {tab === "communication" && (
-          <CommunicationTab
-            project={selectedProject}
-            onSaveLog={(item) => {
-              updateProject(selectedProject.id, (project) => ({
-                ...project,
-                communicationLog: [...(project.communicationLog || []), item]
-              }));
-            }}
-          />
-        )}
+                    if (patch.delayDays > 0) tasks = applyDelay(tasks, task.id, patch.delayDays);
+                    if (patch.duration !== task.duration) tasks = applyDurationChange(tasks, task.id, patch.duration);
 
-        {tab === "decision" && (
-          <DecisionTab
-            project={selectedProject}
-            onSaveLog={(item) => {
-              updateProject(selectedProject.id, (project) => ({
-                ...project,
-                decisionLog: [...(project.decisionLog || []), item]
-              }));
-            }}
-          />
-        )}
+                    const developTask = tasks.find((currentTask) => currentTask.id === DEVELOP_TASK_ID);
+                    const developSubTimeline = normalizeDevelopSubTimeline(
+                      project.developSubTimeline,
+                      developTask?.duration || 1
+                    );
 
-        {tab === "backup" && (
-          <BackupTab
-            projects={projects}
-            selectedProject={selectedProject}
-            onRestore={(nextProjects) => {
-              setProjects(normalizeProjects(nextProjects));
-              if (nextProjects.length > 0) setSelectedId(nextProjects[0].id);
-            }}
-          />
+                    return {
+                      ...project,
+                      tasks,
+                      developSubTimeline,
+                      changeLog: [
+                        ...(project.changeLog || []),
+                        {
+                          id: Date.now(),
+                          taskId: task.id,
+                          taskName: task.name,
+                          date: TODAY,
+                          reason: patch.notes || "수정",
+                          delayDays: patch.delayDays,
+                          duration: patch.duration
+                        }
+                      ]
+                    };
+                  });
+                }}
+                onDevelopSubTimelineUpdate={(nextTimeline) => {
+                  updateProject(selectedProject.id, (project) => ({
+                    ...project,
+                    developSubTimeline: nextTimeline,
+                    changeLog: [
+                      ...(project.changeLog || []),
+                      {
+                        id: Date.now(),
+                        taskId: DEVELOP_TASK_ID,
+                        taskName: "제품 개발 부수 일정",
+                        date: TODAY,
+                        reason: "하위 구성요소 기간/위치 변경"
+                      }
+                    ]
+                  }));
+                }}
+              />
+            )}
+
+            {tab === "communication" && (
+              <CommunicationTab
+                project={selectedProject}
+                onSaveLog={(item) => {
+                  updateProject(selectedProject.id, (project) => ({
+                    ...project,
+                    communicationLog: [...(project.communicationLog || []), item]
+                  }));
+                }}
+              />
+            )}
+
+            {tab === "decision" && (
+              <DecisionTab
+                project={selectedProject}
+                onSaveLog={(item) => {
+                  updateProject(selectedProject.id, (project) => ({
+                    ...project,
+                    decisionLog: [...(project.decisionLog || []), item]
+                  }));
+                }}
+              />
+            )}
+
+            {tab === "backup" && (
+              <BackupTab
+                projects={projects}
+                selectedProject={selectedProject}
+                onRestore={(nextProjects) => {
+                  setProjects(normalizeProjects(nextProjects));
+                  if (nextProjects.length > 0) setSelectedId(nextProjects[0].id);
+                  else setSelectedId(null);
+                }}
+              />
+            )}
+          </>
+        ) : (
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 24, textAlign: "center" }}>
+            <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>생성된 프로젝트가 없습니다.</div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14 }}>
+              첫 프로젝트를 만들면 일정 관리, 업체 소통 기록, 의사결정 기록을 바로 시작할 수 있습니다.
+            </div>
+            <button onClick={addProject} style={primaryButton}>
+              + 첫 프로젝트 만들기
+            </button>
+          </div>
         )}
       </main>
     </div>
