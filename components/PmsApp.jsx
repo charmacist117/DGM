@@ -919,7 +919,7 @@ function BackupTab({ projects, adminLogs, selectedProject, onRestore }) {
 
   const exportAllJson = () => {
     const content = JSON.stringify({ projects, adminLogs }, null, 2);
-    downloadFile(`PharmaDev_backup_${toStr(new Date())}.json`, content, "application/json");
+    downloadFile(`Charmacist_PB_backup_${toStr(new Date())}.json`, content, "application/json");
   };
 
   const exportProjectCsv = () => {
@@ -1469,12 +1469,11 @@ export default function PmsApp() {
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
       <aside style={{ width: 280, background: "#0f172a", color: "#fff", padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ padding: "8px 10px" }}>
-          <div style={{ fontSize: 14, fontWeight: 900 }}>PharmaDev PMS</div>
-          <div style={{ fontSize: 11, color: "#94a3b8" }}>Vercel 영구저장형 운영 모드</div>
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "flex-end", paddingRight: 4, marginBottom: -2 }}>
+        <div style={{ padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 900 }}>참약사 PB 제품개발 시트</div>
+            <div style={{ fontSize: 11, color: "#94a3b8" }}>Vercel Neon Storage</div>
+          </div>
           <button
             onClick={() => {
               setIsHome(true);
