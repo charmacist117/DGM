@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   CATEGORIES,
   PHASES,
@@ -10,7 +11,7 @@ import {
   getInitialProjects
 } from "@/lib/pms/defaults";
 import { TODAY, addDays, diff, fmt, toStr } from "@/lib/pms/date";
-import { applyDelay, applyDurationChange, calcSchedule } from "@/lib/pms/schedule";
+import { applyDelay, applyDurationChange, applyStartDateChange, calcSchedule } from "@/lib/pms/schedule";
 import { downloadFile, toCsv } from "@/lib/pms/exporters";
 
 const LOCAL_CACHE_KEY = "pharmadev_pms_cache_v2";
@@ -62,6 +63,16 @@ const subtleButton = {
   fontWeight: 700,
   fontSize: 12
 };
+
+function formatOwners(project) {
+  const pm = (project?.pmName || "").trim();
+  const am = (project?.amName || "").trim();
+  const chunks = [];
+  if (pm) chunks.push(`PM ${pm}`);
+  if (am) chunks.push(`AM ${am}`);
+  if (chunks.length > 0) return chunks.join(" / ");
+  return project?.manager || "미정";
+}
 
 function toPositiveInt(value, fallback = 1) {
   const n = Number(value);
@@ -166,13 +177,19 @@ function normalizeProject(project) {
       duration,
       pred: normalizePredList(existing?.pred || template.pred),
       progress: Math.max(0, Math.min(100, Number(existing?.progress || 0))),
+      isEnabled: existing?.isEnabled !== false,
       taskStatus: existing?.taskStatus || "pending",
       notes: existing?.notes || ""
     };
     return task;
   });
 
-  const extraTasks = normalizedSourceTasks.filter((task) => !PHASE_ID_SET.has(task.id));
+  const extraTasks = normalizedSourceTasks
+    .filter((task) => !PHASE_ID_SET.has(task.id))
+    .map((task) => ({
+      ...task,
+      isEnabled: task?.isEnabled !== false
+    }));
   const finalTasks = [...orderedPhaseTasks, ...extraTasks];
 
   const hasMissingSchedule = orderedPhaseTasks.some((task) => !task.scheduledStart || !task.scheduledEnd || !task.originalStart || !task.originalEnd);
@@ -197,19 +214,36 @@ function normalizeProject(project) {
 
   return {
     ...project,
-    manager: project.manager || "담당자",
+    pmName: (project.pmName || "").trim(),
+    amName: (project.amName || "").trim(),
+    manager: project.manager || [project.pmName, project.amName].filter(Boolean).join(" / ") || "미정",
     category: project.category || "건강기능식품",
     start: startDate,
     tasks: [...finalOrderedTasks, ...extraTasks],
     developSubTimeline,
     communicationLog: Array.isArray(project.communicationLog) ? project.communicationLog : [],
     decisionLog: Array.isArray(project.decisionLog) ? project.decisionLog : [],
+    advisorLog: Array.isArray(project.advisorLog) ? project.advisorLog : [],
     changeLog: Array.isArray(project.changeLog) ? project.changeLog : []
   };
 }
 
 function normalizeProjects(projects) {
   return (projects || []).map(normalizeProject);
+}
+
+function normalizeAdminLogs(logs) {
+  return (logs || [])
+    .filter((log) => log && typeof log === "object")
+    .map((log) => ({
+      id: log.id || Date.now() + Math.floor(Math.random() * 1000),
+      type: log.type || "project_event",
+      projectId: log.projectId ?? null,
+      projectName: log.projectName || "-",
+      reason: log.reason || "",
+      actor: log.actor || "관리자",
+      createdAt: log.createdAt || new Date().toISOString()
+    }));
 }
 
 function errorMessage(error, fallback = "알 수 없는 오류") {
@@ -225,7 +259,22 @@ function useProjectsStore() {
     try {
       const cached = window.localStorage.getItem(LOCAL_CACHE_KEY);
       if (!cached) return [];
-      return normalizeProjects(JSON.parse(cached));
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed)) return normalizeProjects(parsed);
+      return normalizeProjects(Array.isArray(parsed?.projects) ? parsed.projects : []);
+    } catch {
+      return [];
+    }
+  });
+
+  const [adminLogs, setAdminLogs] = useState(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const cached = window.localStorage.getItem(LOCAL_CACHE_KEY);
+      if (!cached) return [];
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed)) return [];
+      return normalizeAdminLogs(Array.isArray(parsed?.adminLogs) ? parsed.adminLogs : []);
     } catch {
       return [];
     }
@@ -249,7 +298,9 @@ function useProjectsStore() {
 
         if (!disposed) {
           const nextProjects = normalizeProjects(Array.isArray(payload.projects) ? payload.projects : []);
+          const nextAdminLogs = normalizeAdminLogs(Array.isArray(payload.adminLogs) ? payload.adminLogs : []);
           setProjects(nextProjects);
+          setAdminLogs(nextAdminLogs);
           serverAvailableRef.current = true;
           setSyncState({
             status: "ready",
@@ -262,6 +313,7 @@ function useProjectsStore() {
         if (!disposed) {
           const fallbackProjects = normalizeProjects(getInitialProjects());
           setProjects((prev) => (prev.length ? normalizeProjects(prev) : fallbackProjects));
+          setAdminLogs((prev) => normalizeAdminLogs(prev));
           serverAvailableRef.current = false;
           setSyncState({
             status: "warning",
@@ -282,7 +334,7 @@ function useProjectsStore() {
     if (!readyRef.current) return;
 
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(projects));
+      window.localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify({ projects, adminLogs }));
     }
 
     if (!serverAvailableRef.current) {
@@ -296,7 +348,7 @@ function useProjectsStore() {
         const response = await fetch("/api/projects", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projects })
+          body: JSON.stringify({ projects, adminLogs })
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.ok) {
@@ -315,9 +367,9 @@ function useProjectsStore() {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [projects]);
+  }, [projects, adminLogs]);
 
-  return { projects, setProjects, syncState };
+  return { projects, setProjects, adminLogs, setAdminLogs, syncState };
 }
 
 function SyncBadge({ syncState }) {
@@ -341,6 +393,7 @@ function TaskEditModal({ task, onClose, onSave }) {
   const [notes, setNotes] = useState(task.notes || "");
   const [delayDays, setDelayDays] = useState(0);
   const [duration, setDuration] = useState(task.duration || 1);
+  const [startDate, setStartDate] = useState(task.scheduledStart || TODAY);
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(15,23,42,.55)", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -365,7 +418,7 @@ function TaskEditModal({ task, onClose, onSave }) {
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
           <div>
             <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 4 }}>지연 적용 (일)</label>
             <input type="number" value={delayDays} min={0} onChange={(e) => setDelayDays(Number(e.target.value))} style={inputStyle} />
@@ -373,6 +426,10 @@ function TaskEditModal({ task, onClose, onSave }) {
           <div>
             <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 4 }}>기간 변경 (일)</label>
             <input type="number" value={duration} min={1} onChange={(e) => setDuration(Number(e.target.value))} style={inputStyle} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 4 }}>시작일 지정</label>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={inputStyle} />
           </div>
         </div>
 
@@ -384,7 +441,14 @@ function TaskEditModal({ task, onClose, onSave }) {
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={onClose} style={{ flex: 1, padding: 10, borderRadius: 8, border: "1px solid #e2e8f0", background: "#f8fafc", cursor: "pointer" }}>취소</button>
           <button
-            onClick={() => onSave({ progress, taskStatus, notes, delayDays, duration: toPositiveInt(duration, task.duration || 1) })}
+            onClick={() => onSave({
+              progress,
+              taskStatus,
+              notes,
+              delayDays,
+              startDate,
+              duration: toPositiveInt(duration, task.duration || 1)
+            })}
             style={{ ...primaryButton, flex: 2 }}
           >
             저장
@@ -458,13 +522,18 @@ function OverviewTab({ project }) {
   );
 }
 
-function TasksTab({ project, onTaskSave, onDevelopSubTimelineUpdate }) {
+function TasksTab({ project, onTaskSave, onTaskToggle, onProjectStartChange, onDevelopSubTimelineUpdate }) {
   const [editTask, setEditTask] = useState(null);
+  const [projectStart, setProjectStart] = useState(project.start || TODAY);
   const developTask = project.tasks.find((task) => task.id === DEVELOP_TASK_ID);
   const developDuration = toPositiveInt(developTask?.duration, 1);
   const developTimeline = developTask
     ? normalizeDevelopSubTimeline(project.developSubTimeline, developDuration)
     : [];
+
+  useEffect(() => {
+    setProjectStart(project.start || TODAY);
+  }, [project.id, project.start]);
 
   const saveDevelopItem = (itemId, field, value) => {
     if (!developTask) return;
@@ -477,37 +546,78 @@ function TasksTab({ project, onTaskSave, onDevelopSubTimelineUpdate }) {
 
   return (
     <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
-      <div style={{ padding: "12px 14px", borderBottom: "1px solid #e2e8f0", fontWeight: 800 }}>태스크 일정/진행 수정</div>
+      <div style={{ padding: "12px 14px", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <div style={{ fontWeight: 800 }}>태스크 일정/진행 수정</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 12, color: "#64748b", fontWeight: 700 }}>프로젝트 시작일</span>
+          <input type="date" value={projectStart} onChange={(e) => setProjectStart(e.target.value)} style={{ ...inputStyle, width: 150, padding: "6px 8px", fontSize: 12 }} />
+          <button
+            onClick={() => onProjectStartChange(projectStart)}
+            style={{ padding: "6px 9px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 700 }}
+          >
+            적용
+          </button>
+        </div>
+      </div>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ background: "#f8fafc" }}>
-            {["태스크", "시작", "완료", "상태", "진행률", "메모", ""].map((h) => (
+            {["활성", "태스크", "시작일", "완료", "상태", "진행률", "메모", ""].map((h) => (
               <th key={h} style={{ textAlign: "left", padding: "9px 12px", fontSize: 11, color: "#64748b", borderBottom: "1px solid #e2e8f0" }}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {project.tasks.flatMap((task) => {
+            const enabled = task.isEnabled !== false;
             const rows = [
-              <tr key={task.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+              <tr key={task.id} style={{ borderBottom: "1px solid #f1f5f9", opacity: enabled ? 1 : 0.55 }}>
+                <td style={{ padding: "9px 12px", fontSize: 12 }}>
+                  <button
+                    onClick={() => onTaskToggle(task, !enabled)}
+                    style={{
+                      width: 44,
+                      height: 24,
+                      borderRadius: 999,
+                      border: "1px solid " + (enabled ? "#10b981" : "#cbd5e1"),
+                      background: enabled ? "#dcfce7" : "#f1f5f9",
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: enabled ? "flex-end" : "flex-start",
+                      padding: 2
+                    }}
+                    title={enabled ? "활성화됨" : "비활성화됨"}
+                  >
+                    <span style={{ width: 18, height: 18, borderRadius: 999, background: enabled ? "#16a34a" : "#94a3b8", display: "block" }} />
+                  </button>
+                </td>
                 <td style={{ padding: "9px 12px", fontSize: 13, fontWeight: 700 }}>{task.icon} {task.name}</td>
-                <td style={{ padding: "9px 12px", fontSize: 12 }}>{fmt(task.scheduledStart)}</td>
+                <td style={{ padding: "9px 12px", fontSize: 12 }}>
+                  <input
+                    type="date"
+                    value={task.scheduledStart}
+                    onChange={(event) => onTaskSave(task, { startDate: event.target.value })}
+                    style={{ ...inputStyle, width: 140, padding: "5px 8px", fontSize: 12 }}
+                    disabled={!enabled}
+                  />
+                </td>
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>{fmt(task.scheduledEnd)}</td>
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>{STATUS_LABEL[task.taskStatus]}</td>
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>{task.progress || 0}%</td>
                 <td style={{ padding: "9px 12px", fontSize: 12, color: "#64748b", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.notes || "-"}</td>
                 <td style={{ padding: "9px 12px" }}>
-                  <button onClick={() => setEditTask(task)} style={{ padding: "6px 9px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer", fontSize: 12 }}>
+                  <button onClick={() => setEditTask(task)} style={{ padding: "6px 9px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer", fontSize: 12 }} disabled={!enabled}>
                     수정
                   </button>
                 </td>
               </tr>
             ];
 
-            if (task.id === DEVELOP_TASK_ID && developTask) {
+            if (task.id === DEVELOP_TASK_ID && developTask && enabled) {
               rows.push(
                 <tr key={`${task.id}__subtimeline`} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                  <td colSpan={7} style={{ padding: "10px 12px 14px", background: "#f8fafc" }}>
+                  <td colSpan={8} style={{ padding: "10px 12px 14px", background: "#f8fafc" }}>
                     <div style={{ fontSize: 12, fontWeight: 800, color: "#0f172a", marginBottom: 8 }}>
                       제품 개발 부수 일정 (제품 개발 {developTask.duration}일 내)
                     </div>
@@ -713,11 +823,11 @@ function DecisionTab({ project, onSaveLog }) {
   );
 }
 
-function BackupTab({ projects, selectedProject, onRestore }) {
+function BackupTab({ projects, adminLogs, selectedProject, onRestore }) {
   const fileInputRef = useRef(null);
 
   const exportAllJson = () => {
-    const content = JSON.stringify(projects, null, 2);
+    const content = JSON.stringify({ projects, adminLogs }, null, 2);
     downloadFile(`PharmaDev_backup_${toStr(new Date())}.json`, content, "application/json");
   };
 
@@ -759,8 +869,15 @@ function BackupTab({ projects, selectedProject, onRestore }) {
           try {
             const text = await file.text();
             const parsed = JSON.parse(text);
-            if (!Array.isArray(parsed)) throw new Error("프로젝트 배열 형식이 아닙니다.");
-            onRestore(normalizeProjects(parsed));
+            const nextProjects = Array.isArray(parsed)
+              ? parsed
+              : (Array.isArray(parsed?.projects) ? parsed.projects : null);
+            if (!Array.isArray(nextProjects)) throw new Error("프로젝트 배열 형식이 아닙니다.");
+            const nextAdminLogs = Array.isArray(parsed?.adminLogs) ? parsed.adminLogs : [];
+            onRestore({
+              projects: normalizeProjects(nextProjects),
+              adminLogs: normalizeAdminLogs(nextAdminLogs)
+            });
             window.alert("백업 데이터 복원이 완료되었습니다.");
           } catch (error) {
             window.alert(`복원 실패: ${String(error.message || error)}`);
@@ -773,61 +890,223 @@ function BackupTab({ projects, selectedProject, onRestore }) {
   );
 }
 
-function ProjectMetaEditor({ project, onSave }) {
-  const [manager, setManager] = useState(project.manager || "");
-  const [category, setCategory] = useState(project.category || CATEGORIES[0]);
-  const categoryOptions = CATEGORIES.includes(category) ? CATEGORIES : [category, ...CATEGORIES];
+function BasicInfoTab({ project, onSave }) {
+  const [form, setForm] = useState({
+    name: project.name || "",
+    pmName: project.pmName || "",
+    amName: project.amName || "",
+    category: project.category || CATEGORIES[0],
+    start: project.start || TODAY
+  });
+  const categoryOptions = CATEGORIES.includes(form.category) ? CATEGORIES : [form.category, ...CATEGORIES];
 
   useEffect(() => {
-    setManager(project.manager || "");
-    setCategory(project.category || CATEGORIES[0]);
-  }, [project.id, project.manager, project.category]);
+    setForm({
+      name: project.name || "",
+      pmName: project.pmName || "",
+      amName: project.amName || "",
+      category: project.category || CATEGORIES[0],
+      start: project.start || TODAY
+    });
+  }, [project.id, project.name, project.pmName, project.amName, project.category, project.start]);
 
   const metaLogs = (project.changeLog || [])
     .filter((log) => log?.type === "project_meta")
     .slice()
-    .reverse()
-    .slice(0, 5);
+    .reverse();
 
   return (
-    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 12, marginBottom: 12 }}>
-      <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>프로젝트 기본정보 수정</div>
-      <div style={{ display: "grid", gridTemplateColumns: "180px 180px auto", gap: 8, alignItems: "center", marginBottom: 10 }}>
-        <input
-          value={manager}
-          onChange={(event) => setManager(event.target.value)}
-          placeholder="담당자"
-          style={inputStyle}
-        />
-        <select value={category} onChange={(event) => setCategory(event.target.value)} style={inputStyle}>
-          {categoryOptions.map((item) => (
-            <option key={item} value={item}>{item}</option>
-          ))}
-        </select>
-        <button
-          onClick={() => {
-            const nextManager = manager.trim();
-            if (!nextManager) {
-              window.alert("담당자명을 입력하세요.");
-              return;
-            }
-            onSave({ manager: nextManager, category });
-          }}
-          style={primaryButton}
-        >
-          저장
-        </button>
+    <div style={{ display: "grid", gap: 12 }}>
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
+        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10 }}>프로젝트 기본정보 수정</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>프로젝트명</label>
+            <input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} style={inputStyle} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>카테고리</label>
+            <select value={form.category} onChange={(event) => setForm((prev) => ({ ...prev, category: event.target.value }))} style={inputStyle}>
+              {categoryOptions.map((item) => (
+                <option key={item} value={item}>{item}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>PM</label>
+            <input value={form.pmName} onChange={(event) => setForm((prev) => ({ ...prev, pmName: event.target.value }))} style={inputStyle} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>AM</label>
+            <input value={form.amName} onChange={(event) => setForm((prev) => ({ ...prev, amName: event.target.value }))} style={inputStyle} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>시작일</label>
+            <input type="date" value={form.start} onChange={(event) => setForm((prev) => ({ ...prev, start: event.target.value }))} style={inputStyle} />
+          </div>
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <button
+            onClick={() => {
+              const nextName = form.name.trim();
+              const nextPm = form.pmName.trim();
+              const nextAm = form.amName.trim();
+              if (!nextName) {
+                window.alert("프로젝트명을 입력하세요.");
+                return;
+              }
+              if (!nextPm && !nextAm) {
+                window.alert("PM 또는 AM 중 최소 1명은 입력하세요.");
+                return;
+              }
+              onSave({
+                name: nextName,
+                pmName: nextPm,
+                amName: nextAm,
+                category: form.category,
+                start: form.start || TODAY
+              });
+            }}
+            style={primaryButton}
+          >
+            기본정보 저장
+          </button>
+        </div>
       </div>
 
-      <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>최근 변경 이력</div>
-      <div style={{ display: "grid", gap: 4 }}>
-        {metaLogs.map((log) => (
-          <div key={log.id} style={{ fontSize: 11, color: "#475569", background: "#f8fafc", borderRadius: 6, padding: "5px 8px" }}>
-            {fmt(log.date)} · {log.reason}
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
+        <div style={{ fontSize: 13, color: "#64748b", marginBottom: 8 }}>기본정보 변경 이력</div>
+        <div style={{ display: "grid", gap: 6 }}>
+          {metaLogs.map((log) => (
+            <div key={log.id} style={{ fontSize: 12, color: "#475569", background: "#f8fafc", borderRadius: 6, padding: "7px 10px" }}>
+              {fmt(log.date)} · {log.reason}
+            </div>
+          ))}
+          {metaLogs.length === 0 && (
+            <div style={{ fontSize: 12, color: "#94a3b8" }}>변경 이력이 없습니다.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdvisorTab({ project, onSaveLog }) {
+  const [form, setForm] = useState({
+    name: "",
+    datetime: "",
+    content: ""
+  });
+  const logs = project.advisorLog || [];
+
+  const save = () => {
+    const name = form.name.trim();
+    const datetime = form.datetime;
+    const content = form.content.trim();
+    if (!name || !datetime || !content) {
+      window.alert("이름, 일시, 대화내용을 모두 입력하세요.");
+      return;
+    }
+    onSaveLog({ id: Date.now(), name, datetime, content });
+    setForm({ name: "", datetime: "", content: "" });
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 14 }}>
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
+        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10 }}>자문약사 의견 입력</div>
+        <div style={{ display: "grid", gap: 8 }}>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>이름</label>
+            <input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} style={inputStyle} />
           </div>
-        ))}
-        {metaLogs.length === 0 && (
-          <div style={{ fontSize: 11, color: "#94a3b8", padding: "4px 2px" }}>변경 이력이 없습니다.</div>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>일시</label>
+            <input type="datetime-local" value={form.datetime} onChange={(event) => setForm((prev) => ({ ...prev, datetime: event.target.value }))} style={inputStyle} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>대화내용</label>
+            <textarea rows={5} value={form.content} onChange={(event) => setForm((prev) => ({ ...prev, content: event.target.value }))} style={{ ...inputStyle, resize: "vertical" }} />
+          </div>
+          <button onClick={save} style={primaryButton}>저장</button>
+        </div>
+      </div>
+
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
+        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10 }}>자문약사 기록 ({logs.length}건)</div>
+        <div style={{ display: "grid", gap: 8 }}>
+          {[...logs].reverse().map((log) => (
+            <div key={log.id} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                <div style={{ fontWeight: 800 }}>{log.name}</div>
+                <div style={{ fontSize: 11, color: "#64748b" }}>{log.datetime}</div>
+              </div>
+              <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{log.content}</div>
+            </div>
+          ))}
+          {logs.length === 0 && (
+            <div style={{ fontSize: 12, color: "#94a3b8" }}>저장된 자문약사 의견이 없습니다.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectLifecycleLogTab({ logs, onDeleteLog }) {
+  const sortedLogs = [...(logs || [])].sort(
+    (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+  );
+
+  const typeLabel = (type) => {
+    if (type === "project_create") return "신설";
+    if (type === "project_delete") return "삭제";
+    return "기록";
+  };
+
+  const typeColor = (type) => {
+    if (type === "project_create") return { fg: "#166534", bg: "#dcfce7" };
+    if (type === "project_delete") return { fg: "#b91c1c", bg: "#fee2e2" };
+    return { fg: "#475569", bg: "#e2e8f0" };
+  };
+
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
+      <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10 }}>프로젝트 신설/삭제 로그</div>
+      <div style={{ display: "grid", gap: 8 }}>
+        {sortedLogs.map((log) => {
+          const badge = typeColor(log.type);
+          return (
+            <div key={log.id} style={{ border: "1px solid #e2e8f0", borderRadius: 8, background: "#f8fafc", padding: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: badge.fg, background: badge.bg, borderRadius: 999, padding: "2px 8px" }}>
+                    {typeLabel(log.type)}
+                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{log.projectName || "-"}</span>
+                  <span style={{ fontSize: 11, color: "#64748b" }}>{log.actor || "관리자"}</span>
+                </div>
+                <button
+                  onClick={() => {
+                    if (!window.confirm("이 로그를 삭제하시겠습니까?")) return;
+                    onDeleteLog(log.id);
+                  }}
+                  style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #fecaca", background: "#fff", color: "#dc2626", cursor: "pointer", fontSize: 11, fontWeight: 700 }}
+                >
+                  로그 삭제
+                </button>
+              </div>
+              <div style={{ fontSize: 12, color: "#475569", marginBottom: 4 }}>
+                사유: {log.reason || "-"}
+              </div>
+              <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                {log.createdAt ? new Date(log.createdAt).toLocaleString() : "-"}
+              </div>
+            </div>
+          );
+        })}
+        {sortedLogs.length === 0 && (
+          <div style={{ fontSize: 12, color: "#94a3b8" }}>아직 기록된 프로젝트 신설/삭제 로그가 없습니다.</div>
         )}
       </div>
     </div>
@@ -835,7 +1114,8 @@ function ProjectMetaEditor({ project, onSave }) {
 }
 
 export default function PmsApp() {
-  const { projects, setProjects, syncState } = useProjectsStore();
+  const router = useRouter();
+  const { projects, setProjects, adminLogs, setAdminLogs, syncState } = useProjectsStore();
   const [selectedId, setSelectedId] = useState(null);
   const [tab, setTab] = useState("overview");
 
@@ -847,6 +1127,15 @@ export default function PmsApp() {
     setSelectedId((prev) => (prev && projects.some((project) => project.id === prev) ? prev : projects[0].id));
   }, [projects]);
 
+  useEffect(() => {
+    if (!projects.length || typeof window === "undefined") return;
+    const raw = new URLSearchParams(window.location.search).get("project");
+    const requestedId = Number(raw);
+    if (!Number.isFinite(requestedId)) return;
+    if (!projects.some((project) => project.id === requestedId)) return;
+    setSelectedId(requestedId);
+  }, [projects]);
+
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedId),
     [projects, selectedId]
@@ -856,63 +1145,36 @@ export default function PmsApp() {
     setProjects((prev) => normalizeProjects(prev.map((project) => (project.id === projectId ? updater(project) : project))));
   };
 
-  const addProject = () => {
-    const name = window.prompt("새 프로젝트명");
-    if (!name) return;
-    const manager = window.prompt("담당자명", "담당자");
-    const category = window.prompt(`카테고리 (${CATEGORIES.join(", ")})`, "건강기능식품");
-    const start = window.prompt("시작일 (YYYY-MM-DD)", TODAY);
-    const id = Date.now();
-
-    const templates = PHASES.map((task) => ({
-      id: task.id,
-      name: task.name,
-      cat: task.cat,
-      icon: task.icon,
-      color: task.color,
-      duration: task.duration,
-      pred: [...task.pred]
-    }));
-    const schedule = calcSchedule(templates, start || TODAY);
-
-    const newProject = normalizeProject({
-      id,
-      name,
-      desc: "",
-      manager: manager || "담당자",
-      category: category || "건강기능식품",
-      start: start || TODAY,
-      permitCompany: "",
-      manufacturer: "",
-      tasks: templates.map((task) => ({
-        ...task,
-        scheduledStart: schedule[task.id].start,
-        scheduledEnd: schedule[task.id].end,
-        originalStart: schedule[task.id].start,
-        originalEnd: schedule[task.id].end,
-        progress: 0,
-        taskStatus: "pending",
-        notes: ""
-      })),
-      developSubTimeline: getDefaultDevelopSubTimeline(),
-      communicationLog: [],
-      decisionLog: [],
-      contracts: [],
-      changeLog: []
-    });
-
-    setProjects((prev) => [...prev, newProject]);
-    setSelectedId(id);
-    setTab("overview");
+  const goToNewProjectPage = () => {
+    router.push("/projects/new");
   };
 
   const deleteProject = (projectId) => {
     const target = projects.find((project) => project.id === projectId);
     if (!target) return;
     if (!window.confirm(`"${target.name}" 프로젝트를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
+    const reason = window.prompt("삭제 사유를 입력해주세요.");
+    if (reason === null) return;
+    const reasonText = reason.trim();
+    if (!reasonText) {
+      window.alert("삭제 사유를 입력해야 프로젝트를 삭제할 수 있습니다.");
+      return;
+    }
 
     const remaining = projects.filter((project) => project.id !== projectId);
     setProjects(normalizeProjects(remaining));
+    setAdminLogs((prev) => normalizeAdminLogs([
+      ...(prev || []),
+      {
+        id: Date.now(),
+        type: "project_delete",
+        projectId: target.id,
+        projectName: target.name,
+        reason: reasonText,
+        actor: "관리자",
+        createdAt: new Date().toISOString()
+      }
+    ]));
     setSelectedId((prev) => (prev === projectId ? (remaining[0]?.id || null) : prev));
     if (remaining.length === 0) {
       setTab("overview");
@@ -927,7 +1189,7 @@ export default function PmsApp() {
           <div style={{ fontSize: 11, color: "#94a3b8" }}>Vercel 영구저장형 운영 모드</div>
         </div>
 
-        <button onClick={addProject} style={{ width: "100%", borderRadius: 8, padding: "8px 10px", border: "1px dashed #475569", background: "transparent", color: "#cbd5e1", cursor: "pointer", fontWeight: 700 }}>
+        <button onClick={goToNewProjectPage} style={{ width: "100%", borderRadius: 8, padding: "8px 10px", border: "1px dashed #475569", background: "transparent", color: "#cbd5e1", cursor: "pointer", fontWeight: 700 }}>
           + 새 프로젝트
         </button>
 
@@ -952,7 +1214,7 @@ export default function PmsApp() {
               >
                 <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 2 }}>{project.name}</div>
                 <div style={{ fontSize: 11, color: "#94a3b8" }}>
-                  {project.category} · D-{dDay} · {project.manager}
+                  {project.category} · D-{dDay} · {formatOwners(project)}
                 </div>
               </button>
             );
@@ -967,7 +1229,7 @@ export default function PmsApp() {
               <>
                 <div style={{ fontSize: 22, fontWeight: 900 }}>{selectedProject.name}</div>
                 <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-                  담당: {selectedProject.manager} · 시작일: {fmt(selectedProject.start)} · 카테고리: {selectedProject.category}
+                  담당: {formatOwners(selectedProject)} · 시작일: {fmt(selectedProject.start)} · 카테고리: {selectedProject.category}
                 </div>
               </>
             ) : (
@@ -1003,44 +1265,15 @@ export default function PmsApp() {
 
         {selectedProject ? (
           <>
-            <ProjectMetaEditor
-              project={selectedProject}
-              onSave={({ manager, category }) => {
-                updateProject(selectedProject.id, (project) => {
-                  const nextManager = manager.trim();
-                  const nextCategory = category;
-                  if (project.manager === nextManager && project.category === nextCategory) return project;
-
-                  const historyParts = [];
-                  if (project.manager !== nextManager) historyParts.push(`담당자: ${project.manager} → ${nextManager}`);
-                  if (project.category !== nextCategory) historyParts.push(`카테고리: ${project.category} → ${nextCategory}`);
-
-                  return {
-                    ...project,
-                    manager: nextManager,
-                    category: nextCategory,
-                    changeLog: [
-                      ...(project.changeLog || []),
-                      {
-                        id: Date.now(),
-                        type: "project_meta",
-                        taskId: "_project_meta",
-                        taskName: "프로젝트 기본정보",
-                        date: TODAY,
-                        reason: historyParts.join(" / ")
-                      }
-                    ]
-                  };
-                });
-              }}
-            />
-
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               {[
                 ["overview", "개요"],
                 ["tasks", "태스크 관리"],
+                ["advisor", "자문약사 의견"],
                 ["communication", "업체 소통 기록"],
                 ["decision", "의사결정 기록"],
+                ["basic", "기본정보 수정"],
+                ["project_logs", "신설/삭제 로그"],
                 ["backup", "백업/복원"]
               ].map(([id, label]) => (
                 <button key={id} onClick={() => setTab(id)} style={tabButtonStyle(tab === id)}>
@@ -1060,16 +1293,21 @@ export default function PmsApp() {
                       currentTask.id === task.id
                         ? {
                             ...currentTask,
-                            progress: patch.progress,
-                            taskStatus: patch.taskStatus,
-                            notes: patch.notes,
-                            duration: patch.duration
+                            progress: patch.progress ?? currentTask.progress,
+                            taskStatus: patch.taskStatus ?? currentTask.taskStatus,
+                            notes: patch.notes ?? currentTask.notes,
+                            duration: patch.duration ?? currentTask.duration
                           }
                         : currentTask
                     ));
 
+                    if (patch.startDate && patch.startDate !== task.scheduledStart) {
+                      tasks = applyStartDateChange(tasks, task.id, patch.startDate);
+                    }
                     if (patch.delayDays > 0) tasks = applyDelay(tasks, task.id, patch.delayDays);
-                    if (patch.duration !== task.duration) tasks = applyDurationChange(tasks, task.id, patch.duration);
+                    if (typeof patch.duration === "number" && patch.duration !== task.duration) {
+                      tasks = applyDurationChange(tasks, task.id, patch.duration);
+                    }
 
                     const developTask = tasks.find((currentTask) => currentTask.id === DEVELOP_TASK_ID);
                     const developSubTimeline = normalizeDevelopSubTimeline(
@@ -1088,9 +1326,68 @@ export default function PmsApp() {
                           taskId: task.id,
                           taskName: task.name,
                           date: TODAY,
-                          reason: patch.notes || "수정",
-                          delayDays: patch.delayDays,
-                          duration: patch.duration
+                          reason: patch.notes || (patch.startDate ? `시작일 조정: ${task.scheduledStart} → ${patch.startDate}` : "수정"),
+                          delayDays: patch.delayDays || 0,
+                          duration: typeof patch.duration === "number" ? patch.duration : task.duration
+                        }
+                      ]
+                    };
+                  });
+                }}
+                onTaskToggle={(task, enabled) => {
+                  updateProject(selectedProject.id, (project) => ({
+                    ...project,
+                    tasks: project.tasks.map((currentTask) => (
+                      currentTask.id === task.id
+                        ? {
+                            ...currentTask,
+                            isEnabled: enabled,
+                            taskStatus: enabled
+                              ? (currentTask.taskStatus === "on_hold" ? "pending" : currentTask.taskStatus)
+                              : "on_hold"
+                          }
+                        : currentTask
+                    )),
+                    changeLog: [
+                      ...(project.changeLog || []),
+                      {
+                        id: Date.now(),
+                        type: "task_toggle",
+                        taskId: task.id,
+                        taskName: task.name,
+                        date: TODAY,
+                        reason: enabled ? "진행단계 활성화" : "진행단계 비활성화"
+                      }
+                    ]
+                  }));
+                }}
+                onProjectStartChange={(nextStart) => {
+                  if (!nextStart) return;
+                  updateProject(selectedProject.id, (project) => {
+                    if (project.start === nextStart) return project;
+                    const schedule = calcSchedule(project.tasks, nextStart);
+                    const nextTasks = project.tasks.map((task) => ({
+                      ...task,
+                      scheduledStart: schedule[task.id]?.start || task.scheduledStart,
+                      scheduledEnd: schedule[task.id]?.end || task.scheduledEnd,
+                      originalStart: schedule[task.id]?.start || task.originalStart,
+                      originalEnd: schedule[task.id]?.end || task.originalEnd
+                    }));
+                    const developTask = nextTasks.find((task) => task.id === DEVELOP_TASK_ID);
+                    return {
+                      ...project,
+                      start: nextStart,
+                      tasks: nextTasks,
+                      developSubTimeline: normalizeDevelopSubTimeline(project.developSubTimeline, developTask?.duration || 1),
+                      changeLog: [
+                        ...(project.changeLog || []),
+                        {
+                          id: Date.now(),
+                          type: "project_start",
+                          taskId: "_project_start",
+                          taskName: "프로젝트 시작일",
+                          date: TODAY,
+                          reason: `시작일 변경: ${project.start} → ${nextStart}`
                         }
                       ]
                     };
@@ -1115,6 +1412,18 @@ export default function PmsApp() {
               />
             )}
 
+            {tab === "advisor" && (
+              <AdvisorTab
+                project={selectedProject}
+                onSaveLog={(item) => {
+                  updateProject(selectedProject.id, (project) => ({
+                    ...project,
+                    advisorLog: [...(project.advisorLog || []), item]
+                  }));
+                }}
+              />
+            )}
+
             {tab === "communication" && (
               <CommunicationTab
                 project={selectedProject}
@@ -1123,6 +1432,60 @@ export default function PmsApp() {
                     ...project,
                     communicationLog: [...(project.communicationLog || []), item]
                   }));
+                }}
+              />
+            )}
+
+            {tab === "basic" && (
+              <BasicInfoTab
+                project={selectedProject}
+                onSave={({ name, pmName, amName, category, start }) => {
+                  updateProject(selectedProject.id, (project) => {
+                    const historyParts = [];
+                    if (project.name !== name) historyParts.push(`프로젝트명: ${project.name} → ${name}`);
+                    if ((project.pmName || "") !== pmName) historyParts.push(`PM: ${project.pmName || "-"} → ${pmName || "-"}`);
+                    if ((project.amName || "") !== amName) historyParts.push(`AM: ${project.amName || "-"} → ${amName || "-"}`);
+                    if (project.category !== category) historyParts.push(`카테고리: ${project.category} → ${category}`);
+                    if (project.start !== start) historyParts.push(`시작일: ${project.start} → ${start}`);
+                    if (historyParts.length === 0) return project;
+
+                    const manager = [pmName, amName].filter(Boolean).join(" / ") || "미정";
+                    let nextTasks = project.tasks;
+                    if (project.start !== start) {
+                      const schedule = calcSchedule(project.tasks, start);
+                      nextTasks = project.tasks.map((task) => ({
+                        ...task,
+                        scheduledStart: schedule[task.id]?.start || task.scheduledStart,
+                        scheduledEnd: schedule[task.id]?.end || task.scheduledEnd,
+                        originalStart: schedule[task.id]?.start || task.originalStart,
+                        originalEnd: schedule[task.id]?.end || task.originalEnd
+                      }));
+                    }
+
+                    const developTask = nextTasks.find((task) => task.id === DEVELOP_TASK_ID);
+                    return {
+                      ...project,
+                      name,
+                      pmName,
+                      amName,
+                      manager,
+                      category,
+                      start,
+                      tasks: nextTasks,
+                      developSubTimeline: normalizeDevelopSubTimeline(project.developSubTimeline, developTask?.duration || 1),
+                      changeLog: [
+                        ...(project.changeLog || []),
+                        {
+                          id: Date.now(),
+                          type: "project_meta",
+                          taskId: "_project_meta",
+                          taskName: "프로젝트 기본정보",
+                          date: TODAY,
+                          reason: historyParts.join(" / ")
+                        }
+                      ]
+                    };
+                  });
                 }}
               />
             )}
@@ -1139,12 +1502,23 @@ export default function PmsApp() {
               />
             )}
 
+            {tab === "project_logs" && (
+              <ProjectLifecycleLogTab
+                logs={adminLogs}
+                onDeleteLog={(logId) => {
+                  setAdminLogs((prev) => normalizeAdminLogs((prev || []).filter((log) => log.id !== logId)));
+                }}
+              />
+            )}
+
             {tab === "backup" && (
               <BackupTab
                 projects={projects}
+                adminLogs={adminLogs}
                 selectedProject={selectedProject}
-                onRestore={(nextProjects) => {
+                onRestore={({ projects: nextProjects, adminLogs: nextAdminLogs }) => {
                   setProjects(normalizeProjects(nextProjects));
+                  setAdminLogs(normalizeAdminLogs(nextAdminLogs));
                   if (nextProjects.length > 0) setSelectedId(nextProjects[0].id);
                   else setSelectedId(null);
                 }}
@@ -1152,14 +1526,22 @@ export default function PmsApp() {
             )}
           </>
         ) : (
-          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 24, textAlign: "center" }}>
-            <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>생성된 프로젝트가 없습니다.</div>
-            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14 }}>
-              첫 프로젝트를 만들면 일정 관리, 업체 소통 기록, 의사결정 기록을 바로 시작할 수 있습니다.
+          <div style={{ display: "grid", gap: 14 }}>
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 24, textAlign: "center" }}>
+              <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>생성된 프로젝트가 없습니다.</div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14 }}>
+                첫 프로젝트를 만들면 일정 관리, 업체 소통 기록, 의사결정 기록을 바로 시작할 수 있습니다.
+              </div>
+              <button onClick={goToNewProjectPage} style={primaryButton}>
+                + 첫 프로젝트 만들기
+              </button>
             </div>
-            <button onClick={addProject} style={primaryButton}>
-              + 첫 프로젝트 만들기
-            </button>
+            <ProjectLifecycleLogTab
+              logs={adminLogs}
+              onDeleteLog={(logId) => {
+                setAdminLogs((prev) => normalizeAdminLogs((prev || []).filter((log) => log.id !== logId)));
+              }}
+            />
           </div>
         )}
       </main>

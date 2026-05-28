@@ -8,6 +8,7 @@ export async function GET() {
     return Response.json({
       ok: true,
       projects: result.projects,
+      adminLogs: result.adminLogs,
       updatedAt: result.updatedAt,
       source: result.source
     });
@@ -27,7 +28,13 @@ export async function PUT(request) {
       return Response.json({ ok: false, message: "projects 배열이 필요합니다." }, { status: 400 });
     }
 
-    const result = await saveProjects(body.projects);
+    let adminLogs = Array.isArray(body.adminLogs) ? body.adminLogs : null;
+    if (adminLogs === null) {
+      const current = await loadProjects();
+      adminLogs = Array.isArray(current.adminLogs) ? current.adminLogs : [];
+    }
+
+    const result = await saveProjects(body.projects, adminLogs);
     return Response.json({ ok: true, updatedAt: result.updatedAt });
   } catch (error) {
     console.error("[PUT /api/projects] failed:", error);
