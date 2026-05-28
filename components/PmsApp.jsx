@@ -74,6 +74,46 @@ function formatOwners(project) {
   return project?.manager || "미정";
 }
 
+function getCurrentStageTask(project) {
+  const tasks = (project?.tasks || []).filter((task) => task.isEnabled !== false);
+  if (tasks.length === 0) return null;
+
+  const delayed = tasks.find((task) => task.taskStatus === "delayed" && task.taskStatus !== "completed");
+  if (delayed) return delayed;
+
+  const inProgress = tasks.find((task) => task.taskStatus === "in_progress");
+  if (inProgress) return inProgress;
+
+  const todayBased = tasks.find((task) => (
+    task.taskStatus !== "completed" &&
+    task.scheduledStart <= TODAY &&
+    task.scheduledEnd >= TODAY
+  ));
+  if (todayBased) return todayBased;
+
+  const upcoming = tasks.find((task) => task.taskStatus !== "completed" && task.scheduledEnd >= TODAY);
+  if (upcoming) return upcoming;
+
+  return tasks[tasks.length - 1] || null;
+}
+
+function buildStageReminderMessage(task) {
+  if (!task) {
+    return { text: "진행 중인 단계를 찾지 못했습니다.", isLate: false };
+  }
+  const daysLeft = diff(TODAY, task.scheduledEnd || TODAY);
+  if (daysLeft >= 0) {
+    return {
+      text: `해당 단계 완료까지 ${daysLeft}일 남았습니다. 문제없이 진행되고 있나요?`,
+      isLate: false
+    };
+  }
+  return {
+    text: `해당 단계 완료 예정일이 ${Math.abs(daysLeft)}일 지났습니다. 지연 사유를 확인해주세요.`,
+    isLate: true
+  };
+}
+
 function toPositiveInt(value, fallback = 1) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -178,6 +218,7 @@ function normalizeProject(project) {
       pred: normalizePredList(existing?.pred || template.pred),
       progress: Math.max(0, Math.min(100, Number(existing?.progress || 0))),
       isEnabled: existing?.isEnabled !== false,
+      vendorName: existing?.vendorName || "",
       taskStatus: existing?.taskStatus || "pending",
       notes: existing?.notes || ""
     };
@@ -224,6 +265,7 @@ function normalizeProject(project) {
     communicationLog: Array.isArray(project.communicationLog) ? project.communicationLog : [],
     decisionLog: Array.isArray(project.decisionLog) ? project.decisionLog : [],
     advisorLog: Array.isArray(project.advisorLog) ? project.advisorLog : [],
+    stageCheckLog: Array.isArray(project.stageCheckLog) ? project.stageCheckLog : [],
     changeLog: Array.isArray(project.changeLog) ? project.changeLog : []
   };
 }
@@ -522,9 +564,19 @@ function OverviewTab({ project }) {
   );
 }
 
-function TasksTab({ project, onTaskSave, onTaskToggle, onProjectStartChange, onDevelopSubTimelineUpdate }) {
+function TasksTab({
+  project,
+  onTaskSave,
+  onTaskToggle,
+  onProjectStartChange,
+  onDevelopSubTimelineUpdate,
+  forcedEditTaskId,
+  onForcedEditHandled
+}) {
   const [editTask, setEditTask] = useState(null);
   const [projectStart, setProjectStart] = useState(project.start || TODAY);
+  const [draftStartDates, setDraftStartDates] = useState({});
+  const [draftSupplierNames, setDraftSupplierNames] = useState({});
   const developTask = project.tasks.find((task) => task.id === DEVELOP_TASK_ID);
   const developDuration = toPositiveInt(developTask?.duration, 1);
   const developTimeline = developTask
@@ -534,6 +586,18 @@ function TasksTab({ project, onTaskSave, onTaskToggle, onProjectStartChange, onD
   useEffect(() => {
     setProjectStart(project.start || TODAY);
   }, [project.id, project.start]);
+
+  useEffect(() => {
+    setDraftStartDates(Object.fromEntries((project.tasks || []).map((task) => [task.id, task.scheduledStart || TODAY])));
+    setDraftSupplierNames(Object.fromEntries((project.tasks || []).map((task) => [task.id, task.vendorName || ""])));
+  }, [project.id, project.tasks]);
+
+  useEffect(() => {
+    if (!forcedEditTaskId) return;
+    const target = (project.tasks || []).find((task) => task.id === forcedEditTaskId);
+    if (target) setEditTask(target);
+    if (onForcedEditHandled) onForcedEditHandled();
+  }, [forcedEditTaskId, onForcedEditHandled, project.tasks]);
 
   const saveDevelopItem = (itemId, field, value) => {
     if (!developTask) return;
@@ -562,7 +626,7 @@ function TasksTab({ project, onTaskSave, onTaskToggle, onProjectStartChange, onD
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ background: "#f8fafc" }}>
-            {["활성", "태스크", "시작일", "완료", "상태", "진행률", "메모", ""].map((h) => (
+            {["활성", "태스크", "시작일", "완료", "업체(공급업체 선정)", "상태", "진행률", "메모", ""].map((h) => (
               <th key={h} style={{ textAlign: "left", padding: "9px 12px", fontSize: 11, color: "#64748b", borderBottom: "1px solid #e2e8f0" }}>{h}</th>
             ))}
           </tr>
@@ -596,13 +660,40 @@ function TasksTab({ project, onTaskSave, onTaskToggle, onProjectStartChange, onD
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>
                   <input
                     type="date"
-                    value={task.scheduledStart}
-                    onChange={(event) => onTaskSave(task, { startDate: event.target.value })}
+                    value={draftStartDates[task.id] || task.scheduledStart}
+                    onChange={(event) => {
+                      const next = event.target.value;
+                      setDraftStartDates((prev) => ({ ...prev, [task.id]: next }));
+                    }}
+                    onBlur={(event) => {
+                      const next = event.target.value;
+                      if (next && next !== task.scheduledStart) onTaskSave(task, { startDate: next });
+                    }}
                     style={{ ...inputStyle, width: 140, padding: "5px 8px", fontSize: 12 }}
                     disabled={!enabled}
                   />
                 </td>
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>{fmt(task.scheduledEnd)}</td>
+                <td style={{ padding: "9px 12px", fontSize: 12 }}>
+                  {task.id === "supplier" ? (
+                    <input
+                      value={draftSupplierNames[task.id] || ""}
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        setDraftSupplierNames((prev) => ({ ...prev, [task.id]: next }));
+                      }}
+                      onBlur={(event) => {
+                        const next = event.target.value.trim();
+                        if (next !== (task.vendorName || "")) onTaskSave(task, { vendorName: next });
+                      }}
+                      placeholder="선정 업체명 입력"
+                      style={{ ...inputStyle, width: 180, padding: "5px 8px", fontSize: 12 }}
+                      disabled={!enabled}
+                    />
+                  ) : (
+                    <span style={{ color: "#94a3b8" }}>-</span>
+                  )}
+                </td>
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>{STATUS_LABEL[task.taskStatus]}</td>
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>{task.progress || 0}%</td>
                 <td style={{ padding: "9px 12px", fontSize: 12, color: "#64748b", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.notes || "-"}</td>
@@ -617,7 +708,7 @@ function TasksTab({ project, onTaskSave, onTaskToggle, onProjectStartChange, onD
             if (task.id === DEVELOP_TASK_ID && developTask && enabled) {
               rows.push(
                 <tr key={`${task.id}__subtimeline`} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                  <td colSpan={8} style={{ padding: "10px 12px 14px", background: "#f8fafc" }}>
+                  <td colSpan={9} style={{ padding: "10px 12px 14px", background: "#f8fafc" }}>
                     <div style={{ fontSize: 12, fontWeight: 800, color: "#0f172a", marginBottom: 8 }}>
                       제품 개발 부수 일정 (제품 개발 {developTask.duration}일 내)
                     </div>
@@ -1053,6 +1144,101 @@ function AdvisorTab({ project, onSaveLog }) {
   );
 }
 
+function HomeDashboardTab({ projects, onOpenProject, onReminderYes, onReminderNo }) {
+  const items = (projects || []).map((project) => {
+    const currentTask = getCurrentStageTask(project);
+    const reminder = buildStageReminderMessage(currentTask);
+    const delayedCount = (project.tasks || []).filter((task) => task.taskStatus === "delayed").length;
+    const lastCheck = [...(project.stageCheckLog || [])]
+      .reverse()
+      .find((log) => (currentTask ? log.taskId === currentTask.id : true));
+    return { project, currentTask, reminder, delayedCount, lastCheck };
+  });
+
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
+        <div style={{ fontSize: 16, fontWeight: 900, color: "#0f172a", marginBottom: 4 }}>홈 점검 보드</div>
+        <div style={{ fontSize: 12, color: "#64748b" }}>
+          현재 단계 리마인드를 확인하고, 문제가 있으면 바로 지연 적용 팝업으로 이동할 수 있습니다.
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gap: 10 }}>
+        {items.map(({ project, currentTask, reminder, delayedCount, lastCheck }) => (
+          <div key={project.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, marginBottom: 8 }}>
+              <div>
+                <button
+                  onClick={() => onOpenProject(project.id)}
+                  style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "#0f172a", fontWeight: 900, fontSize: 14 }}
+                >
+                  {project.name}
+                </button>
+                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                  담당: {formatOwners(project)} · 카테고리: {project.category}
+                </div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 11, color: "#94a3b8" }}>현재 단계</div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>
+                  {currentTask ? `${currentTask.icon} ${currentTask.name}` : "-"}
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                fontSize: 12,
+                color: reminder.isLate ? "#b91c1c" : "#0f766e",
+                background: reminder.isLate ? "#fef2f2" : "#ecfeff",
+                border: `1px solid ${reminder.isLate ? "#fecaca" : "#a5f3fc"}`,
+                borderRadius: 8,
+                padding: "8px 10px",
+                marginBottom: 8
+              }}
+            >
+              {reminder.text}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 11, color: "#64748b" }}>
+                지연 태스크 {delayedCount}건
+                {lastCheck && (
+                  <span style={{ marginLeft: 8 }}>
+                    최근 점검: {lastCheck.answer === "yes" ? "Y" : "N"} ({new Date(lastCheck.date).toLocaleString()})
+                  </span>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  onClick={() => currentTask && onReminderYes(project, currentTask)}
+                  style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #86efac", background: "#dcfce7", color: "#166534", cursor: "pointer", fontSize: 12, fontWeight: 800 }}
+                  disabled={!currentTask}
+                >
+                  Y
+                </button>
+                <button
+                  onClick={() => currentTask && onReminderNo(project, currentTask)}
+                  style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #fca5a5", background: "#fee2e2", color: "#b91c1c", cursor: "pointer", fontSize: 12, fontWeight: 800 }}
+                  disabled={!currentTask}
+                >
+                  N
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+        {items.length === 0 && (
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 16, fontSize: 12, color: "#94a3b8", textAlign: "center" }}>
+            표시할 프로젝트가 없습니다.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ProjectLifecycleLogTab({ logs, onDeleteLog }) {
   const sortedLogs = [...(logs || [])].sort(
     (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
@@ -1061,18 +1247,31 @@ function ProjectLifecycleLogTab({ logs, onDeleteLog }) {
   const typeLabel = (type) => {
     if (type === "project_create") return "신설";
     if (type === "project_delete") return "삭제";
+    if (type === "task_start_date_change") return "태스크 일정";
+    if (type === "project_start_date_change") return "프로젝트 날짜";
+    if (type === "basic_info_update") return "기본정보";
+    if (type === "advisor_log_add") return "자문약사";
+    if (type === "communication_log_add") return "업체소통";
+    if (type === "decision_log_add") return "의사결정";
+    if (type === "stage_check_yes") return "점검(Y)";
+    if (type === "stage_check_issue") return "점검(N)";
     return "기록";
   };
 
   const typeColor = (type) => {
     if (type === "project_create") return { fg: "#166534", bg: "#dcfce7" };
     if (type === "project_delete") return { fg: "#b91c1c", bg: "#fee2e2" };
+    if (type === "task_start_date_change" || type === "project_start_date_change") return { fg: "#1d4ed8", bg: "#dbeafe" };
+    if (type === "basic_info_update") return { fg: "#7c3aed", bg: "#f3e8ff" };
+    if (type === "advisor_log_add" || type === "communication_log_add" || type === "decision_log_add") return { fg: "#0f766e", bg: "#ccfbf1" };
+    if (type === "stage_check_yes") return { fg: "#166534", bg: "#dcfce7" };
+    if (type === "stage_check_issue") return { fg: "#b91c1c", bg: "#fee2e2" };
     return { fg: "#475569", bg: "#e2e8f0" };
   };
 
   return (
     <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
-      <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10 }}>프로젝트 신설/삭제 로그</div>
+      <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10 }}>현재 프로젝트 이력 로그</div>
       <div style={{ display: "grid", gap: 8 }}>
         {sortedLogs.map((log) => {
           const badge = typeColor(log.type);
@@ -1117,7 +1316,9 @@ export default function PmsApp() {
   const router = useRouter();
   const { projects, setProjects, adminLogs, setAdminLogs, syncState } = useProjectsStore();
   const [selectedId, setSelectedId] = useState(null);
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState("home");
+  const initialUrlAppliedRef = useRef(false);
+  const [forcedEdit, setForcedEdit] = useState(null);
 
   useEffect(() => {
     if (!projects.length) {
@@ -1128,18 +1329,36 @@ export default function PmsApp() {
   }, [projects]);
 
   useEffect(() => {
+    if (initialUrlAppliedRef.current) return;
     if (!projects.length || typeof window === "undefined") return;
     const raw = new URLSearchParams(window.location.search).get("project");
     const requestedId = Number(raw);
-    if (!Number.isFinite(requestedId)) return;
-    if (!projects.some((project) => project.id === requestedId)) return;
-    setSelectedId(requestedId);
+    if (Number.isFinite(requestedId) && projects.some((project) => project.id === requestedId)) {
+      setSelectedId(requestedId);
+    }
+    initialUrlAppliedRef.current = true;
   }, [projects]);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedId),
     [projects, selectedId]
   );
+  const selectedProjectAdminLogs = useMemo(() => {
+    if (!selectedProject) return [];
+    return (adminLogs || []).filter((log) => String(log?.projectId) === String(selectedProject.id));
+  }, [adminLogs, selectedProject]);
+
+  const appendAdminLog = (entry) => {
+    setAdminLogs((prev) => normalizeAdminLogs([
+      ...(prev || []),
+      {
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        actor: "관리자",
+        createdAt: new Date().toISOString(),
+        ...entry
+      }
+    ]));
+  };
 
   const updateProject = (projectId, updater) => {
     setProjects((prev) => normalizeProjects(prev.map((project) => (project.id === projectId ? updater(project) : project))));
@@ -1147,6 +1366,66 @@ export default function PmsApp() {
 
   const goToNewProjectPage = () => {
     router.push("/projects/new");
+  };
+
+  const goToProjectLogsPage = () => {
+    router.push("/project-logs");
+  };
+
+  const openProject = (projectId) => {
+    setSelectedId(projectId);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("project", String(projectId));
+      window.history.replaceState({}, "", url.toString());
+    }
+  };
+
+  const handleReminderYes = (project, task) => {
+    updateProject(project.id, (current) => ({
+      ...current,
+      stageCheckLog: [
+        ...(current.stageCheckLog || []),
+        {
+          id: Date.now(),
+          taskId: task.id,
+          answer: "yes",
+          date: new Date().toISOString(),
+          message: "문제없이 진행중"
+        }
+      ]
+    }));
+    appendAdminLog({
+      type: "stage_check_yes",
+      projectId: project.id,
+      projectName: project.name,
+      reason: `${task.name} 단계 점검 응답: Y`
+    });
+  };
+
+  const handleReminderNo = (project, task) => {
+    updateProject(project.id, (current) => ({
+      ...current,
+      stageCheckLog: [
+        ...(current.stageCheckLog || []),
+        {
+          id: Date.now(),
+          taskId: task.id,
+          answer: "no",
+          date: new Date().toISOString(),
+          message: "지연 사유 확인 필요"
+        }
+      ]
+    }));
+    appendAdminLog({
+      type: "stage_check_issue",
+      projectId: project.id,
+      projectName: project.name,
+      reason: `${task.name} 단계 점검 응답: N (지연 적용 필요)`
+    });
+    openProject(project.id);
+    setTab("tasks");
+    setForcedEdit({ projectId: project.id, taskId: task.id, token: Date.now() });
   };
 
   const deleteProject = (projectId) => {
@@ -1192,6 +1471,12 @@ export default function PmsApp() {
         <button onClick={goToNewProjectPage} style={{ width: "100%", borderRadius: 8, padding: "8px 10px", border: "1px dashed #475569", background: "transparent", color: "#cbd5e1", cursor: "pointer", fontWeight: 700 }}>
           + 새 프로젝트
         </button>
+        <button
+          onClick={goToProjectLogsPage}
+          style={{ width: "100%", borderRadius: 8, padding: "8px 10px", border: "1px solid #334155", background: "#111827", color: "#cbd5e1", cursor: "pointer", fontWeight: 700, fontSize: 12 }}
+        >
+          프로젝트 이력 전체보기
+        </button>
 
         <div style={{ overflowY: "auto", display: "grid", gap: 6, paddingRight: 4 }}>
           {projects.map((project) => {
@@ -1201,7 +1486,7 @@ export default function PmsApp() {
             return (
               <button
                 key={project.id}
-                onClick={() => setSelectedId(project.id)}
+                onClick={() => openProject(project.id)}
                 style={{
                   textAlign: "left",
                   borderRadius: 9,
@@ -1267,13 +1552,14 @@ export default function PmsApp() {
           <>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               {[
+                ["home", "홈"],
                 ["overview", "개요"],
                 ["tasks", "태스크 관리"],
                 ["advisor", "자문약사 의견"],
                 ["communication", "업체 소통 기록"],
                 ["decision", "의사결정 기록"],
                 ["basic", "기본정보 수정"],
-                ["project_logs", "신설/삭제 로그"],
+                ["project_logs", "이력 로그"],
                 ["backup", "백업/복원"]
               ].map(([id, label]) => (
                 <button key={id} onClick={() => setTab(id)} style={tabButtonStyle(tab === id)}>
@@ -1282,12 +1568,24 @@ export default function PmsApp() {
               ))}
             </div>
 
+            {tab === "home" && (
+              <HomeDashboardTab
+                projects={projects}
+                onOpenProject={openProject}
+                onReminderYes={handleReminderYes}
+                onReminderNo={handleReminderNo}
+              />
+            )}
+
             {tab === "overview" && <OverviewTab project={selectedProject} />}
 
             {tab === "tasks" && (
               <TasksTab
                 project={selectedProject}
                 onTaskSave={(task, patch) => {
+                  const hasTaskDateChange = Boolean(patch.startDate && patch.startDate !== task.scheduledStart);
+                  const hasDelayChange = Boolean((patch.delayDays || 0) > 0);
+                  const hasDurationChange = Boolean(typeof patch.duration === "number" && patch.duration !== task.duration);
                   updateProject(selectedProject.id, (project) => {
                     let tasks = project.tasks.map((currentTask) => (
                       currentTask.id === task.id
@@ -1296,6 +1594,7 @@ export default function PmsApp() {
                             progress: patch.progress ?? currentTask.progress,
                             taskStatus: patch.taskStatus ?? currentTask.taskStatus,
                             notes: patch.notes ?? currentTask.notes,
+                            vendorName: patch.vendorName ?? currentTask.vendorName,
                             duration: patch.duration ?? currentTask.duration
                           }
                         : currentTask
@@ -1326,13 +1625,29 @@ export default function PmsApp() {
                           taskId: task.id,
                           taskName: task.name,
                           date: TODAY,
-                          reason: patch.notes || (patch.startDate ? `시작일 조정: ${task.scheduledStart} → ${patch.startDate}` : "수정"),
+                          reason:
+                            patch.notes ||
+                            (typeof patch.vendorName === "string"
+                              ? `공급업체 기록: ${(task.vendorName || "-")} → ${(patch.vendorName || "-")}`
+                              : (patch.startDate ? `시작일 조정: ${task.scheduledStart} → ${patch.startDate}` : "수정")),
                           delayDays: patch.delayDays || 0,
                           duration: typeof patch.duration === "number" ? patch.duration : task.duration
                         }
                       ]
                     };
                   });
+                  if (hasTaskDateChange || hasDelayChange || hasDurationChange) {
+                    const reasonParts = [];
+                    if (hasTaskDateChange) reasonParts.push(`시작일: ${task.scheduledStart} → ${patch.startDate}`);
+                    if (hasDelayChange) reasonParts.push(`지연 적용: +${patch.delayDays}일`);
+                    if (hasDurationChange) reasonParts.push(`기간: ${task.duration}일 → ${patch.duration}일`);
+                    appendAdminLog({
+                      type: "task_start_date_change",
+                      projectId: selectedProject.id,
+                      projectName: selectedProject.name,
+                      reason: `${task.name} 일정 변경 (${reasonParts.join(" / ")})`
+                    });
+                  }
                 }}
                 onTaskToggle={(task, enabled) => {
                   updateProject(selectedProject.id, (project) => ({
@@ -1363,6 +1678,7 @@ export default function PmsApp() {
                 }}
                 onProjectStartChange={(nextStart) => {
                   if (!nextStart) return;
+                  if (selectedProject.start === nextStart) return;
                   updateProject(selectedProject.id, (project) => {
                     if (project.start === nextStart) return project;
                     const schedule = calcSchedule(project.tasks, nextStart);
@@ -1392,6 +1708,12 @@ export default function PmsApp() {
                       ]
                     };
                   });
+                  appendAdminLog({
+                    type: "project_start_date_change",
+                    projectId: selectedProject.id,
+                    projectName: selectedProject.name,
+                    reason: `프로젝트 시작일 변경: ${selectedProject.start} → ${nextStart}`
+                  });
                 }}
                 onDevelopSubTimelineUpdate={(nextTimeline) => {
                   updateProject(selectedProject.id, (project) => ({
@@ -1409,6 +1731,8 @@ export default function PmsApp() {
                     ]
                   }));
                 }}
+                forcedEditTaskId={forcedEdit && forcedEdit.projectId === selectedProject.id ? forcedEdit.taskId : null}
+                onForcedEditHandled={() => setForcedEdit(null)}
               />
             )}
 
@@ -1420,6 +1744,12 @@ export default function PmsApp() {
                     ...project,
                     advisorLog: [...(project.advisorLog || []), item]
                   }));
+                  appendAdminLog({
+                    type: "advisor_log_add",
+                    projectId: selectedProject.id,
+                    projectName: selectedProject.name,
+                    reason: `${item.name} 의견 등록 (${item.datetime})`
+                  });
                 }}
               />
             )}
@@ -1432,6 +1762,12 @@ export default function PmsApp() {
                     ...project,
                     communicationLog: [...(project.communicationLog || []), item]
                   }));
+                  appendAdminLog({
+                    type: "communication_log_add",
+                    projectId: selectedProject.id,
+                    projectName: selectedProject.name,
+                    reason: `${item.company} 소통 기록 등록 (${item.date})`
+                  });
                 }}
               />
             )}
@@ -1440,6 +1776,14 @@ export default function PmsApp() {
               <BasicInfoTab
                 project={selectedProject}
                 onSave={({ name, pmName, amName, category, start }) => {
+                  const historyParts = [];
+                  if (selectedProject.name !== name) historyParts.push(`프로젝트명: ${selectedProject.name} → ${name}`);
+                  if ((selectedProject.pmName || "") !== pmName) historyParts.push(`PM: ${selectedProject.pmName || "-"} → ${pmName || "-"}`);
+                  if ((selectedProject.amName || "") !== amName) historyParts.push(`AM: ${selectedProject.amName || "-"} → ${amName || "-"}`);
+                  if (selectedProject.category !== category) historyParts.push(`카테고리: ${selectedProject.category} → ${category}`);
+                  if (selectedProject.start !== start) historyParts.push(`시작일: ${selectedProject.start} → ${start}`);
+                  if (historyParts.length === 0) return;
+
                   updateProject(selectedProject.id, (project) => {
                     const historyParts = [];
                     if (project.name !== name) historyParts.push(`프로젝트명: ${project.name} → ${name}`);
@@ -1486,6 +1830,12 @@ export default function PmsApp() {
                       ]
                     };
                   });
+                  appendAdminLog({
+                    type: "basic_info_update",
+                    projectId: selectedProject.id,
+                    projectName: selectedProject.name,
+                    reason: historyParts.join(" / ")
+                  });
                 }}
               />
             )}
@@ -1498,13 +1848,19 @@ export default function PmsApp() {
                     ...project,
                     decisionLog: [...(project.decisionLog || []), item]
                   }));
+                  appendAdminLog({
+                    type: "decision_log_add",
+                    projectId: selectedProject.id,
+                    projectName: selectedProject.name,
+                    reason: `${item.decider} 결정 등록: ${item.title}`
+                  });
                 }}
               />
             )}
 
             {tab === "project_logs" && (
               <ProjectLifecycleLogTab
-                logs={adminLogs}
+                logs={selectedProjectAdminLogs}
                 onDeleteLog={(logId) => {
                   setAdminLogs((prev) => normalizeAdminLogs((prev || []).filter((log) => log.id !== logId)));
                 }}
@@ -1526,22 +1882,14 @@ export default function PmsApp() {
             )}
           </>
         ) : (
-          <div style={{ display: "grid", gap: 14 }}>
-            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 24, textAlign: "center" }}>
-              <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>생성된 프로젝트가 없습니다.</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14 }}>
-                첫 프로젝트를 만들면 일정 관리, 업체 소통 기록, 의사결정 기록을 바로 시작할 수 있습니다.
-              </div>
-              <button onClick={goToNewProjectPage} style={primaryButton}>
-                + 첫 프로젝트 만들기
-              </button>
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 24, textAlign: "center" }}>
+            <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>생성된 프로젝트가 없습니다.</div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14 }}>
+              첫 프로젝트를 만들면 일정 관리, 업체 소통 기록, 의사결정 기록을 바로 시작할 수 있습니다.
             </div>
-            <ProjectLifecycleLogTab
-              logs={adminLogs}
-              onDeleteLog={(logId) => {
-                setAdminLogs((prev) => normalizeAdminLogs((prev || []).filter((log) => log.id !== logId)));
-              }}
-            />
+            <button onClick={goToNewProjectPage} style={primaryButton}>
+              + 첫 프로젝트 만들기
+            </button>
           </div>
         )}
       </main>

@@ -44,9 +44,7 @@ export default function NewProjectPage() {
     pmName: "",
     amName: "",
     category: CATEGORIES[0],
-    start: TODAY,
-    permitCompany: "",
-    manufacturer: ""
+    start: TODAY
   });
 
   const save = async () => {
@@ -82,9 +80,7 @@ export default function NewProjectPage() {
         pmName,
         amName,
         category: form.category,
-        start: form.start || TODAY,
-        permitCompany: form.permitCompany,
-        manufacturer: form.manufacturer
+        start: form.start || TODAY
       });
       const createLog = {
         id: Date.now() + 1,
@@ -152,17 +148,6 @@ export default function NewProjectPage() {
             <div>
               <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>시작일 *</label>
               <input type="date" value={form.start} onChange={(e) => setForm((p) => ({ ...p, start: e.target.value }))} style={fieldStyle} />
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div>
-              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>허가사</label>
-              <input value={form.permitCompany} onChange={(e) => setForm((p) => ({ ...p, permitCompany: e.target.value }))} style={fieldStyle} />
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>제조사</label>
-              <input value={form.manufacturer} onChange={(e) => setForm((p) => ({ ...p, manufacturer: e.target.value }))} style={fieldStyle} />
             </div>
           </div>
 
