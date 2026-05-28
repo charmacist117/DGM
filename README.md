@@ -32,6 +32,9 @@ npm run dev
 
 ```bash
 DATABASE_URL=postgres://...
+POSTGRES_URL=postgres://...
+POSTGRES_URL_NON_POOLING=postgres://...
+POSTGRES_PRISMA_URL=postgres://...
 ```
 
 ### 방식 B) 개별 PG 변수
@@ -42,6 +45,11 @@ PGPORT=
 PGUSER=
 PGPASSWORD=
 PGDATABASE=
+POSTGRES_HOST=
+POSTGRES_PORT=
+POSTGRES_USER=
+POSTGRES_PASSWORD=
+POSTGRES_DATABASE=
 ```
 
 ## Vercel 배포 가이드
@@ -58,3 +66,10 @@ PGDATABASE=
 - 서버 저장 실패 시에도 로컬 캐시에 임시 저장됩니다.
 - 동기화 상태는 화면 우상단 배지에서 확인할 수 있습니다.
 - 장기 보관이 필요하면 정기적으로 `전체 JSON 백업` 파일을 외부 저장소에 보관하세요.
+- `서버 저장 실패: 로컬 캐시에만 저장됨`이 보이면 Vercel 환경변수 적용 범위(Production/Preview)와 재배포 여부를 먼저 확인하세요.
+
+## 최근 UI 변경사항
+
+- `제품 개발` 하위 부수 일정(제품명 선정/포장 단위 선정/관능도 테스트/패키지 디자인)을 **태스크 관리 표의 제품 개발 라인 바로 아래**에서 직접 편집하도록 통합
+- 프로젝트 `담당자`, `카테고리`를 상시 수정 가능하도록 추가
+- 담당자/카테고리 저장 시 변경 이력(`changeLog`) 자동 기록

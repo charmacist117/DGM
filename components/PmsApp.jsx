@@ -197,14 +197,26 @@ function normalizeProject(project) {
 
   return {
     ...project,
+    manager: project.manager || "담당자",
+    category: project.category || "건강기능식품",
     start: startDate,
     tasks: [...finalOrderedTasks, ...extraTasks],
-    developSubTimeline
+    developSubTimeline,
+    communicationLog: Array.isArray(project.communicationLog) ? project.communicationLog : [],
+    decisionLog: Array.isArray(project.decisionLog) ? project.decisionLog : [],
+    changeLog: Array.isArray(project.changeLog) ? project.changeLog : []
   };
 }
 
 function normalizeProjects(projects) {
   return (projects || []).map(normalizeProject);
+}
+
+function errorMessage(error, fallback = "알 수 없는 오류") {
+  if (!error) return fallback;
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message || fallback;
+  return String(error?.message || error || fallback);
 }
 
 function useProjectsStore() {
@@ -221,6 +233,7 @@ function useProjectsStore() {
 
   const [syncState, setSyncState] = useState({ status: "loading", message: "서버 데이터 확인 중..." });
   const readyRef = useRef(false);
+  const serverAvailableRef = useRef(false);
   const saveTimerRef = useRef(null);
 
   useEffect(() => {
@@ -229,25 +242,30 @@ function useProjectsStore() {
     async function bootstrap() {
       try {
         const response = await fetch("/api/projects", { cache: "no-store" });
-        const payload = await response.json();
-        if (!response.ok || !payload.ok) throw new Error(payload.message || "서버 오류");
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || payload.message || `서버 오류 (${response.status})`);
+        }
 
         if (!disposed) {
           const nextProjects = normalizeProjects(Array.isArray(payload.projects) ? payload.projects : []);
           setProjects(nextProjects);
+          serverAvailableRef.current = true;
           setSyncState({
             status: "ready",
             message: `서버 기준 데이터 로드 완료 (${payload.source === "seeded" ? "초기 생성" : "기존 데이터"})`
           });
           readyRef.current = true;
         }
-      } catch {
+      } catch (error) {
+        const reason = errorMessage(error, "서버 연결 실패");
         if (!disposed) {
           const fallbackProjects = normalizeProjects(getInitialProjects());
           setProjects((prev) => (prev.length ? normalizeProjects(prev) : fallbackProjects));
+          serverAvailableRef.current = false;
           setSyncState({
             status: "warning",
-            message: "서버 연결 실패: 로컬 캐시 모드로 동작합니다."
+            message: `${reason}: 로컬 캐시 모드로 동작합니다.`
           });
           readyRef.current = true;
         }
@@ -267,6 +285,10 @@ function useProjectsStore() {
       window.localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(projects));
     }
 
+    if (!serverAvailableRef.current) {
+      return;
+    }
+
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
       try {
@@ -276,11 +298,17 @@ function useProjectsStore() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ projects })
         });
-        const payload = await response.json();
-        if (!response.ok || !payload.ok) throw new Error(payload.message || "저장 실패");
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || payload.message || `저장 실패 (${response.status})`);
+        }
         setSyncState({ status: "saved", message: `저장 완료 (${new Date(payload.updatedAt).toLocaleString()})` });
-      } catch {
-        setSyncState({ status: "warning", message: "서버 저장 실패: 로컬 캐시에만 저장됨" });
+      } catch (error) {
+        serverAvailableRef.current = false;
+        setSyncState({
+          status: "warning",
+          message: `서버 저장 실패 (${errorMessage(error, "원인 확인 필요")}): 로컬 캐시에만 저장됨`
+        });
       }
     }, 700);
 
@@ -430,82 +458,37 @@ function OverviewTab({ project }) {
   );
 }
 
-function DevelopSubTimelineEditor({ project, onUpdate }) {
+function TasksTab({ project, onTaskSave, onDevelopSubTimelineUpdate }) {
+  const [editTask, setEditTask] = useState(null);
   const developTask = project.tasks.find((task) => task.id === DEVELOP_TASK_ID);
   const developDuration = toPositiveInt(developTask?.duration, 1);
-  const timeline = normalizeDevelopSubTimeline(project.developSubTimeline, developDuration);
+  const developTimeline = developTask
+    ? normalizeDevelopSubTimeline(project.developSubTimeline, developDuration)
+    : [];
 
-  if (!developTask) return null;
-
-  const saveItem = (itemId, field, rawValue) => {
-    const value = Number(rawValue);
-    const updatedRaw = timeline.map((item) => (
-      item.id === itemId ? { ...item, [field]: Number.isFinite(value) ? value : item[field] } : item
+  const saveDevelopItem = (itemId, field, value) => {
+    if (!developTask) return;
+    const numeric = Number(value);
+    const raw = developTimeline.map((item) => (
+      item.id === itemId ? { ...item, [field]: Number.isFinite(numeric) ? numeric : item[field] } : item
     ));
-    onUpdate(normalizeDevelopSubTimeline(updatedRaw, developDuration));
+    onDevelopSubTimelineUpdate(normalizeDevelopSubTimeline(raw, developDuration));
   };
 
   return (
-    <div style={{ marginTop: 14, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
-      <div style={{ padding: "12px 14px", borderBottom: "1px solid #e2e8f0", fontWeight: 800 }}>
-        제품 개발 하단 타임라인 (총 {developTask.duration}일)
-      </div>
-      <div style={{ padding: 14 }}>
-        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
-          각 항목의 `시작 오프셋(일)`과 `기간(일)`을 자유롭게 조정할 수 있습니다. 제품 개발 기간을 넘는 값은 자동 보정됩니다.
-        </div>
-        <div style={{ display: "grid", gap: 10 }}>
-          {timeline.map((item) => {
-            const itemStart = toStr(addDays(developTask.scheduledStart, item.startOffset));
-            const itemEnd = toStr(addDays(itemStart, item.duration));
-            const leftPct = (item.startOffset / developDuration) * 100;
-            const widthPct = (item.duration / developDuration) * 100;
-
-            return (
-              <div key={item.id} style={{ border: "1px solid #e2e8f0", borderRadius: 8, background: "#f8fafc", padding: 10 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "200px 1fr 1fr 1fr", gap: 8, alignItems: "center", marginBottom: 8 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>{item.name}</div>
-                  <div>
-                    <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 2 }}>시작 오프셋(일)</label>
-                    <input type="number" min={0} value={item.startOffset} onChange={(e) => saveItem(item.id, "startOffset", e.target.value)} style={inputStyle} />
-                  </div>
-                  <div>
-                    <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 2 }}>기간(일)</label>
-                    <input type="number" min={1} value={item.duration} onChange={(e) => saveItem(item.id, "duration", e.target.value)} style={inputStyle} />
-                  </div>
-                  <div style={{ fontSize: 12, color: "#475569" }}>
-                    {fmt(itemStart)} ~ {fmt(itemEnd)}
-                  </div>
-                </div>
-                <div style={{ position: "relative", height: 12, background: "#e2e8f0", borderRadius: 999, overflow: "hidden" }}>
-                  <div style={{ position: "absolute", left: `${leftPct}%`, width: `${widthPct}%`, top: 0, bottom: 0, background: "#047857" }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TasksTab({ project, onTaskSave, onDevelopSubTimelineUpdate }) {
-  const [editTask, setEditTask] = useState(null);
-
-  return (
-    <>
-      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
-        <div style={{ padding: "12px 14px", borderBottom: "1px solid #e2e8f0", fontWeight: 800 }}>태스크 일정/진행 수정</div>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr style={{ background: "#f8fafc" }}>
-              {["태스크", "시작", "완료", "상태", "진행률", "메모", ""].map((h) => (
-                <th key={h} style={{ textAlign: "left", padding: "9px 12px", fontSize: 11, color: "#64748b", borderBottom: "1px solid #e2e8f0" }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {project.tasks.map((task) => (
+    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
+      <div style={{ padding: "12px 14px", borderBottom: "1px solid #e2e8f0", fontWeight: 800 }}>태스크 일정/진행 수정</div>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ background: "#f8fafc" }}>
+            {["태스크", "시작", "완료", "상태", "진행률", "메모", ""].map((h) => (
+              <th key={h} style={{ textAlign: "left", padding: "9px 12px", fontSize: 11, color: "#64748b", borderBottom: "1px solid #e2e8f0" }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {project.tasks.flatMap((task) => {
+            const rows = [
               <tr key={task.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                 <td style={{ padding: "9px 12px", fontSize: 13, fontWeight: 700 }}>{task.icon} {task.name}</td>
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>{fmt(task.scheduledStart)}</td>
@@ -519,24 +502,71 @@ function TasksTab({ project, onTaskSave, onDevelopSubTimelineUpdate }) {
                   </button>
                 </td>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            ];
 
-        {editTask && (
-          <TaskEditModal
-            task={editTask}
-            onClose={() => setEditTask(null)}
-            onSave={(patch) => {
-              onTaskSave(editTask, patch);
-              setEditTask(null);
-            }}
-          />
-        )}
-      </div>
+            if (task.id === DEVELOP_TASK_ID && developTask) {
+              rows.push(
+                <tr key={`${task.id}__subtimeline`} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                  <td colSpan={7} style={{ padding: "10px 12px 14px", background: "#f8fafc" }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: "#0f172a", marginBottom: 8 }}>
+                      제품 개발 부수 일정 (제품 개발 {developTask.duration}일 내)
+                    </div>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {developTimeline.map((item) => {
+                        const itemStart = toStr(addDays(developTask.scheduledStart, item.startOffset));
+                        const itemEnd = toStr(addDays(itemStart, item.duration));
+                        const leftPct = (item.startOffset / developDuration) * 100;
+                        const widthPct = (item.duration / developDuration) * 100;
+                        return (
+                          <div key={item.id} style={{ border: "1px solid #e2e8f0", borderRadius: 8, background: "#fff", padding: 8 }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "170px 100px 100px 1fr", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                              <div style={{ fontSize: 12, fontWeight: 700 }}>{item.name}</div>
+                              <input
+                                type="number"
+                                min={0}
+                                value={item.startOffset}
+                                onChange={(event) => saveDevelopItem(item.id, "startOffset", event.target.value)}
+                                style={{ ...inputStyle, fontSize: 12, padding: "5px 8px" }}
+                                title="시작 오프셋(일)"
+                              />
+                              <input
+                                type="number"
+                                min={1}
+                                value={item.duration}
+                                onChange={(event) => saveDevelopItem(item.id, "duration", event.target.value)}
+                                style={{ ...inputStyle, fontSize: 12, padding: "5px 8px" }}
+                                title="기간(일)"
+                              />
+                              <div style={{ fontSize: 11, color: "#64748b" }}>{fmt(itemStart)} ~ {fmt(itemEnd)}</div>
+                            </div>
+                            <div style={{ position: "relative", height: 8, background: "#e2e8f0", borderRadius: 999, overflow: "hidden" }}>
+                              <div style={{ position: "absolute", left: `${leftPct}%`, width: `${widthPct}%`, top: 0, bottom: 0, background: "#047857" }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </td>
+                </tr>
+              );
+            }
 
-      <DevelopSubTimelineEditor project={project} onUpdate={onDevelopSubTimelineUpdate} />
-    </>
+            return rows;
+          })}
+        </tbody>
+      </table>
+
+      {editTask && (
+        <TaskEditModal
+          task={editTask}
+          onClose={() => setEditTask(null)}
+          onSave={(patch) => {
+            onTaskSave(editTask, patch);
+            setEditTask(null);
+          }}
+        />
+      )}
+    </div>
   );
 }
 
@@ -743,6 +773,67 @@ function BackupTab({ projects, selectedProject, onRestore }) {
   );
 }
 
+function ProjectMetaEditor({ project, onSave }) {
+  const [manager, setManager] = useState(project.manager || "");
+  const [category, setCategory] = useState(project.category || CATEGORIES[0]);
+  const categoryOptions = CATEGORIES.includes(category) ? CATEGORIES : [category, ...CATEGORIES];
+
+  useEffect(() => {
+    setManager(project.manager || "");
+    setCategory(project.category || CATEGORIES[0]);
+  }, [project.id, project.manager, project.category]);
+
+  const metaLogs = (project.changeLog || [])
+    .filter((log) => log?.type === "project_meta")
+    .slice()
+    .reverse()
+    .slice(0, 5);
+
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 12, marginBottom: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>프로젝트 기본정보 수정</div>
+      <div style={{ display: "grid", gridTemplateColumns: "180px 180px auto", gap: 8, alignItems: "center", marginBottom: 10 }}>
+        <input
+          value={manager}
+          onChange={(event) => setManager(event.target.value)}
+          placeholder="담당자"
+          style={inputStyle}
+        />
+        <select value={category} onChange={(event) => setCategory(event.target.value)} style={inputStyle}>
+          {categoryOptions.map((item) => (
+            <option key={item} value={item}>{item}</option>
+          ))}
+        </select>
+        <button
+          onClick={() => {
+            const nextManager = manager.trim();
+            if (!nextManager) {
+              window.alert("담당자명을 입력하세요.");
+              return;
+            }
+            onSave({ manager: nextManager, category });
+          }}
+          style={primaryButton}
+        >
+          저장
+        </button>
+      </div>
+
+      <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>최근 변경 이력</div>
+      <div style={{ display: "grid", gap: 4 }}>
+        {metaLogs.map((log) => (
+          <div key={log.id} style={{ fontSize: 11, color: "#475569", background: "#f8fafc", borderRadius: 6, padding: "5px 8px" }}>
+            {fmt(log.date)} · {log.reason}
+          </div>
+        ))}
+        {metaLogs.length === 0 && (
+          <div style={{ fontSize: 11, color: "#94a3b8", padding: "4px 2px" }}>변경 이력이 없습니다.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function PmsApp() {
   const { projects, setProjects, syncState } = useProjectsStore();
   const [selectedId, setSelectedId] = useState(null);
@@ -873,6 +964,38 @@ export default function PmsApp() {
           <SyncBadge syncState={syncState} />
         </div>
 
+        <ProjectMetaEditor
+          project={selectedProject}
+          onSave={({ manager, category }) => {
+            updateProject(selectedProject.id, (project) => {
+              const nextManager = manager.trim();
+              const nextCategory = category;
+              if (project.manager === nextManager && project.category === nextCategory) return project;
+
+              const historyParts = [];
+              if (project.manager !== nextManager) historyParts.push(`담당자: ${project.manager} → ${nextManager}`);
+              if (project.category !== nextCategory) historyParts.push(`카테고리: ${project.category} → ${nextCategory}`);
+
+              return {
+                ...project,
+                manager: nextManager,
+                category: nextCategory,
+                changeLog: [
+                  ...(project.changeLog || []),
+                  {
+                    id: Date.now(),
+                    type: "project_meta",
+                    taskId: "_project_meta",
+                    taskName: "프로젝트 기본정보",
+                    date: TODAY,
+                    reason: historyParts.join(" / ")
+                  }
+                ]
+              };
+            });
+          }}
+        />
+
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
           {[
             ["overview", "개요"],
@@ -943,7 +1066,7 @@ export default function PmsApp() {
                   {
                     id: Date.now(),
                     taskId: DEVELOP_TASK_ID,
-                    taskName: "제품 개발 하단 타임라인",
+                    taskName: "제품 개발 부수 일정",
                     date: TODAY,
                     reason: "하위 구성요소 기간/위치 변경"
                   }
