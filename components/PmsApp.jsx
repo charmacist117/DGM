@@ -1316,9 +1316,13 @@ export default function PmsApp() {
   const router = useRouter();
   const { projects, setProjects, adminLogs, setAdminLogs, syncState } = useProjectsStore();
   const [selectedId, setSelectedId] = useState(null);
-  const [tab, setTab] = useState("home");
+  const [tab, setTab] = useState("overview");
   const initialUrlAppliedRef = useRef(false);
   const [forcedEdit, setForcedEdit] = useState(null);
+  const [isHome, setIsHome] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return !new URLSearchParams(window.location.search).get("project");
+  });
 
   useEffect(() => {
     if (!projects.length) {
@@ -1335,6 +1339,7 @@ export default function PmsApp() {
     const requestedId = Number(raw);
     if (Number.isFinite(requestedId) && projects.some((project) => project.id === requestedId)) {
       setSelectedId(requestedId);
+      setIsHome(false);
     }
     initialUrlAppliedRef.current = true;
   }, [projects]);
@@ -1374,6 +1379,7 @@ export default function PmsApp() {
 
   const openProject = (projectId) => {
     setSelectedId(projectId);
+    setIsHome(false);
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
       url.searchParams.set("project", String(projectId));
@@ -1468,6 +1474,37 @@ export default function PmsApp() {
           <div style={{ fontSize: 11, color: "#94a3b8" }}>Vercel 영구저장형 운영 모드</div>
         </div>
 
+        <div style={{ display: "flex", justifyContent: "flex-end", paddingRight: 4, marginBottom: -2 }}>
+          <button
+            onClick={() => {
+              setIsHome(true);
+              setTab("overview");
+              if (typeof window !== "undefined") {
+                const url = new URL(window.location.href);
+                url.searchParams.delete("project");
+                window.history.replaceState({}, "", url.toString());
+              }
+            }}
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 8,
+              border: isHome ? "1px solid #7c3aed" : "1px solid #475569",
+              background: isHome ? "#7c3aed" : "transparent",
+              color: "#fff",
+              cursor: "pointer",
+              fontSize: 16,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0
+            }}
+            title="홈 대시보드"
+          >
+            🏠
+          </button>
+        </div>
+
         <button onClick={goToNewProjectPage} style={{ width: "100%", borderRadius: 8, padding: "8px 10px", border: "1px dashed #475569", background: "transparent", color: "#cbd5e1", cursor: "pointer", fontWeight: 700 }}>
           + 새 프로젝트
         </button>
@@ -1482,7 +1519,7 @@ export default function PmsApp() {
           {projects.map((project) => {
             const launch = project.tasks[project.tasks.length - 1];
             const dDay = diff(TODAY, launch?.scheduledEnd || TODAY);
-            const active = project.id === selectedId;
+            const active = !isHome && project.id === selectedId;
             return (
               <button
                 key={project.id}
@@ -1508,6 +1545,24 @@ export default function PmsApp() {
       </aside>
 
       <main style={{ flex: 1, padding: 16, minWidth: 0 }}>
+        {isHome ? (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 900 }}>홈 대시보드</div>
+                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>모든 프로젝트의 현재 진행 상황을 한눈에 확인합니다.</div>
+              </div>
+              <SyncBadge syncState={syncState} />
+            </div>
+            <HomeDashboardTab
+              projects={projects}
+              onOpenProject={openProject}
+              onReminderYes={handleReminderYes}
+              onReminderNo={handleReminderNo}
+            />
+          </>
+        ) : (
+          <>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12 }}>
           <div>
             {selectedProject ? (
@@ -1552,7 +1607,6 @@ export default function PmsApp() {
           <>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               {[
-                ["home", "홈"],
                 ["overview", "개요"],
                 ["tasks", "태스크 관리"],
                 ["advisor", "자문약사 의견"],
@@ -1567,15 +1621,6 @@ export default function PmsApp() {
                 </button>
               ))}
             </div>
-
-            {tab === "home" && (
-              <HomeDashboardTab
-                projects={projects}
-                onOpenProject={openProject}
-                onReminderYes={handleReminderYes}
-                onReminderNo={handleReminderNo}
-              />
-            )}
 
             {tab === "overview" && <OverviewTab project={selectedProject} />}
 
@@ -1891,6 +1936,8 @@ export default function PmsApp() {
               + 첫 프로젝트 만들기
             </button>
           </div>
+        )}
+          </>
         )}
       </main>
     </div>
