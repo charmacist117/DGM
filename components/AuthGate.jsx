@@ -62,7 +62,7 @@ export default function AuthGate({ children }) {
   return (
     <div style={{ minHeight: "100vh", background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <form onSubmit={submit} style={{ width: 360, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 20 }}>
-        <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>PharmaDev PMS 로그인</div>
+        <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>참약사 PB 제품개발 시트 로그인</div>
         <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14 }}>관리자 또는 매니저 인증코드를 입력해주세요.</div>
         <input
           type="password"

@@ -1043,6 +1043,39 @@ function DecisionTab({ project, onSaveLog }) {
 
 function BackupTab({ projects, adminLogs, selectedProject, onRestore, isAdmin }) {
   const fileInputRef = useRef(null);
+  const [driveBusy, setDriveBusy] = useState(false);
+  const [driveMessage, setDriveMessage] = useState("");
+  const [driveFiles, setDriveFiles] = useState([]);
+  const [driveConfig, setDriveConfig] = useState({ configured: false, folderId: null, filePrefix: "PharmaDev_PMS_Backup" });
+
+  const loadDriveBackups = async () => {
+    setDriveBusy(true);
+    setDriveMessage("");
+    try {
+      const response = await fetch("/api/backup/google-drive?action=list&limit=40", { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.message || `조회 실패 (${response.status})`);
+      }
+      setDriveFiles(Array.isArray(payload.files) ? payload.files : []);
+      setDriveConfig({
+        configured: Boolean(payload.configured),
+        folderId: payload.folderId || null,
+        filePrefix: payload.filePrefix || "PharmaDev_PMS_Backup"
+      });
+      if (!payload.configured) {
+        setDriveMessage("Google Drive 환경변수가 없어 Drive 백업을 사용할 수 없습니다.");
+      }
+    } catch (error) {
+      setDriveMessage(`Drive 조회 실패: ${String(error?.message || error)}`);
+    } finally {
+      setDriveBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDriveBackups();
+  }, []);
 
   const exportAllJson = () => {
     const content = JSON.stringify({ projects, adminLogs }, null, 2);
@@ -1063,6 +1096,78 @@ function BackupTab({ projects, adminLogs, selectedProject, onRestore, isAdmin })
     downloadFile(`${selectedProject.name}_tasks.csv`, toCsv(rows), "text/csv;charset=utf-8;");
   };
 
+  const uploadToGoogleDrive = async () => {
+    setDriveBusy(true);
+    setDriveMessage("");
+    try {
+      const response = await fetch("/api/backup/google-drive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "upload",
+          projects,
+          adminLogs
+        })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.message || `업로드 실패 (${response.status})`);
+      }
+      setDriveMessage(`Google Drive 백업 완료: ${payload.file?.name || "파일 생성됨"}`);
+      await loadDriveBackups();
+    } catch (error) {
+      setDriveMessage(`Drive 업로드 실패: ${String(error?.message || error)}`);
+    } finally {
+      setDriveBusy(false);
+    }
+  };
+
+  const downloadBackupFromDrive = async (file) => {
+    setDriveBusy(true);
+    setDriveMessage("");
+    try {
+      const response = await fetch(`/api/backup/google-drive?action=download&fileId=${encodeURIComponent(file.id)}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.message || `다운로드 실패 (${response.status})`);
+      }
+      const raw = payload.raw || { projects: payload.projects || [], adminLogs: payload.adminLogs || [] };
+      downloadFile(file.name || `drive_backup_${toStr(new Date())}.json`, JSON.stringify(raw, null, 2), "application/json");
+      setDriveMessage(`Drive 백업 다운로드 완료: ${file.name}`);
+    } catch (error) {
+      setDriveMessage(`Drive 다운로드 실패: ${String(error?.message || error)}`);
+    } finally {
+      setDriveBusy(false);
+    }
+  };
+
+  const restoreBackupFromDrive = async (file) => {
+    if (!isAdmin) {
+      window.alert("복원 기능은 admin 권한에서만 가능합니다.");
+      return;
+    }
+    if (!window.confirm(`"${file.name}" 백업으로 복원하시겠습니까? 현재 데이터는 덮어써집니다.`)) return;
+    setDriveBusy(true);
+    setDriveMessage("");
+    try {
+      const response = await fetch(`/api/backup/google-drive?action=download&fileId=${encodeURIComponent(file.id)}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.message || `복원 실패 (${response.status})`);
+      }
+      onRestore({
+        projects: normalizeProjects(Array.isArray(payload.projects) ? payload.projects : []),
+        adminLogs: normalizeAdminLogs(Array.isArray(payload.adminLogs) ? payload.adminLogs : [])
+      });
+      setDriveMessage(`Drive 백업 복원 완료: ${file.name}`);
+      window.alert("Google Drive 백업 복원이 완료되었습니다.");
+    } catch (error) {
+      setDriveMessage(`Drive 복원 실패: ${String(error?.message || error)}`);
+    } finally {
+      setDriveBusy(false);
+    }
+  };
+
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
@@ -1073,9 +1178,49 @@ function BackupTab({ projects, adminLogs, selectedProject, onRestore, isAdmin })
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button onClick={exportAllJson} style={primaryButton}>전체 JSON 백업</button>
           <button onClick={exportProjectCsv} style={subtleButton}>현재 프로젝트 태스크 CSV</button>
+          <button onClick={uploadToGoogleDrive} style={subtleButton} disabled={driveBusy}>Google Drive 백업 생성</button>
+          <button onClick={loadDriveBackups} style={subtleButton} disabled={driveBusy}>Drive 목록 새로고침</button>
           {isAdmin && <button onClick={() => fileInputRef.current?.click()} style={subtleButton}>JSON 백업파일 불러오기</button>}
         </div>
+        <div style={{ marginTop: 10, fontSize: 12, color: "#64748b" }}>
+          {driveConfig.configured
+            ? `Drive 백업 사용 가능${driveConfig.folderId ? ` · 폴더: ${driveConfig.folderId}` : " · 기본 위치(My Drive)"}`
+            : "Drive 백업 미설정 (환경변수 필요)"}
+        </div>
+        {driveMessage && <div style={{ marginTop: 8, fontSize: 12, color: "#0369a1" }}>{driveMessage}</div>}
         {!isAdmin && <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>복원 기능은 admin 권한에서만 가능합니다.</div>}
+      </div>
+
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
+        <div style={{ fontWeight: 800, marginBottom: 8 }}>Google Drive 백업 목록</div>
+        <div style={{ display: "grid", gap: 8 }}>
+          {(driveFiles || []).map((file) => (
+            <div key={file.id} style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, display: "grid", gap: 6 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{file.name}</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button onClick={() => downloadBackupFromDrive(file)} style={subtleButton} disabled={driveBusy}>다운로드</button>
+                  {isAdmin && <button onClick={() => restoreBackupFromDrive(file)} style={subtleButton} disabled={driveBusy}>복원</button>}
+                  {file.webViewLink && (
+                    <a href={file.webViewLink} target="_blank" rel="noreferrer" style={{ ...subtleButton, textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
+                      Drive 열기
+                    </a>
+                  )}
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: "#64748b" }}>
+                생성: {file.createdTime ? new Date(file.createdTime).toLocaleString() : "-"}
+                {file.modifiedTime ? ` · 수정: ${new Date(file.modifiedTime).toLocaleString()}` : ""}
+                {file.size ? ` · 크기: ${(Number(file.size) / 1024).toFixed(1)}KB` : ""}
+              </div>
+            </div>
+          ))}
+        </div>
+        {!driveBusy && (driveFiles || []).length === 0 && (
+          <div style={{ marginTop: 10, fontSize: 12, color: "#94a3b8" }}>
+            Drive 백업 파일이 없습니다.
+          </div>
+        )}
       </div>
       {isAdmin && <input
         type="file"
@@ -1502,13 +1647,6 @@ export default function PmsApp() {
     }
     initialUrlAppliedRef.current = true;
   }, [projects]);
-
-  useEffect(() => {
-    if (isAdmin) return;
-    if (tab === "project_logs" || tab === "backup") {
-      setTab("overview");
-    }
-  }, [isAdmin, tab]);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedId),

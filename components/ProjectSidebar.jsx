@@ -21,7 +21,7 @@ export default function ProjectSidebar({
     <aside style={{ width: 280, background: "#0f172a", color: "#fff", padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 900 }}>PharmaDev PMS</div>
+          <div style={{ fontSize: 14, fontWeight: 900 }}>참약사 PB 제품개발 시트</div>
           <div style={{ fontSize: 11, color: "#94a3b8" }}>Vercel Neon Storage</div>
         </div>
         <button
