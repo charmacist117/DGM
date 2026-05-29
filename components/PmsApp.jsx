@@ -19,6 +19,8 @@ const DEVELOP_TASK_ID = "develop";
 const MERGED_SAMPLE_QUALITY_TASK_ID = "sample_quality";
 const LEGACY_SAMPLE_TASK_ID = "sample";
 const LEGACY_QUALITY_TASK_ID = "quality";
+const ROLE_ADMIN = "admin";
+const ROLE_GUEST = "guest";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -288,6 +290,10 @@ function normalizeAdminLogs(logs) {
       createdAt: log.createdAt || new Date().toISOString(),
       hiddenForManager: Boolean(log.hiddenForManager)
     }));
+}
+
+function canManage(role) {
+  return role === ROLE_ADMIN;
 }
 
 function errorMessage(error, fallback = "알 수 없는 오류") {
@@ -1436,7 +1442,7 @@ function ProjectLifecycleLogTab({ logs, onDeleteLog, onToggleHiddenForManager, i
 export default function PmsApp() {
   const router = useRouter();
   const { projects, setProjects, adminLogs, setAdminLogs, syncState } = useProjectsStore();
-  const [userRole, setUserRole] = useState("guest");
+  const [userRole, setUserRole] = useState(ROLE_GUEST);
   const [selectedId, setSelectedId] = useState(null);
   const [tab, setTab] = useState("overview");
   const initialUrlAppliedRef = useRef(false);
@@ -1445,7 +1451,7 @@ export default function PmsApp() {
     if (typeof window === "undefined") return true;
     return !new URLSearchParams(window.location.search).get("project");
   });
-  const isAdmin = userRole === "admin";
+  const isAdmin = canManage(userRole);
   const roleLabel = isAdmin ? "ADMIN" : "MANAGER";
 
   useEffect(() => {
@@ -1454,9 +1460,9 @@ export default function PmsApp() {
       try {
         const response = await fetch("/api/auth/session", { cache: "no-store" });
         const payload = await response.json().catch(() => ({}));
-        if (!disposed) setUserRole(payload?.role === "admin" ? "admin" : "guest");
+        if (!disposed) setUserRole(payload?.role === ROLE_ADMIN ? ROLE_ADMIN : ROLE_GUEST);
       } catch {
-        if (!disposed) setUserRole("guest");
+        if (!disposed) setUserRole(ROLE_GUEST);
       }
     }
     fetchRole();
@@ -1498,9 +1504,9 @@ export default function PmsApp() {
   );
   const selectedProjectAdminLogs = useMemo(() => {
     if (!selectedProject) return [];
-    return (adminLogs || [])
-      .filter((log) => String(log?.projectId) === String(selectedProject.id))
-      .filter((log) => isAdmin || !log.hiddenForManager);
+    const scopedLogs = (adminLogs || []).filter((log) => String(log?.projectId) === String(selectedProject.id));
+    if (isAdmin) return scopedLogs;
+    return scopedLogs.filter((log) => !log.hiddenForManager);
   }, [adminLogs, selectedProject, isAdmin]);
 
   const appendAdminLog = (entry) => {
