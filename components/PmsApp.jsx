@@ -285,7 +285,8 @@ function normalizeAdminLogs(logs) {
       projectName: log.projectName || "-",
       reason: log.reason || "",
       actor: log.actor || "관리자",
-      createdAt: log.createdAt || new Date().toISOString()
+      createdAt: log.createdAt || new Date().toISOString(),
+      hiddenForManager: Boolean(log.hiddenForManager)
     }));
 }
 
@@ -1033,7 +1034,7 @@ function DecisionTab({ project, onSaveLog }) {
   );
 }
 
-function BackupTab({ projects, adminLogs, selectedProject, onRestore }) {
+function BackupTab({ projects, adminLogs, selectedProject, onRestore, isAdmin }) {
   const fileInputRef = useRef(null);
 
   const exportAllJson = () => {
@@ -1065,10 +1066,11 @@ function BackupTab({ projects, adminLogs, selectedProject, onRestore }) {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button onClick={exportAllJson} style={primaryButton}>전체 JSON 백업</button>
           <button onClick={exportProjectCsv} style={subtleButton}>현재 프로젝트 태스크 CSV</button>
-          <button onClick={() => fileInputRef.current?.click()} style={subtleButton}>JSON 백업파일 불러오기</button>
+          {isAdmin && <button onClick={() => fileInputRef.current?.click()} style={subtleButton}>JSON 백업파일 불러오기</button>}
         </div>
+        {!isAdmin && <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>복원 기능은 admin 권한에서만 가능합니다.</div>}
       </div>
-      <input
+      {isAdmin && <input
         type="file"
         accept="application/json"
         style={{ display: "none" }}
@@ -1095,7 +1097,7 @@ function BackupTab({ projects, adminLogs, selectedProject, onRestore }) {
             event.target.value = "";
           }
         }}
-      />
+      />}
     </div>
   );
 }
@@ -1358,7 +1360,7 @@ function HomeDashboardTab({ projects, onOpenProject, onReminderYes, onReminderNo
   );
 }
 
-function ProjectLifecycleLogTab({ logs, onDeleteLog }) {
+function ProjectLifecycleLogTab({ logs, onDeleteLog, onToggleHiddenForManager, isAdmin }) {
   const sortedLogs = [...(logs || [])].sort(
     (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
   );
@@ -1404,7 +1406,7 @@ function ProjectLifecycleLogTab({ logs, onDeleteLog }) {
                   <span style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{log.projectName || "-"}</span>
                   <span style={{ fontSize: 11, color: "#64748b" }}>{log.actor || "관리자"}</span>
                 </div>
-                <button
+                {isAdmin && <button
                   onClick={() => {
                     if (!window.confirm("이 로그를 삭제하시겠습니까?")) return;
                     onDeleteLog(log.id);
@@ -1412,7 +1414,7 @@ function ProjectLifecycleLogTab({ logs, onDeleteLog }) {
                   style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #fecaca", background: "#fff", color: "#dc2626", cursor: "pointer", fontSize: 11, fontWeight: 700 }}
                 >
                   로그 삭제
-                </button>
+                </button>}
               </div>
               <div style={{ fontSize: 12, color: "#475569", marginBottom: 4 }}>
                 사유: {log.reason || "-"}
@@ -1434,6 +1436,7 @@ function ProjectLifecycleLogTab({ logs, onDeleteLog }) {
 export default function PmsApp() {
   const router = useRouter();
   const { projects, setProjects, adminLogs, setAdminLogs, syncState } = useProjectsStore();
+  const [userRole, setUserRole] = useState("guest");
   const [selectedId, setSelectedId] = useState(null);
   const [tab, setTab] = useState("overview");
   const initialUrlAppliedRef = useRef(false);
@@ -1442,6 +1445,25 @@ export default function PmsApp() {
     if (typeof window === "undefined") return true;
     return !new URLSearchParams(window.location.search).get("project");
   });
+  const isAdmin = userRole === "admin";
+  const roleLabel = isAdmin ? "ADMIN" : "MANAGER";
+
+  useEffect(() => {
+    let disposed = false;
+    async function fetchRole() {
+      try {
+        const response = await fetch("/api/auth/session", { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!disposed) setUserRole(payload?.role === "admin" ? "admin" : "guest");
+      } catch {
+        if (!disposed) setUserRole("guest");
+      }
+    }
+    fetchRole();
+    return () => {
+      disposed = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!projects.length) {
@@ -1463,14 +1485,23 @@ export default function PmsApp() {
     initialUrlAppliedRef.current = true;
   }, [projects]);
 
+  useEffect(() => {
+    if (isAdmin) return;
+    if (tab === "project_logs" || tab === "backup") {
+      setTab("overview");
+    }
+  }, [isAdmin, tab]);
+
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedId),
     [projects, selectedId]
   );
   const selectedProjectAdminLogs = useMemo(() => {
     if (!selectedProject) return [];
-    return (adminLogs || []).filter((log) => String(log?.projectId) === String(selectedProject.id));
-  }, [adminLogs, selectedProject]);
+    return (adminLogs || [])
+      .filter((log) => String(log?.projectId) === String(selectedProject.id))
+      .filter((log) => isAdmin || !log.hiddenForManager);
+  }, [adminLogs, selectedProject, isAdmin]);
 
   const appendAdminLog = (entry) => {
     setAdminLogs((prev) => normalizeAdminLogs([
@@ -1554,6 +1585,10 @@ export default function PmsApp() {
   };
 
   const deleteProject = (projectId) => {
+    if (!isAdmin) {
+      window.alert("관리자(admin) 권한이 필요합니다.");
+      return;
+    }
     const target = projects.find((project) => project.id === projectId);
     if (!target) return;
     if (!window.confirm(`"${target.name}" 프로젝트를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
@@ -1623,15 +1658,15 @@ export default function PmsApp() {
           </button>
         </div>
 
-        <button onClick={goToNewProjectPage} style={{ width: "100%", borderRadius: 8, padding: "8px 10px", border: "1px dashed #475569", background: "transparent", color: "#cbd5e1", cursor: "pointer", fontWeight: 700 }}>
+        {isAdmin && <button onClick={goToNewProjectPage} style={{ width: "100%", borderRadius: 8, padding: "8px 10px", border: "1px dashed #475569", background: "transparent", color: "#cbd5e1", cursor: "pointer", fontWeight: 700 }}>
           + 새 프로젝트
-        </button>
-        <button
+        </button>}
+        {isAdmin && <button
           onClick={goToProjectLogsPage}
           style={{ width: "100%", borderRadius: 8, padding: "8px 10px", border: "1px solid #334155", background: "#111827", color: "#cbd5e1", cursor: "pointer", fontWeight: 700, fontSize: 12 }}
         >
           프로젝트 이력 전체보기
-        </button>
+        </button>}
 
         <div style={{ overflowY: "auto", display: "grid", gap: 6, paddingRight: 4 }}>
           {projects.map((project) => {
@@ -1701,7 +1736,10 @@ export default function PmsApp() {
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
             <SyncBadge syncState={syncState} />
-            {selectedProject && (
+            <div style={{ fontSize: 11, fontWeight: 800, color: "#0f172a", background: "#e2e8f0", borderRadius: 999, padding: "3px 9px" }}>
+              {roleLabel}
+            </div>
+            {selectedProject && isAdmin && (
               <button
                 onClick={() => deleteProject(selectedProject.id)}
                 style={{
@@ -2024,7 +2062,9 @@ export default function PmsApp() {
             {tab === "project_logs" && (
               <ProjectLifecycleLogTab
                 logs={selectedProjectAdminLogs}
+                isAdmin={isAdmin}
                 onDeleteLog={(logId) => {
+                  if (!isAdmin) return;
                   setAdminLogs((prev) => normalizeAdminLogs((prev || []).filter((log) => log.id !== logId)));
                 }}
               />
@@ -2035,7 +2075,9 @@ export default function PmsApp() {
                 projects={projects}
                 adminLogs={adminLogs}
                 selectedProject={selectedProject}
+                isAdmin={isAdmin}
                 onRestore={({ projects: nextProjects, adminLogs: nextAdminLogs }) => {
+                  if (!isAdmin) return;
                   setProjects(normalizeProjects(nextProjects));
                   setAdminLogs(normalizeAdminLogs(nextAdminLogs));
                   if (nextProjects.length > 0) setSelectedId(nextProjects[0].id);

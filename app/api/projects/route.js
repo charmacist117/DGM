@@ -1,9 +1,14 @@
 import { loadProjects, saveProjects } from "@/lib/server/projectStore";
+import { readSession } from "@/lib/server/auth";
 
 export const runtime = "nodejs";
 
 export async function GET() {
   try {
+    const session = await readSession();
+    if (!session) {
+      return Response.json({ ok: false, message: "로그인이 필요합니다." }, { status: 401 });
+    }
     const result = await loadProjects();
     return Response.json({
       ok: true,
@@ -23,6 +28,10 @@ export async function GET() {
 
 export async function PUT(request) {
   try {
+    const session = await readSession();
+    if (!session) {
+      return Response.json({ ok: false, message: "로그인이 필요합니다." }, { status: 401 });
+    }
     const body = await request.json();
     if (!body || !Array.isArray(body.projects)) {
       return Response.json({ ok: false, message: "projects 배열이 필요합니다." }, { status: 400 });
