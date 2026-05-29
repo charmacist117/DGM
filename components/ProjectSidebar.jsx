@@ -35,20 +35,41 @@ export default function ProjectSidebar({
             }
           }}
           style={{
-            width: 34, height: 34, borderRadius: 8,
+            width: 34,
+            height: 34,
+            borderRadius: 8,
             border: isHome ? "1px solid #7c3aed" : "1px solid #475569",
             background: isHome ? "#7c3aed" : "transparent",
-            color: "#fff", cursor: "pointer", fontSize: 16,
-            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0
+            color: "#fff",
+            cursor: "pointer",
+            fontSize: 16,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0
           }}
           title="홈 대시보드"
         >
-          ⌂
+          🏠
         </button>
       </div>
 
-      {isAdmin && <button onClick={goToNewProjectPage} style={{ width: "100%", borderRadius: 8, padding: "8px 10px", border: "1px dashed #475569", background: "transparent", color: "#cbd5e1", cursor: "pointer", fontWeight: 700 }}>+ 새 프로젝트</button>}
-      {isAdmin && <button onClick={goToProjectLogsPage} style={{ width: "100%", borderRadius: 8, padding: "8px 10px", border: "1px solid #334155", background: "#111827", color: "#cbd5e1", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>프로젝트 이력 전체보기</button>}
+      {isAdmin && (
+        <button
+          onClick={goToNewProjectPage}
+          style={{ width: "100%", borderRadius: 8, padding: "8px 10px", border: "1px dashed #475569", background: "transparent", color: "#cbd5e1", cursor: "pointer", fontWeight: 700 }}
+        >
+          + 새 프로젝트
+        </button>
+      )}
+      {isAdmin && (
+        <button
+          onClick={goToProjectLogsPage}
+          style={{ width: "100%", borderRadius: 8, padding: "8px 10px", border: "1px solid #334155", background: "#111827", color: "#cbd5e1", cursor: "pointer", fontWeight: 700, fontSize: 12 }}
+        >
+          프로젝트 이력 전체보기
+        </button>
+      )}
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "grid", gap: 8, paddingRight: 4 }}>
         {projectBuckets.map((bucket) => (

@@ -63,7 +63,7 @@ export default function AuthGate({ children }) {
     <div style={{ minHeight: "100vh", background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <form onSubmit={submit} style={{ width: 360, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 20 }}>
         <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>PharmaDev PMS 로그인</div>
-        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14 }}>관리자 또는 사용자 인증코드를 입력하세요.</div>
+        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14 }}>관리자 또는 매니저 인증코드를 입력해주세요.</div>
         <input
           type="password"
           placeholder="인증코드"
@@ -72,7 +72,10 @@ export default function AuthGate({ children }) {
           style={inputStyle}
         />
         {error ? <div style={{ marginTop: 10, color: "#dc2626", fontSize: 12 }}>{error}</div> : null}
-        <button type="submit" style={{ marginTop: 14, width: "100%", padding: "10px 12px", borderRadius: 8, border: "none", background: "#0f172a", color: "#fff", fontWeight: 700, cursor: "pointer" }}>
+        <button
+          type="submit"
+          style={{ marginTop: 14, width: "100%", padding: "10px 12px", borderRadius: 8, border: "none", background: "#0f172a", color: "#fff", fontWeight: 700, cursor: "pointer" }}
+        >
           로그인
         </button>
       </form>

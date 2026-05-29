@@ -51,12 +51,13 @@ export default function NewProjectPage() {
     const name = form.name.trim();
     const pmName = form.pmName.trim();
     const amName = form.amName.trim();
+
     if (!name) {
-      setError("프로젝트명을 입력하세요.");
+      setError("프로젝트명을 입력해주세요.");
       return;
     }
     if (!pmName && !amName) {
-      setError("PM 또는 AM 중 최소 1명은 입력하세요.");
+      setError("PM 또는 AM 중 최소 1명을 입력해주세요.");
       return;
     }
 
@@ -72,6 +73,7 @@ export default function NewProjectPage() {
 
       const currentProjects = Array.isArray(getPayload.projects) ? getPayload.projects : [];
       const currentAdminLogs = Array.isArray(getPayload.adminLogs) ? getPayload.adminLogs : [];
+
       const id = Date.now();
       const newProject = createProjectFromForm({
         id,
@@ -82,6 +84,7 @@ export default function NewProjectPage() {
         category: form.category,
         start: form.start || TODAY
       });
+
       const createLog = {
         id: Date.now() + 1,
         type: "project_create",
@@ -117,13 +120,15 @@ export default function NewProjectPage() {
       <div style={{ maxWidth: 920, margin: "0 auto", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden" }}>
         <div style={{ padding: "16px 18px", borderBottom: "1px solid #e2e8f0", background: "#f8fafc" }}>
           <div style={{ fontSize: 19, fontWeight: 900, color: "#0f172a" }}>새 프로젝트 생성</div>
-          <div style={{ fontSize: 12, color: "#64748b", marginTop: 3 }}>프로젝트명, 담당자(PM/AM), 카테고리, 시작일을 입력해 프로젝트를 생성합니다.</div>
+          <div style={{ fontSize: 12, color: "#64748b", marginTop: 3 }}>
+            프로젝트명, 담당자(PM/AM), 카테고리, 시작일을 입력해 프로젝트를 생성합니다.
+          </div>
         </div>
 
         <div style={{ padding: 18, display: "grid", gap: 12 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div>
-              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>프로젝트명 *</label>
+              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>프로젝트명*</label>
               <input value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} style={fieldStyle} />
             </div>
             <div>
@@ -146,7 +151,7 @@ export default function NewProjectPage() {
               <input value={form.amName} onChange={(e) => setForm((p) => ({ ...p, amName: e.target.value }))} style={fieldStyle} />
             </div>
             <div>
-              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>시작일 *</label>
+              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>시작일*</label>
               <input type="date" value={form.start} onChange={(e) => setForm((p) => ({ ...p, start: e.target.value }))} style={fieldStyle} />
             </div>
           </div>
