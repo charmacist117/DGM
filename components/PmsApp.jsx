@@ -183,7 +183,8 @@ function normalizeDevelopSubTimeline(rawTimeline, developDuration) {
         ...base,
         ...(raw || {}),
         id: base.id,
-        name: base.name
+        name: base.name,
+        enabled: raw?.enabled !== false
       },
       developDuration
     );
@@ -509,6 +510,13 @@ function OverviewTab({ project }) {
   const dDay = diff(TODAY, launch?.scheduledEnd || TODAY);
 
   const cardStyle = { borderRadius: 10, background: "#fff", border: "1px solid #e2e8f0", padding: 14 };
+  const activeTasks = project.tasks.filter((task) => task.isEnabled !== false);
+  const datePoints = activeTasks.flatMap((task) => [task.scheduledStart, task.scheduledEnd]).filter(Boolean);
+  const minDate = datePoints.length ? datePoints.reduce((a, b) => (a < b ? a : b)) : TODAY;
+  const maxDate = datePoints.length ? datePoints.reduce((a, b) => (a > b ? a : b)) : TODAY;
+  const totalDays = Math.max(1, diff(minDate, maxDate));
+  const leftPct = (start) => Math.max(0, Math.min(100, (diff(minDate, start) / totalDays) * 100));
+  const widthPct = (start, end) => Math.max(1.2, ((Math.max(1, diff(start, end))) / totalDays) * 100);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -529,6 +537,33 @@ function OverviewTab({ project }) {
         <div style={cardStyle}>
           <div style={{ fontSize: 11, color: "#94a3b8" }}>지연 태스크</div>
           <div style={{ fontSize: 23, fontWeight: 900, color: delayedCount > 0 ? "#ef4444" : "#10b981" }}>{delayedCount}</div>
+        </div>
+      </div>
+
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
+        <div style={{ padding: "11px 14px", borderBottom: "1px solid #e2e8f0", fontWeight: 800 }}>간트 차트</div>
+        <div style={{ padding: 12, display: "grid", gap: 8 }}>
+          {activeTasks.map((task) => (
+            <div key={task.id} style={{ display: "grid", gridTemplateColumns: "170px 1fr", alignItems: "center", gap: 8 }}>
+              <div style={{ fontSize: 12, color: "#334155", fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {task.icon} {task.name}
+              </div>
+              <div style={{ position: "relative", height: 18, background: "#f1f5f9", borderRadius: 999, overflow: "hidden" }}>
+                <div
+                  style={{
+                    position: "absolute",
+                    left: `${leftPct(task.scheduledStart)}%`,
+                    width: `${widthPct(task.scheduledStart, task.scheduledEnd)}%`,
+                    top: 1,
+                    bottom: 1,
+                    background: task.taskStatus === "delayed" ? "#ef4444" : task.color,
+                    borderRadius: 999
+                  }}
+                  title={`${fmt(task.scheduledStart)} ~ ${fmt(task.scheduledEnd)}`}
+                />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -604,6 +639,12 @@ function TasksTab({
     const numeric = Number(value);
     const raw = developTimeline.map((item) => (
       item.id === itemId ? { ...item, [field]: Number.isFinite(numeric) ? numeric : item[field] } : item
+    ));
+    onDevelopSubTimelineUpdate(normalizeDevelopSubTimeline(raw, developDuration));
+  };
+  const toggleSensory = () => {
+    const raw = developTimeline.map((item) => (
+      item.id === "dev_sensory" ? { ...item, enabled: item.enabled === false ? true : false } : item
     ));
     onDevelopSubTimelineUpdate(normalizeDevelopSubTimeline(raw, developDuration));
   };
@@ -714,14 +755,37 @@ function TasksTab({
                     </div>
                     <div style={{ display: "grid", gap: 8 }}>
                       {developTimeline.map((item) => {
+                        const enabled = item.enabled !== false;
                         const itemStart = toStr(addDays(developTask.scheduledStart, item.startOffset));
                         const itemEnd = toStr(addDays(itemStart, item.duration));
                         const leftPct = (item.startOffset / developDuration) * 100;
                         const widthPct = (item.duration / developDuration) * 100;
                         return (
-                          <div key={item.id} style={{ border: "1px solid #e2e8f0", borderRadius: 8, background: "#fff", padding: 8 }}>
+                          <div key={item.id} style={{ border: "1px solid #e2e8f0", borderRadius: 8, background: "#fff", padding: 8, opacity: enabled ? 1 : 0.45 }}>
                             <div style={{ display: "grid", gridTemplateColumns: "170px 100px 100px 1fr", gap: 8, alignItems: "center", marginBottom: 6 }}>
-                              <div style={{ fontSize: 12, fontWeight: 700 }}>{item.name}</div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <div style={{ fontSize: 12, fontWeight: 700 }}>{item.name}</div>
+                                {item.id === "dev_sensory" && (
+                                  <button
+                                    onClick={toggleSensory}
+                                    style={{
+                                      width: 40,
+                                      height: 20,
+                                      borderRadius: 999,
+                                      border: "1px solid " + (enabled ? "#10b981" : "#cbd5e1"),
+                                      background: enabled ? "#dcfce7" : "#f1f5f9",
+                                      cursor: "pointer",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      justifyContent: enabled ? "flex-end" : "flex-start",
+                                      padding: 2
+                                    }}
+                                    title={enabled ? "관능도 테스트 ON" : "관능도 테스트 OFF"}
+                                  >
+                                    <span style={{ width: 14, height: 14, borderRadius: 999, background: enabled ? "#16a34a" : "#94a3b8", display: "block" }} />
+                                  </button>
+                                )}
+                              </div>
                               <input
                                 type="number"
                                 min={0}
@@ -729,6 +793,7 @@ function TasksTab({
                                 onChange={(event) => saveDevelopItem(item.id, "startOffset", event.target.value)}
                                 style={{ ...inputStyle, fontSize: 12, padding: "5px 8px" }}
                                 title="시작 오프셋(일)"
+                                disabled={!enabled}
                               />
                               <input
                                 type="number"
@@ -737,6 +802,7 @@ function TasksTab({
                                 onChange={(event) => saveDevelopItem(item.id, "duration", event.target.value)}
                                 style={{ ...inputStyle, fontSize: 12, padding: "5px 8px" }}
                                 title="기간(일)"
+                                disabled={!enabled}
                               />
                               <div style={{ fontSize: 11, color: "#64748b" }}>{fmt(itemStart)} ~ {fmt(itemEnd)}</div>
                             </div>
