@@ -1620,6 +1620,14 @@ export default function PmsApp() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      if (typeof window !== "undefined") window.location.reload();
+    }
+  };
+
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
       <aside style={{ width: 280, background: "#0f172a", color: "#fff", padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1739,6 +1747,12 @@ export default function PmsApp() {
             <div style={{ fontSize: 11, fontWeight: 800, color: "#0f172a", background: "#e2e8f0", borderRadius: 999, padding: "3px 9px" }}>
               {roleLabel}
             </div>
+            <button
+              onClick={handleLogout}
+              style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", color: "#334155", cursor: "pointer", fontSize: 12, fontWeight: 700 }}
+            >
+              로그아웃
+            </button>
             {selectedProject && isAdmin && (
               <button
                 onClick={() => deleteProject(selectedProject.id)}
