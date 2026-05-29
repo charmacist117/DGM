@@ -517,6 +517,19 @@ function OverviewTab({ project }) {
   const totalDays = Math.max(1, diff(minDate, maxDate));
   const leftPct = (start) => Math.max(0, Math.min(100, (diff(minDate, start) / totalDays) * 100));
   const widthPct = (start, end) => Math.max(1.2, ((Math.max(1, diff(start, end))) / totalDays) * 100);
+  const chartEndDate = toStr(addDays(maxDate, 1));
+  const axisDates = [];
+  let axisCursor = new Date(minDate);
+  while (toStr(axisCursor) <= chartEndDate) {
+    axisDates.push(toStr(axisCursor));
+    axisCursor = addDays(axisCursor, 1);
+  }
+  const monthTicks = axisDates.filter((d) => d.slice(8, 10) === "01");
+  const yearTicks = axisDates.filter((d) => d.slice(5, 10) === "01-01");
+  const fiveDayTicks = axisDates.filter((d) => {
+    const day = Number(d.slice(8, 10));
+    return day % 5 === 0;
+  });
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -543,12 +556,51 @@ function OverviewTab({ project }) {
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
         <div style={{ padding: "11px 14px", borderBottom: "1px solid #e2e8f0", fontWeight: 800 }}>간트 차트</div>
         <div style={{ padding: 12, display: "grid", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "170px 1fr", alignItems: "end", gap: 8 }}>
+            <div />
+            <div style={{ position: "relative", height: 34, borderBottom: "1px solid #e2e8f0" }}>
+              {fiveDayTicks.map((d) => {
+                const x = leftPct(d);
+                return (
+                  <div key={`day-${d}`} style={{ position: "absolute", left: `${x}%`, top: 16, transform: "translateX(-50%)", fontSize: 10, color: "#94a3b8" }}>
+                    {Number(d.slice(8, 10))}
+                  </div>
+                );
+              })}
+              {monthTicks.map((d) => {
+                const x = leftPct(d);
+                return (
+                  <div key={`month-${d}`} style={{ position: "absolute", left: `${x}%`, top: 1, transform: "translateX(2px)", fontSize: 10, color: "#64748b", fontWeight: 700 }}>
+                    {Number(d.slice(5, 7))}월
+                  </div>
+                );
+              })}
+              {yearTicks.map((d) => {
+                const x = leftPct(d);
+                return (
+                  <div key={`year-${d}`} style={{ position: "absolute", left: `${x}%`, top: 1, transform: "translateX(2px)", fontSize: 10, color: "#334155", fontWeight: 900 }}>
+                    {d.slice(0, 4)}년
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           {activeTasks.map((task) => (
             <div key={task.id} style={{ display: "grid", gridTemplateColumns: "170px 1fr", alignItems: "center", gap: 8 }}>
               <div style={{ fontSize: 12, color: "#334155", fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {task.icon} {task.name}
               </div>
               <div style={{ position: "relative", height: 18, background: "#f1f5f9", borderRadius: 999, overflow: "hidden" }}>
+                {fiveDayTicks.map((d) => (
+                  <div key={`g5-${task.id}-${d}`} style={{ position: "absolute", left: `${leftPct(d)}%`, top: 0, bottom: 0, borderLeft: "1px dashed #cbd5e1" }} />
+                ))}
+                {monthTicks.map((d) => (
+                  <div key={`gm-${task.id}-${d}`} style={{ position: "absolute", left: `${leftPct(d)}%`, top: 0, bottom: 0, borderLeft: "1px solid #94a3b8" }} />
+                ))}
+                {yearTicks.map((d) => (
+                  <div key={`gy-${task.id}-${d}`} style={{ position: "absolute", left: `${leftPct(d)}%`, top: 0, bottom: 0, borderLeft: "2px solid #475569" }} />
+                ))}
                 <div
                   style={{
                     position: "absolute",
@@ -557,7 +609,8 @@ function OverviewTab({ project }) {
                     top: 1,
                     bottom: 1,
                     background: task.taskStatus === "delayed" ? "#ef4444" : task.color,
-                    borderRadius: 999
+                    borderRadius: 999,
+                    zIndex: 2
                   }}
                   title={`${fmt(task.scheduledStart)} ~ ${fmt(task.scheduledEnd)}`}
                 />
