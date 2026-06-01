@@ -214,9 +214,10 @@ function normalizeProject(project) {
     pred: normalizePredList(task.pred || [])
   }));
 
+  const sourceOrderIds = normalizedSourceTasks.map((task) => task.id);
   const byId = Object.fromEntries(normalizedSourceTasks.map((task) => [task.id, task]));
   let structureChanged = migratedFromLegacy;
-  const orderedPhaseTasks = PHASES.map((template) => {
+  const normalizedPhaseTasks = PHASES.map((template) => {
     const existing = byId[template.id];
     if (!existing) structureChanged = true;
 
@@ -246,15 +247,20 @@ function normalizeProject(project) {
       ...task,
       isEnabled: task?.isEnabled !== false
     }));
-  const finalTasks = [...orderedPhaseTasks, ...extraTasks];
+  const phaseTaskById = Object.fromEntries(normalizedPhaseTasks.map((task) => [task.id, task]));
+  const orderedPhaseTasks = sourceOrderIds
+    .filter((id) => PHASE_ID_SET.has(id) && phaseTaskById[id])
+    .map((id) => phaseTaskById[id]);
+  const missingPhaseTasks = normalizedPhaseTasks.filter((task) => !sourceOrderIds.includes(task.id));
+  const finalTasks = [...orderedPhaseTasks, ...missingPhaseTasks, ...extraTasks];
 
-  const hasMissingSchedule = orderedPhaseTasks.some((task) => !task.scheduledStart || !task.scheduledEnd || !task.originalStart || !task.originalEnd);
+  const hasMissingSchedule = normalizedPhaseTasks.some((task) => !task.scheduledStart || !task.scheduledEnd || !task.originalStart || !task.originalEnd);
   const startDate = project.start || TODAY;
 
-  let phaseTasksWithSchedule = orderedPhaseTasks;
+  let phaseTasksWithSchedule = normalizedPhaseTasks;
   if (structureChanged || hasMissingSchedule) {
-    const schedule = calcSchedule(orderedPhaseTasks, startDate);
-    phaseTasksWithSchedule = orderedPhaseTasks.map((task) => ({
+    const schedule = calcSchedule(normalizedPhaseTasks, startDate);
+    phaseTasksWithSchedule = normalizedPhaseTasks.map((task) => ({
       ...task,
       scheduledStart: schedule[task.id].start,
       scheduledEnd: schedule[task.id].end,
@@ -264,7 +270,7 @@ function normalizeProject(project) {
   }
 
   const phaseTaskMap = Object.fromEntries(phaseTasksWithSchedule.map((task) => [task.id, task]));
-  const finalOrderedTasks = PHASES.map((template) => phaseTaskMap[template.id]);
+  const finalOrderedTasks = finalTasks.map((task) => phaseTaskMap[task.id] || task);
   const developTask = phaseTaskMap[DEVELOP_TASK_ID] || PHASE_TEMPLATE_BY_ID[DEVELOP_TASK_ID];
   const developSubTimeline = normalizeDevelopSubTimeline(project.developSubTimeline, developTask.duration);
 
@@ -275,7 +281,7 @@ function normalizeProject(project) {
     manager: project.manager || [project.pmName, project.amName].filter(Boolean).join(" / ") || "미정",
     category: project.category || "건강기능식품",
     start: startDate,
-    tasks: [...finalOrderedTasks, ...extraTasks],
+    tasks: finalOrderedTasks,
     developSubTimeline,
     communicationLog: Array.isArray(project.communicationLog) ? project.communicationLog : [],
     decisionLog: Array.isArray(project.decisionLog) ? project.decisionLog : [],
@@ -689,6 +695,7 @@ function TasksTab({
   project,
   onTaskSave,
   onTaskAdd,
+  onTaskReorder,
   onTaskToggle,
   onProjectStartChange,
   onDevelopSubTimelineUpdate,
@@ -708,6 +715,8 @@ function TasksTab({
   const [draftStartDates, setDraftStartDates] = useState({});
   const [draftEndDates, setDraftEndDates] = useState({});
   const [draftSupplierNames, setDraftSupplierNames] = useState({});
+  const [draggedTaskId, setDraggedTaskId] = useState(null);
+  const [dragOverTaskId, setDragOverTaskId] = useState(null);
   const developTask = project.tasks.find((task) => task.id === DEVELOP_TASK_ID);
   const developDuration = toPositiveInt(developTask?.duration, 1);
   const developTimeline = developTask
@@ -747,9 +756,9 @@ function TasksTab({
     ));
     onDevelopSubTimelineUpdate(normalizeDevelopSubTimeline(raw, developDuration));
   };
-  const toggleSensory = () => {
+  const toggleDevelopItem = (itemId) => {
     const raw = developTimeline.map((item) => (
-      item.id === "dev_sensory" ? { ...item, enabled: item.enabled === false ? true : false } : item
+      item.id === itemId ? { ...item, enabled: item.enabled === false ? true : false } : item
     ));
     onDevelopSubTimelineUpdate(normalizeDevelopSubTimeline(raw, developDuration));
   };
@@ -775,6 +784,18 @@ function TasksTab({
       end: toStr(addDays(project.start || TODAY, 7))
     });
     setShowAddTask(false);
+  };
+
+  const moveTask = (fromId, toId) => {
+    if (!fromId || !toId || fromId === toId) return;
+    const ids = (project.tasks || []).map((task) => task.id);
+    const fromIndex = ids.indexOf(fromId);
+    const toIndex = ids.indexOf(toId);
+    if (fromIndex < 0 || toIndex < 0) return;
+    const nextIds = [...ids];
+    const [movedId] = nextIds.splice(fromIndex, 1);
+    nextIds.splice(toIndex, 0, movedId);
+    onTaskReorder(nextIds);
   };
 
   return (
@@ -853,7 +874,7 @@ function TasksTab({
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ background: "#f8fafc" }}>
-            {["활성", "태스크", "시작일", "완료일", "업체(공급업체 예정)", "상태", "진행률", "메모", ""].map((h) => (
+            {["순서", "활성", "태스크", "시작일", "완료일", "업체(공급업체 예정)", "상태", "진행률", "메모", ""].map((h) => (
               <th key={h} style={{ textAlign: "left", padding: "9px 12px", fontSize: 11, color: "#64748b", borderBottom: "1px solid #e2e8f0" }}>{h}</th>
             ))}
           </tr>
@@ -861,8 +882,61 @@ function TasksTab({
         <tbody>
           {project.tasks.flatMap((task) => {
             const enabled = task.isEnabled !== false;
+            const isDragging = draggedTaskId === task.id;
+            const isDragTarget = dragOverTaskId === task.id && draggedTaskId !== task.id;
             const rows = [
-              <tr key={task.id} style={{ borderBottom: "1px solid #f1f5f9", opacity: enabled ? 1 : 0.55 }}>
+              <tr
+                key={task.id}
+                draggable
+                onDragStart={(event) => {
+                  setDraggedTaskId(task.id);
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", task.id);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  if (dragOverTaskId !== task.id) setDragOverTaskId(task.id);
+                }}
+                onDragLeave={() => {
+                  if (dragOverTaskId === task.id) setDragOverTaskId(null);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const sourceId = event.dataTransfer.getData("text/plain") || draggedTaskId;
+                  moveTask(sourceId, task.id);
+                  setDraggedTaskId(null);
+                  setDragOverTaskId(null);
+                }}
+                onDragEnd={() => {
+                  setDraggedTaskId(null);
+                  setDragOverTaskId(null);
+                }}
+                style={{
+                  borderBottom: "1px solid #f1f5f9",
+                  opacity: enabled ? (isDragging ? 0.45 : 1) : 0.55,
+                  background: isDragTarget ? "#ecfeff" : "#fff"
+                }}
+              >
+                <td style={{ padding: "9px 12px", fontSize: 12, color: "#64748b" }}>
+                  <span
+                    title="드래그해서 순서 변경"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 24,
+                      height: 24,
+                      borderRadius: 6,
+                      border: "1px solid #cbd5e1",
+                      background: "#f8fafc",
+                      cursor: "grab",
+                      userSelect: "none"
+                    }}
+                  >
+                    ↕
+                  </span>
+                </td>
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>
                   <button
                     onClick={() => onTaskToggle(task, !enabled)}
@@ -967,7 +1041,7 @@ function TasksTab({
             if (task.id === DEVELOP_TASK_ID && developTask && enabled) {
               rows.push(
                 <tr key={`${task.id}__subtimeline`} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                  <td colSpan={9} style={{ padding: "10px 12px 14px", background: "#f8fafc" }}>
+                  <td colSpan={10} style={{ padding: "10px 12px 14px", background: "#f8fafc" }}>
                     <div style={{ fontSize: 12, fontWeight: 800, color: "#0f172a", marginBottom: 8 }}>
                       제품 개발 하단 타임라인 (제품 개발 {developTask.duration}일)
                     </div>
@@ -983,26 +1057,24 @@ function TasksTab({
                             <div style={{ display: "grid", gridTemplateColumns: "170px 100px 100px 1fr", gap: 8, alignItems: "center", marginBottom: 6 }}>
                               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                 <div style={{ fontSize: 12, fontWeight: 700 }}>{item.name}</div>
-                                {item.id === "dev_sensory" && (
-                                  <button
-                                    onClick={toggleSensory}
-                                    style={{
-                                      width: 40,
-                                      height: 20,
-                                      borderRadius: 999,
-                                      border: "1px solid " + (enabled ? "#10b981" : "#cbd5e1"),
-                                      background: enabled ? "#dcfce7" : "#f1f5f9",
-                                      cursor: "pointer",
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      justifyContent: enabled ? "flex-end" : "flex-start",
-                                      padding: 2
-                                    }}
-                                    title={enabled ? "관능도 테스트 ON" : "관능도 테스트 OFF"}
-                                  >
-                                    <span style={{ width: 14, height: 14, borderRadius: 999, background: enabled ? "#16a34a" : "#94a3b8", display: "block" }} />
-                                  </button>
-                                )}
+                                <button
+                                  onClick={() => toggleDevelopItem(item.id)}
+                                  style={{
+                                    width: 40,
+                                    height: 20,
+                                    borderRadius: 999,
+                                    border: "1px solid " + (enabled ? "#10b981" : "#cbd5e1"),
+                                    background: enabled ? "#dcfce7" : "#f1f5f9",
+                                    cursor: "pointer",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: enabled ? "flex-end" : "flex-start",
+                                    padding: 2
+                                  }}
+                                  title={enabled ? `${item.name} ON` : `${item.name} OFF`}
+                                >
+                                  <span style={{ width: 14, height: 14, borderRadius: 999, background: enabled ? "#16a34a" : "#94a3b8", display: "block" }} />
+                                </button>
                               </div>
                               <input
                                 type="number"
@@ -2060,6 +2132,34 @@ export default function PmsApp() {
                     projectId: selectedProject.id,
                     projectName: selectedProject.name,
                     reason: `${name} 태스크 행 추가 (${nextStart} ~ ${nextEnd})`
+                  });
+                }}
+                onTaskReorder={(orderedIds) => {
+                  updateProject(selectedProject.id, (project) => {
+                    const byId = Object.fromEntries((project.tasks || []).map((task) => [task.id, task]));
+                    const orderedTasks = orderedIds.map((id) => byId[id]).filter(Boolean);
+                    const missingTasks = (project.tasks || []).filter((task) => !orderedIds.includes(task.id));
+                    return {
+                      ...project,
+                      tasks: [...orderedTasks, ...missingTasks],
+                      changeLog: [
+                        ...(project.changeLog || []),
+                        {
+                          id: Date.now(),
+                          type: "task_reorder",
+                          taskId: "_task_reorder",
+                          taskName: "태스크 순서",
+                          date: TODAY,
+                          reason: "태스크 행 순서 변경"
+                        }
+                      ]
+                    };
+                  });
+                  appendAdminLog({
+                    type: "task_reorder",
+                    projectId: selectedProject.id,
+                    projectName: selectedProject.name,
+                    reason: "태스크 행 순서 변경"
                   });
                 }}
                 onTaskToggle={(task, enabled) => {
