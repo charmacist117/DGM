@@ -6,13 +6,14 @@ import ProjectSidebar from "@/components/ProjectSidebar";
 import {
   CATEGORIES,
   PHASES,
+  PHASE_CATS,
   STATUS_COLOR,
   STATUS_LABEL,
   getDefaultDevelopSubTimeline,
   getInitialProjects
 } from "@/lib/pms/defaults";
 import { TODAY, addDays, diff, fmt, toStr } from "@/lib/pms/date";
-import { applyDelay, applyDurationChange, applyStartDateChange, calcSchedule } from "@/lib/pms/schedule";
+import { calcSchedule } from "@/lib/pms/schedule";
 import { downloadFile, toCsv } from "@/lib/pms/exporters";
 
 const LOCAL_CACHE_KEY = "pharmadev_pms_cache_v2";
@@ -25,6 +26,10 @@ const ROLE_GUEST = "guest";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
+const CAT_COLORS = {
+  ...Object.fromEntries(PHASES.map((phase) => [phase.cat, phase.color])),
+  기타: "#64748b"
+};
 
 const tabButtonStyle = (active) => ({
   padding: "8px 12px",
@@ -121,6 +126,12 @@ function toPositiveInt(value, fallback = 1) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(1, Math.round(n));
+}
+
+function durationFromDates(startDate, endDate, fallback = 1) {
+  const days = diff(startDate, endDate);
+  if (!Number.isFinite(days)) return toPositiveInt(fallback, 1);
+  return Math.max(1, days);
 }
 
 function normalizePredList(pred = []) {
@@ -445,10 +456,11 @@ function TaskEditModal({ task, onClose, onSave }) {
   const [delayDays, setDelayDays] = useState(0);
   const [duration, setDuration] = useState(task.duration || 1);
   const [startDate, setStartDate] = useState(task.scheduledStart || TODAY);
+  const [endDate, setEndDate] = useState(task.scheduledEnd || TODAY);
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(15,23,42,.55)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ width: 520, borderRadius: 14, background: "#fff", boxShadow: "0 20px 60px rgba(0,0,0,.2)", padding: 22 }}>
+      <div style={{ width: 640, maxWidth: "92vw", borderRadius: 14, background: "#fff", boxShadow: "0 20px 60px rgba(0,0,0,.2)", padding: 22 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14 }}>
           <div style={{ fontSize: 16, fontWeight: 800 }}>{task.icon} {task.name}</div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 19 }}>✕</button>
@@ -469,7 +481,7 @@ function TaskEditModal({ task, onClose, onSave }) {
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
           <div>
             <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 4 }}>지연 적용 (일)</label>
             <input type="number" value={delayDays} min={0} onChange={(e) => setDelayDays(Number(e.target.value))} style={inputStyle} />
@@ -482,6 +494,10 @@ function TaskEditModal({ task, onClose, onSave }) {
             <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 4 }}>시작일 지정</label>
             <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={inputStyle} />
           </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 4 }}>완료일 지정</label>
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={inputStyle} />
+          </div>
         </div>
 
         <div style={{ marginBottom: 16 }}>
@@ -492,14 +508,23 @@ function TaskEditModal({ task, onClose, onSave }) {
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={onClose} style={{ flex: 1, padding: 10, borderRadius: 8, border: "1px solid #e2e8f0", background: "#f8fafc", cursor: "pointer" }}>취소</button>
           <button
-            onClick={() => onSave({
-              progress,
-              taskStatus,
-              notes,
-              delayDays,
-              startDate,
-              duration: toPositiveInt(duration, task.duration || 1)
-            })}
+            onClick={() => {
+              const nextDuration = toPositiveInt(duration, task.duration || 1);
+              const durationChanged = nextDuration !== task.duration;
+              const endDateWasEdited = endDate !== (task.scheduledEnd || TODAY);
+              const nextEndDate = durationChanged && !endDateWasEdited
+                ? toStr(addDays(startDate || task.scheduledStart, nextDuration))
+                : endDate;
+              onSave({
+                progress,
+                taskStatus,
+                notes,
+                delayDays,
+                startDate,
+                endDate: nextEndDate,
+                duration: nextDuration
+              });
+            }}
             style={{ ...primaryButton, flex: 2 }}
           >
             저장
@@ -663,6 +688,7 @@ function OverviewTab({ project }) {
 function TasksTab({
   project,
   onTaskSave,
+  onTaskAdd,
   onTaskToggle,
   onProjectStartChange,
   onDevelopSubTimelineUpdate,
@@ -671,7 +697,16 @@ function TasksTab({
 }) {
   const [editTask, setEditTask] = useState(null);
   const [projectStart, setProjectStart] = useState(project.start || TODAY);
+  const [showAddTask, setShowAddTask] = useState(false);
+  const [newTask, setNewTask] = useState({
+    name: "",
+    cat: "기타",
+    start: project.start || TODAY,
+    end: toStr(addDays(project.start || TODAY, 7))
+  });
+  const [draftTaskNames, setDraftTaskNames] = useState({});
   const [draftStartDates, setDraftStartDates] = useState({});
+  const [draftEndDates, setDraftEndDates] = useState({});
   const [draftSupplierNames, setDraftSupplierNames] = useState({});
   const developTask = project.tasks.find((task) => task.id === DEVELOP_TASK_ID);
   const developDuration = toPositiveInt(developTask?.duration, 1);
@@ -681,10 +716,19 @@ function TasksTab({
 
   useEffect(() => {
     setProjectStart(project.start || TODAY);
+    setNewTask({
+      name: "",
+      cat: "기타",
+      start: project.start || TODAY,
+      end: toStr(addDays(project.start || TODAY, 7))
+    });
+    setShowAddTask(false);
   }, [project.id, project.start]);
 
   useEffect(() => {
+    setDraftTaskNames(Object.fromEntries((project.tasks || []).map((task) => [task.id, task.name || ""])));
     setDraftStartDates(Object.fromEntries((project.tasks || []).map((task) => [task.id, task.scheduledStart || TODAY])));
+    setDraftEndDates(Object.fromEntries((project.tasks || []).map((task) => [task.id, task.scheduledEnd || TODAY])));
     setDraftSupplierNames(Object.fromEntries((project.tasks || []).map((task) => [task.id, task.vendorName || ""])));
   }, [project.id, project.tasks]);
 
@@ -710,11 +754,40 @@ function TasksTab({
     onDevelopSubTimelineUpdate(normalizeDevelopSubTimeline(raw, developDuration));
   };
 
+  const saveNewTask = () => {
+    const name = newTask.name.trim();
+    if (!name) {
+      window.alert("태스크명을 입력해주세요.");
+      return;
+    }
+    const start = newTask.start || project.start || TODAY;
+    const end = newTask.end || toStr(addDays(start, 1));
+    onTaskAdd({
+      name,
+      cat: newTask.cat || "기타",
+      start,
+      end
+    });
+    setNewTask({
+      name: "",
+      cat: "기타",
+      start: project.start || TODAY,
+      end: toStr(addDays(project.start || TODAY, 7))
+    });
+    setShowAddTask(false);
+  };
+
   return (
     <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
       <div style={{ padding: "12px 14px", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
         <div style={{ fontWeight: 800 }}>태스크 일정/진행 수정</div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            onClick={() => setShowAddTask((prev) => !prev)}
+            style={{ padding: "6px 9px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 700 }}
+          >
+            행 추가
+          </button>
           <span style={{ fontSize: 12, color: "#64748b", fontWeight: 700 }}>프로젝트 시작일</span>
           <input type="date" value={projectStart} onChange={(e) => setProjectStart(e.target.value)} style={{ ...inputStyle, width: 150, padding: "6px 8px", fontSize: 12 }} />
           <button
@@ -725,6 +798,58 @@ function TasksTab({
           </button>
         </div>
       </div>
+      {showAddTask && (
+        <div style={{ padding: 14, borderBottom: "1px solid #e2e8f0", background: "#f8fafc" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1.5fr 140px 150px 150px auto auto", gap: 8, alignItems: "end" }}>
+            <div>
+              <label style={{ display: "block", fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4 }}>태스크명</label>
+              <input
+                value={newTask.name}
+                onChange={(event) => setNewTask((prev) => ({ ...prev, name: event.target.value }))}
+                placeholder="새 태스크명"
+                style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4 }}>단계</label>
+              <select
+                value={newTask.cat}
+                onChange={(event) => setNewTask((prev) => ({ ...prev, cat: event.target.value }))}
+                style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }}
+              >
+                {PHASE_CATS.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4 }}>시작일</label>
+              <input
+                type="date"
+                value={newTask.start}
+                onChange={(event) => setNewTask((prev) => ({ ...prev, start: event.target.value }))}
+                style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4 }}>완료일</label>
+              <input
+                type="date"
+                value={newTask.end}
+                onChange={(event) => setNewTask((prev) => ({ ...prev, end: event.target.value }))}
+                style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }}
+              />
+            </div>
+            <button onClick={saveNewTask} style={{ ...primaryButton, padding: "8px 12px", fontSize: 12 }}>
+              추가
+            </button>
+            <button
+              onClick={() => setShowAddTask(false)}
+              style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 700 }}
+            >
+              취소
+            </button>
+          </div>
+        </div>
+      )}
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ background: "#f8fafc" }}>
@@ -758,7 +883,24 @@ function TasksTab({
                     <span style={{ width: 18, height: 18, borderRadius: 999, background: enabled ? "#16a34a" : "#94a3b8", display: "block" }} />
                   </button>
                 </td>
-                <td style={{ padding: "9px 12px", fontSize: 13, fontWeight: 700 }}>{task.icon} {task.name}</td>
+                <td style={{ padding: "9px 12px", fontSize: 13, fontWeight: 700 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 170 }}>
+                    <span>{task.icon}</span>
+                    <input
+                      value={draftTaskNames[task.id] ?? task.name}
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        setDraftTaskNames((prev) => ({ ...prev, [task.id]: next }));
+                      }}
+                      onBlur={(event) => {
+                        const next = event.target.value.trim();
+                        if (next && next !== task.name) onTaskSave(task, { name: next });
+                      }}
+                      style={{ ...inputStyle, width: "100%", minWidth: 130, padding: "5px 8px", fontSize: 12, fontWeight: 700 }}
+                      disabled={!enabled}
+                    />
+                  </div>
+                </td>
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>
                   <input
                     type="date"
@@ -775,7 +917,22 @@ function TasksTab({
                     disabled={!enabled}
                   />
                 </td>
-                <td style={{ padding: "9px 12px", fontSize: 12 }}>{fmt(task.scheduledEnd)}</td>
+                <td style={{ padding: "9px 12px", fontSize: 12 }}>
+                  <input
+                    type="date"
+                    value={draftEndDates[task.id] || task.scheduledEnd}
+                    onChange={(event) => {
+                      const next = event.target.value;
+                      setDraftEndDates((prev) => ({ ...prev, [task.id]: next }));
+                    }}
+                    onBlur={(event) => {
+                      const next = event.target.value;
+                      if (next && next !== task.scheduledEnd) onTaskSave(task, { endDate: next });
+                    }}
+                    style={{ ...inputStyle, width: 140, padding: "5px 8px", fontSize: 12 }}
+                    disabled={!enabled}
+                  />
+                </td>
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>
                   {task.id === "supplier" ? (
                     <input
@@ -1774,30 +1931,45 @@ export default function PmsApp() {
               <TasksTab
                 project={selectedProject}
                 onTaskSave={(task, patch) => {
+                  const hasTaskNameChange = Boolean(patch.name && patch.name !== task.name);
                   const hasTaskDateChange = Boolean(patch.startDate && patch.startDate !== task.scheduledStart);
+                  const hasTaskEndDateChange = Boolean(patch.endDate && patch.endDate !== task.scheduledEnd);
                   const hasDelayChange = Boolean((patch.delayDays || 0) > 0);
                   const hasDurationChange = Boolean(typeof patch.duration === "number" && patch.duration !== task.duration);
                   updateProject(selectedProject.id, (project) => {
-                    let tasks = project.tasks.map((currentTask) => (
-                      currentTask.id === task.id
-                        ? {
-                            ...currentTask,
-                            progress: patch.progress ?? currentTask.progress,
-                            taskStatus: patch.taskStatus ?? currentTask.taskStatus,
-                            notes: patch.notes ?? currentTask.notes,
-                            vendorName: patch.vendorName ?? currentTask.vendorName,
-                            duration: patch.duration ?? currentTask.duration
-                          }
-                        : currentTask
-                    ));
+                    const tasks = project.tasks.map((currentTask) => {
+                      if (currentTask.id !== task.id) return currentTask;
 
-                    if (patch.startDate && patch.startDate !== task.scheduledStart) {
-                      tasks = applyStartDateChange(tasks, task.id, patch.startDate);
-                    }
-                    if (patch.delayDays > 0) tasks = applyDelay(tasks, task.id, patch.delayDays);
-                    if (typeof patch.duration === "number" && patch.duration !== task.duration) {
-                      tasks = applyDurationChange(tasks, task.id, patch.duration);
-                    }
+                      const hasStartPatch = Boolean(patch.startDate);
+                      const hasEndPatch = Boolean(patch.endDate);
+                      const hasDurationPatch = typeof patch.duration === "number";
+                      const nextStart = hasStartPatch ? toStr(patch.startDate) : currentTask.scheduledStart;
+                      let nextEnd = hasEndPatch ? toStr(patch.endDate) : currentTask.scheduledEnd;
+                      let nextDuration = hasDurationPatch
+                        ? toPositiveInt(patch.duration, currentTask.duration || 1)
+                        : currentTask.duration;
+
+                      if (hasDurationPatch && !hasEndPatch) {
+                        nextEnd = toStr(addDays(nextStart, nextDuration));
+                      }
+                      if ((patch.delayDays || 0) > 0) {
+                        nextEnd = toStr(addDays(nextEnd, patch.delayDays));
+                      }
+
+                      nextDuration = durationFromDates(nextStart, nextEnd, nextDuration);
+
+                      return {
+                        ...currentTask,
+                        name: patch.name ?? currentTask.name,
+                        progress: patch.progress ?? currentTask.progress,
+                        taskStatus: (patch.delayDays || 0) > 0 ? "delayed" : (patch.taskStatus ?? currentTask.taskStatus),
+                        notes: patch.notes ?? currentTask.notes,
+                        vendorName: patch.vendorName ?? currentTask.vendorName,
+                        duration: nextDuration,
+                        scheduledStart: nextStart,
+                        scheduledEnd: nextEnd
+                      };
+                    });
 
                     const developTask = tasks.find((currentTask) => currentTask.id === DEVELOP_TASK_ID);
                     const developSubTimeline = normalizeDevelopSubTimeline(
@@ -1820,16 +1992,22 @@ export default function PmsApp() {
                             patch.notes ||
                             (typeof patch.vendorName === "string"
                               ? `공급업체 기록: ${(task.vendorName || "-")} -> ${(patch.vendorName || "-")}`
-                              : (patch.startDate ? `시작일 조정: ${task.scheduledStart} -> ${patch.startDate}` : "수정")),
+                              : ([
+                                  patch.name && patch.name !== task.name ? `태스크명 변경: ${task.name} -> ${patch.name}` : "",
+                                  patch.startDate ? `시작일 조정: ${task.scheduledStart} -> ${patch.startDate}` : "",
+                                  patch.endDate ? `완료일 조정: ${task.scheduledEnd} -> ${patch.endDate}` : ""
+                                ].filter(Boolean).join(" / ") || "수정")),
                           delayDays: patch.delayDays || 0,
                           duration: typeof patch.duration === "number" ? patch.duration : task.duration
                         }
                       ]
                     };
                   });
-                  if (hasTaskDateChange || hasDelayChange || hasDurationChange) {
+                  if (hasTaskNameChange || hasTaskDateChange || hasTaskEndDateChange || hasDelayChange || hasDurationChange) {
                     const reasonParts = [];
+                    if (hasTaskNameChange) reasonParts.push(`태스크명 ${task.name} -> ${patch.name}`);
                     if (hasTaskDateChange) reasonParts.push(`시작일 ${task.scheduledStart} -> ${patch.startDate}`);
+                    if (hasTaskEndDateChange) reasonParts.push(`완료일 ${task.scheduledEnd} -> ${patch.endDate}`);
                     if (hasDelayChange) reasonParts.push(`지연 적용: +${patch.delayDays}일`);
                     if (hasDurationChange) reasonParts.push(`기간: ${task.duration}일 -> ${patch.duration}일`);
                     appendAdminLog({
@@ -1839,6 +2017,50 @@ export default function PmsApp() {
                       reason: `${task.name} 일정 변경 (${reasonParts.join(" / ")})`
                     });
                   }
+                }}
+                onTaskAdd={({ name, cat, start, end }) => {
+                  const taskId = `custom_${Date.now()}`;
+                  const nextStart = toStr(start || selectedProject.start || TODAY);
+                  const nextEnd = toStr(end || addDays(nextStart, 1));
+                  const newTask = {
+                    id: taskId,
+                    name,
+                    cat: cat || "기타",
+                    icon: "📌",
+                    color: CAT_COLORS[cat] || "#64748b",
+                    duration: durationFromDates(nextStart, nextEnd, 1),
+                    pred: [],
+                    scheduledStart: nextStart,
+                    scheduledEnd: nextEnd,
+                    originalStart: nextStart,
+                    originalEnd: nextEnd,
+                    progress: 0,
+                    isEnabled: true,
+                    vendorName: "",
+                    taskStatus: "pending",
+                    notes: ""
+                  };
+                  updateProject(selectedProject.id, (project) => ({
+                    ...project,
+                    tasks: [...project.tasks, newTask],
+                    changeLog: [
+                      ...(project.changeLog || []),
+                      {
+                        id: Date.now(),
+                        type: "task_add",
+                        taskId,
+                        taskName: name,
+                        date: TODAY,
+                        reason: `태스크 행 추가 (${fmt(nextStart)} ~ ${fmt(nextEnd)})`
+                      }
+                    ]
+                  }));
+                  appendAdminLog({
+                    type: "task_add",
+                    projectId: selectedProject.id,
+                    projectName: selectedProject.name,
+                    reason: `${name} 태스크 행 추가 (${nextStart} ~ ${nextEnd})`
+                  });
                 }}
                 onTaskToggle={(task, enabled) => {
                   updateProject(selectedProject.id, (project) => ({
@@ -1872,20 +2094,9 @@ export default function PmsApp() {
                   if (selectedProject.start === nextStart) return;
                   updateProject(selectedProject.id, (project) => {
                     if (project.start === nextStart) return project;
-                    const schedule = calcSchedule(project.tasks, nextStart);
-                    const nextTasks = project.tasks.map((task) => ({
-                      ...task,
-                      scheduledStart: schedule[task.id]?.start || task.scheduledStart,
-                      scheduledEnd: schedule[task.id]?.end || task.scheduledEnd,
-                      originalStart: schedule[task.id]?.start || task.originalStart,
-                      originalEnd: schedule[task.id]?.end || task.originalEnd
-                    }));
-                    const developTask = nextTasks.find((task) => task.id === DEVELOP_TASK_ID);
                     return {
                       ...project,
                       start: nextStart,
-                      tasks: nextTasks,
-                      developSubTimeline: normalizeDevelopSubTimeline(project.developSubTimeline, developTask?.duration || 1),
                       changeLog: [
                         ...(project.changeLog || []),
                         {
@@ -1985,19 +2196,6 @@ export default function PmsApp() {
                     if (historyParts.length === 0) return project;
 
                     const manager = [pmName, amName].filter(Boolean).join(" / ") || "미정";
-                    let nextTasks = project.tasks;
-                    if (project.start !== start) {
-                      const schedule = calcSchedule(project.tasks, start);
-                      nextTasks = project.tasks.map((task) => ({
-                        ...task,
-                        scheduledStart: schedule[task.id]?.start || task.scheduledStart,
-                        scheduledEnd: schedule[task.id]?.end || task.scheduledEnd,
-                        originalStart: schedule[task.id]?.start || task.originalStart,
-                        originalEnd: schedule[task.id]?.end || task.originalEnd
-                      }));
-                    }
-
-                    const developTask = nextTasks.find((task) => task.id === DEVELOP_TASK_ID);
                     return {
                       ...project,
                       name,
@@ -2006,8 +2204,6 @@ export default function PmsApp() {
                       manager,
                       category,
                       start,
-                      tasks: nextTasks,
-                      developSubTimeline: normalizeDevelopSubTimeline(project.developSubTimeline, developTask?.duration || 1),
                       changeLog: [
                         ...(project.changeLog || []),
                         {
