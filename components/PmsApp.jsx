@@ -14,7 +14,7 @@ import {
 } from "@/lib/pms/defaults";
 import { TODAY, addDays, diff, fmt, toStr } from "@/lib/pms/date";
 import { calcSchedule } from "@/lib/pms/schedule";
-import { downloadFile, toCsv } from "@/lib/pms/exporters";
+import { downloadFile, projectFromBackupCsv, projectToBackupCsv } from "@/lib/pms/exporters";
 
 const LOCAL_CACHE_KEY = "pharmadev_pms_cache_v2";
 const DEVELOP_TASK_ID = "develop";
@@ -308,6 +308,13 @@ function normalizeAdminLogs(logs) {
       createdAt: log.createdAt || new Date().toISOString(),
       hiddenForManager: Boolean(log.hiddenForManager)
     }));
+}
+
+function upsertById(items = [], nextItem) {
+  const nextId = String(nextItem?.id ?? "");
+  const exists = items.some((item) => String(item?.id ?? "") === nextId);
+  if (!exists) return [...items, nextItem];
+  return items.map((item) => (String(item?.id ?? "") === nextId ? { ...item, ...nextItem } : item));
 }
 
 function canManage(role) {
@@ -1128,6 +1135,15 @@ function TasksTab({
 }
 
 function CommunicationTab({ project, onSaveLog }) {
+  const emptyForm = {
+    date: TODAY,
+    company: "",
+    contact: "",
+    channel: "전화",
+    summary: "",
+    outcome: "",
+    nextAction: ""
+  };
   const [form, setForm] = useState({
     date: TODAY,
     company: "",
@@ -1137,6 +1153,7 @@ function CommunicationTab({ project, onSaveLog }) {
     outcome: "",
     nextAction: ""
   });
+  const [editingId, setEditingId] = useState(null);
   const logs = project.communicationLog || [];
 
   const save = () => {
@@ -1144,14 +1161,32 @@ function CommunicationTab({ project, onSaveLog }) {
       window.alert("업체명과 소통 내용을 입력해주세요.");
       return;
     }
-    onSaveLog({ ...form, id: Date.now() });
-    setForm({ date: TODAY, company: "", contact: "", channel: "전화", summary: "", outcome: "", nextAction: "" });
+    onSaveLog({
+      ...form,
+      id: editingId || Date.now(),
+      updatedAt: editingId ? new Date().toISOString() : undefined
+    });
+    setEditingId(null);
+    setForm(emptyForm);
+  };
+
+  const startEdit = (item) => {
+    setEditingId(item.id);
+    setForm({
+      date: item.date || TODAY,
+      company: item.company || "",
+      contact: item.contact || "",
+      channel: item.channel || "전화",
+      summary: item.summary || "",
+      outcome: item.outcome || "",
+      nextAction: item.nextAction || ""
+    });
   };
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 14 }}>
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
-        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10 }}>업체 소통 기록</div>
+        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10 }}>{editingId ? "업체 소통 기록 수정" : "업체 소통 기록"}</div>
         <div style={{ display: "grid", gap: 8 }}>
           <input placeholder="업체명*" value={form.company} onChange={(e) => setForm((prev) => ({ ...prev, company: e.target.value }))} style={inputStyle} />
           <input placeholder="담당자" value={form.contact} onChange={(e) => setForm((prev) => ({ ...prev, contact: e.target.value }))} style={inputStyle} />
@@ -1162,22 +1197,25 @@ function CommunicationTab({ project, onSaveLog }) {
           <textarea rows={3} placeholder="소통 내용*" value={form.summary} onChange={(e) => setForm((prev) => ({ ...prev, summary: e.target.value }))} style={{ ...inputStyle, resize: "vertical" }} />
           <textarea rows={2} placeholder="판단/결과 (예: A업체 제외, B업체 진행)" value={form.outcome} onChange={(e) => setForm((prev) => ({ ...prev, outcome: e.target.value }))} style={{ ...inputStyle, resize: "vertical" }} />
           <input placeholder="후속 조치" value={form.nextAction} onChange={(e) => setForm((prev) => ({ ...prev, nextAction: e.target.value }))} style={inputStyle} />
-          <button onClick={save} style={primaryButton}>저장</button>
+          <button onClick={save} style={primaryButton}>{editingId ? "수정 저장" : "저장"}</button>
+          {editingId && (
+            <button
+              onClick={() => {
+                setEditingId(null);
+                setForm(emptyForm);
+              }}
+              style={subtleButton}
+            >
+              수정 취소
+            </button>
+          )}
         </div>
       </div>
 
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
           <div style={{ fontWeight: 800 }}>소통 히스토리 ({logs.length}건)</div>
-          <button
-            onClick={() => {
-              if (!logs.length) return window.alert("내보낼 데이터가 없습니다.");
-              downloadFile(`${project.name}_communication.csv`, toCsv(logs), "text/csv;charset=utf-8;");
-            }}
-            style={subtleButton}
-          >
-            CSV 내보내기
-          </button>
+          <div style={{ fontSize: 12, color: "#64748b" }}>CSV는 백업/복원 탭에서 일괄 내보내기</div>
         </div>
 
         <div style={{ display: "grid", gap: 10 }}>
@@ -1190,6 +1228,9 @@ function CommunicationTab({ project, onSaveLog }) {
               <div style={{ fontSize: 13, marginBottom: 5 }}>{item.summary}</div>
               {item.outcome && <div style={{ fontSize: 12, color: "#0369a1", marginBottom: 3 }}>결과: {item.outcome}</div>}
               {item.nextAction && <div style={{ fontSize: 12, color: "#b45309" }}>후속: {item.nextAction}</div>}
+              <div style={{ marginTop: 8 }}>
+                <button onClick={() => startEdit(item)} style={subtleButton}>수정</button>
+              </div>
             </div>
           ))}
           {logs.length === 0 && <div style={{ color: "#94a3b8", textAlign: "center", padding: 24 }}>기록이 없습니다.</div>}
@@ -1200,6 +1241,14 @@ function CommunicationTab({ project, onSaveLog }) {
 }
 
 function DecisionTab({ project, onSaveLog }) {
+  const emptyForm = {
+    date: TODAY,
+    decider: "대표",
+    title: "",
+    impact: "보통",
+    status: "의사결정 완료",
+    description: ""
+  };
   const [form, setForm] = useState({
     date: TODAY,
     decider: "대표",
@@ -1208,6 +1257,7 @@ function DecisionTab({ project, onSaveLog }) {
     status: "의사결정 완료",
     description: ""
   });
+  const [editingId, setEditingId] = useState(null);
   const logs = project.decisionLog || [];
 
   const save = () => {
@@ -1215,14 +1265,31 @@ function DecisionTab({ project, onSaveLog }) {
       window.alert("안건명과 의사결정 상세 내용을 입력해주세요.");
       return;
     }
-    onSaveLog({ ...form, id: Date.now() });
-    setForm({ date: TODAY, decider: "대표", title: "", impact: "보통", status: "의사결정 완료", description: "" });
+    onSaveLog({
+      ...form,
+      id: editingId || Date.now(),
+      updatedAt: editingId ? new Date().toISOString() : undefined
+    });
+    setEditingId(null);
+    setForm(emptyForm);
+  };
+
+  const startEdit = (item) => {
+    setEditingId(item.id);
+    setForm({
+      date: item.date || TODAY,
+      decider: item.decider || "대표",
+      title: item.title || "",
+      impact: item.impact || "보통",
+      status: item.status || "의사결정 완료",
+      description: item.description || ""
+    });
   };
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 14 }}>
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
-        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10 }}>대표/부대표 의사결정 기록</div>
+        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10 }}>{editingId ? "대표/부대표 의사결정 수정" : "대표/부대표 의사결정 기록"}</div>
         <div style={{ display: "grid", gap: 8 }}>
           <input type="date" value={form.date} onChange={(e) => setForm((prev) => ({ ...prev, date: e.target.value }))} style={inputStyle} />
           <select value={form.decider} onChange={(e) => setForm((prev) => ({ ...prev, decider: e.target.value }))} style={inputStyle}>
@@ -1236,22 +1303,25 @@ function DecisionTab({ project, onSaveLog }) {
             {["검토중", "의사결정 완료", "보류"].map((value) => <option key={value}>{value}</option>)}
           </select>
           <textarea rows={5} placeholder="의사결정 배경/결론/조건*" value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} style={{ ...inputStyle, resize: "vertical" }} />
-          <button onClick={save} style={primaryButton}>저장</button>
+          <button onClick={save} style={primaryButton}>{editingId ? "수정 저장" : "저장"}</button>
+          {editingId && (
+            <button
+              onClick={() => {
+                setEditingId(null);
+                setForm(emptyForm);
+              }}
+              style={subtleButton}
+            >
+              수정 취소
+            </button>
+          )}
         </div>
       </div>
 
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
           <div style={{ fontWeight: 800 }}>의사결정 아카이브 ({logs.length}건)</div>
-          <button
-            onClick={() => {
-              if (!logs.length) return window.alert("내보낼 데이터가 없습니다.");
-              downloadFile(`${project.name}_decisions.csv`, toCsv(logs), "text/csv;charset=utf-8;");
-            }}
-            style={subtleButton}
-          >
-            CSV 내보내기
-          </button>
+          <div style={{ fontSize: 12, color: "#64748b" }}>CSV는 백업/복원 탭에서 일괄 내보내기</div>
         </div>
         <div style={{ display: "grid", gap: 10 }}>
           {[...logs].reverse().map((item) => (
@@ -1261,6 +1331,9 @@ function DecisionTab({ project, onSaveLog }) {
                 <div style={{ fontSize: 11, color: "#64748b" }}>{item.decider} · {fmt(item.date)}</div>
               </div>
               <div style={{ padding: 10, fontSize: 13, whiteSpace: "pre-wrap" }}>{item.description}</div>
+              <div style={{ padding: "0 10px 10px" }}>
+                <button onClick={() => startEdit(item)} style={subtleButton}>수정</button>
+              </div>
             </div>
           ))}
           {logs.length === 0 && <div style={{ color: "#94a3b8", textAlign: "center", padding: 24 }}>기록이 없습니다.</div>}
@@ -1272,24 +1345,19 @@ function DecisionTab({ project, onSaveLog }) {
 
 function BackupTab({ projects, adminLogs, selectedProject, onRestore, isAdmin }) {
   const fileInputRef = useRef(null);
+  const exportableAdminLogs = isAdmin
+    ? adminLogs
+    : (adminLogs || []).filter((log) => !log.hiddenForManager);
 
   const exportAllJson = () => {
-    const content = JSON.stringify({ projects, adminLogs }, null, 2);
+    const content = JSON.stringify({ projects, adminLogs: exportableAdminLogs }, null, 2);
     downloadFile(`Charmacist_PB_backup_${toStr(new Date())}.json`, content, "application/json");
   };
 
   const exportProjectCsv = () => {
-    const rows = selectedProject.tasks.map((task) => ({
-      project: selectedProject.name,
-      task: task.name,
-      start: task.scheduledStart,
-      end: task.scheduledEnd,
-      duration: task.duration,
-      progress: task.progress,
-      status: task.taskStatus,
-      notes: task.notes || ""
-    }));
-    downloadFile(`${selectedProject.name}_tasks.csv`, toCsv(rows), "text/csv;charset=utf-8;");
+    if (!selectedProject) return window.alert("선택된 프로젝트가 없습니다.");
+    const csv = projectToBackupCsv(selectedProject, exportableAdminLogs);
+    downloadFile(`${selectedProject.name}_project_backup.csv`, csv, "text/csv;charset=utf-8;");
   };
 
   return (
@@ -1301,14 +1369,17 @@ function BackupTab({ projects, adminLogs, selectedProject, onRestore, isAdmin })
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button onClick={exportAllJson} style={primaryButton}>전체 JSON 백업</button>
-          <button onClick={exportProjectCsv} style={subtleButton}>현재 프로젝트 태스크 CSV</button>
-          {isAdmin && <button onClick={() => fileInputRef.current?.click()} style={subtleButton}>JSON 백업파일 불러오기</button>}
+          <button onClick={exportProjectCsv} style={subtleButton}>현재 프로젝트 전체 CSV 백업</button>
+          {isAdmin && <button onClick={() => fileInputRef.current?.click()} style={subtleButton}>JSON/CSV 백업파일 불러오기</button>}
+        </div>
+        <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>
+          CSV 백업에는 태스크, 자문약사 의견, 업체 소통 기록, 의사결정 기록, 변경 이력, 프로젝트 관련 이력 로그가 포함됩니다.
         </div>
         {!isAdmin && <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>복원 기능은 admin 권한에서만 가능합니다.</div>}
       </div>
       {isAdmin && <input
         type="file"
-        accept="application/json"
+        accept=".json,.csv,application/json,text/csv"
         style={{ display: "none" }}
         ref={fileInputRef}
         onChange={async (event) => {
@@ -1316,17 +1387,39 @@ function BackupTab({ projects, adminLogs, selectedProject, onRestore, isAdmin })
           if (!file) return;
           try {
             const text = await file.text();
-            const parsed = JSON.parse(text);
-            const nextProjects = Array.isArray(parsed)
-              ? parsed
-              : (Array.isArray(parsed?.projects) ? parsed.projects : null);
-            if (!Array.isArray(nextProjects)) throw new Error("프로젝트 배열 형식이 아닙니다.");
-            const nextAdminLogs = Array.isArray(parsed?.adminLogs) ? parsed.adminLogs : [];
-            onRestore({
-              projects: normalizeProjects(nextProjects),
-              adminLogs: normalizeAdminLogs(nextAdminLogs)
-            });
-            window.alert("백업 데이터 복원이 완료되었습니다.");
+            const isCsv = file.name.toLowerCase().endsWith(".csv") || file.type.includes("csv");
+
+            if (isCsv) {
+              const restored = projectFromBackupCsv(text);
+              const restoredProject = normalizeProject(restored.project);
+              const restoredProjectId = String(restoredProject.id);
+              const nextProjects = [
+                ...projects.filter((project) => String(project.id) !== restoredProjectId),
+                restoredProject
+              ];
+              const nextAdminLogs = [
+                ...adminLogs.filter((log) => String(log?.projectId ?? "") !== restoredProjectId),
+                ...normalizeAdminLogs(restored.adminLogs)
+              ];
+              onRestore({
+                projects: normalizeProjects(nextProjects),
+                adminLogs: normalizeAdminLogs(nextAdminLogs),
+                selectedId: restoredProject.id
+              });
+              window.alert("CSV 프로젝트 백업 복원이 완료되었습니다.");
+            } else {
+              const parsed = JSON.parse(text);
+              const nextProjects = Array.isArray(parsed)
+                ? parsed
+                : (Array.isArray(parsed?.projects) ? parsed.projects : null);
+              if (!Array.isArray(nextProjects)) throw new Error("프로젝트 배열 형식이 아닙니다.");
+              const nextAdminLogs = Array.isArray(parsed?.adminLogs) ? parsed.adminLogs : [];
+              onRestore({
+                projects: normalizeProjects(nextProjects),
+                adminLogs: normalizeAdminLogs(nextAdminLogs)
+              });
+              window.alert("JSON 백업 데이터 복원이 완료되었습니다.");
+            }
           } catch (error) {
             window.alert(`복원 실패: ${String(error.message || error)}`);
           } finally {
@@ -1440,11 +1533,17 @@ function BasicInfoTab({ project, onSave }) {
 }
 
 function AdvisorTab({ project, onSaveLog }) {
+  const emptyForm = {
+    name: "",
+    datetime: "",
+    content: ""
+  };
   const [form, setForm] = useState({
     name: "",
     datetime: "",
     content: ""
   });
+  const [editingId, setEditingId] = useState(null);
   const logs = project.advisorLog || [];
 
   const save = () => {
@@ -1455,14 +1554,30 @@ function AdvisorTab({ project, onSaveLog }) {
       window.alert("이름, 일시, 대화내용을 모두 입력해주세요.");
       return;
     }
-    onSaveLog({ id: Date.now(), name, datetime, content });
-    setForm({ name: "", datetime: "", content: "" });
+    onSaveLog({
+      id: editingId || Date.now(),
+      name,
+      datetime,
+      content,
+      updatedAt: editingId ? new Date().toISOString() : undefined
+    });
+    setEditingId(null);
+    setForm(emptyForm);
+  };
+
+  const startEdit = (item) => {
+    setEditingId(item.id);
+    setForm({
+      name: item.name || "",
+      datetime: item.datetime || "",
+      content: item.content || ""
+    });
   };
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 14 }}>
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
-        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10 }}>자문약사 의견 입력</div>
+        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10 }}>{editingId ? "자문약사 의견 수정" : "자문약사 의견 입력"}</div>
         <div style={{ display: "grid", gap: 8 }}>
           <div>
             <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>이름</label>
@@ -1476,12 +1591,26 @@ function AdvisorTab({ project, onSaveLog }) {
             <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>대화내용</label>
             <textarea rows={5} value={form.content} onChange={(event) => setForm((prev) => ({ ...prev, content: event.target.value }))} style={{ ...inputStyle, resize: "vertical" }} />
           </div>
-          <button onClick={save} style={primaryButton}>저장</button>
+          <button onClick={save} style={primaryButton}>{editingId ? "수정 저장" : "저장"}</button>
+          {editingId && (
+            <button
+              onClick={() => {
+                setEditingId(null);
+                setForm(emptyForm);
+              }}
+              style={subtleButton}
+            >
+              수정 취소
+            </button>
+          )}
         </div>
       </div>
 
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
-        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10 }}>자문약사 기록 ({logs.length}건)</div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={{ fontSize: 15, fontWeight: 800 }}>자문약사 기록 ({logs.length}건)</div>
+          <div style={{ fontSize: 12, color: "#64748b" }}>CSV는 백업/복원 탭에서 일괄 내보내기</div>
+        </div>
         <div style={{ display: "grid", gap: 8 }}>
           {[...logs].reverse().map((log) => (
             <div key={log.id} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 10 }}>
@@ -1490,6 +1619,9 @@ function AdvisorTab({ project, onSaveLog }) {
                 <div style={{ fontSize: 11, color: "#64748b" }}>{log.datetime}</div>
               </div>
               <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{log.content}</div>
+              <div style={{ marginTop: 8 }}>
+                <button onClick={() => startEdit(log)} style={subtleButton}>수정</button>
+              </div>
             </div>
           ))}
           {logs.length === 0 && (
@@ -2242,15 +2374,16 @@ export default function PmsApp() {
               <AdvisorTab
                 project={selectedProject}
                 onSaveLog={(item) => {
+                  const exists = (selectedProject.advisorLog || []).some((log) => String(log.id) === String(item.id));
                   updateProject(selectedProject.id, (project) => ({
                     ...project,
-                    advisorLog: [...(project.advisorLog || []), item]
+                    advisorLog: upsertById(project.advisorLog || [], item)
                   }));
                   appendAdminLog({
-                    type: "advisor_log_add",
+                    type: exists ? "advisor_log_update" : "advisor_log_add",
                     projectId: selectedProject.id,
                     projectName: selectedProject.name,
-                    reason: `${item.name} 의견 등록 (${item.datetime})`
+                    reason: `${item.name} 의견 ${exists ? "수정" : "등록"} (${item.datetime})`
                   });
                 }}
               />
@@ -2260,15 +2393,16 @@ export default function PmsApp() {
               <CommunicationTab
                 project={selectedProject}
                 onSaveLog={(item) => {
+                  const exists = (selectedProject.communicationLog || []).some((log) => String(log.id) === String(item.id));
                   updateProject(selectedProject.id, (project) => ({
                     ...project,
-                    communicationLog: [...(project.communicationLog || []), item]
+                    communicationLog: upsertById(project.communicationLog || [], item)
                   }));
                   appendAdminLog({
-                    type: "communication_log_add",
+                    type: exists ? "communication_log_update" : "communication_log_add",
                     projectId: selectedProject.id,
                     projectName: selectedProject.name,
-                    reason: `${item.company} 소통 기록 등록 (${item.date})`
+                    reason: `${item.company} 소통 기록 ${exists ? "수정" : "등록"} (${item.date})`
                   });
                 }}
               />
@@ -2331,15 +2465,16 @@ export default function PmsApp() {
               <DecisionTab
                 project={selectedProject}
                 onSaveLog={(item) => {
+                  const exists = (selectedProject.decisionLog || []).some((log) => String(log.id) === String(item.id));
                   updateProject(selectedProject.id, (project) => ({
                     ...project,
-                    decisionLog: [...(project.decisionLog || []), item]
+                    decisionLog: upsertById(project.decisionLog || [], item)
                   }));
                   appendAdminLog({
-                    type: "decision_log_add",
+                    type: exists ? "decision_log_update" : "decision_log_add",
                     projectId: selectedProject.id,
                     projectName: selectedProject.name,
-                    reason: `${item.decider} 결정 등록: ${item.title}`
+                    reason: `${item.decider} 결정 ${exists ? "수정" : "등록"}: ${item.title}`
                   });
                 }}
               />
@@ -2368,11 +2503,12 @@ export default function PmsApp() {
                 adminLogs={adminLogs}
                 selectedProject={selectedProject}
                 isAdmin={isAdmin}
-                onRestore={({ projects: nextProjects, adminLogs: nextAdminLogs }) => {
+                onRestore={({ projects: nextProjects, adminLogs: nextAdminLogs, selectedId: nextSelectedId }) => {
                   if (!isAdmin) return;
                   setProjects(normalizeProjects(nextProjects));
                   setAdminLogs(normalizeAdminLogs(nextAdminLogs));
-                  if (nextProjects.length > 0) setSelectedId(nextProjects[0].id);
+                  if (nextSelectedId) setSelectedId(nextSelectedId);
+                  else if (nextProjects.length > 0) setSelectedId(nextProjects[0].id);
                   else setSelectedId(null);
                 }}
               />
