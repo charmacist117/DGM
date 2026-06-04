@@ -1,23 +1,80 @@
-# 카드 무이자할부 정책 조회
+# PharmaDev PMS (Vercel Persistent Edition)
 
-카드사별 무이자할부 안내 페이지와 PG사의 월간 통합 공지를 수집해 현재 적용 가능한 할부 기간을 보여주는 Vercel용 앱입니다.
+이 프로젝트는 기존 단일 HTML 기반 PMS를 운영형 구조로 전환한 버전입니다.
 
-## 실행
+## 변경 포인트
 
-정적 화면은 `index.html`을 열어서 확인할 수 있습니다. API는 Vercel 배포 후 `/api/policies`에서 동작합니다.
+- `localStorage only` 저장에서 `서버 DB + 로컬 캐시` 이중 저장으로 변경
+- Vercel 배포 시 `새로고침/브라우저 재실행/다른 관리자 접속`에서도 데이터 유지
+- 프로젝트별 `업체 소통 기록` 및 `대표/부대표 의사결정 기록` 관리
+- `JSON 전체 백업`, `JSON 복원`, `CSV 내보내기` 제공
+- 유지보수를 위해 화면/일정엔진/저장소를 모듈 분리
 
-## Vercel 배포
+## 기술 구조
 
-1. 이 폴더를 GitHub 저장소로 올립니다.
-2. Vercel에서 새 프로젝트를 만들고 저장소를 연결합니다.
-3. Framework Preset은 `Other` 또는 자동 감지를 사용합니다.
-4. 배포 후 첫 화면과 `/api/policies`가 카드사별 수집 결과를 반환하는지 확인합니다.
+- Frontend: Next.js App Router (`app/`, `components/`)
+- API: `app/api/projects/route.js`
+- Database: PostgreSQL (`lib/server/db.js`, `lib/server/projectStore.js`)
+- Backup: JSON/CSV export-import (`lib/pms/exporters.js`)
 
-## 수집 방식
+## 로컬 실행
 
-- `lib/cardSources.js`에 카드사별 공식/보조 URL을 둡니다.
-- `/api/policies`는 각 URL의 HTML을 가져와 텍스트로 바꾼 뒤 기간, 무이자 개월, 부분무이자, 최소 결제금액을 추출합니다.
-- 화면에서는 하나의 업종 드롭다운으로 전체 카드사의 업종별 정책을 비교하며, `lib/industryPolicies.js`의 업종별 보정값을 함께 표시합니다.
-- Vercel Cron은 매일 00:00 KST(UTC 15:00)에 API를 호출해 최신 페이지를 미리 데워 둡니다.
+```bash
+npm install
+npm run dev
+```
 
-카드사 페이지 구조가 바뀌거나 이미지/PDF로만 공지되는 경우 자동 추출이 제한될 수 있습니다. 이때 앱에는 원문 링크와 수집 상태가 함께 표시됩니다.
+## 필수 환경변수
+
+`.env.local` 파일에 아래 중 하나 방식으로 설정
+
+### 방식 A) 단일 URL
+
+```bash
+DATABASE_URL=postgres://...
+POSTGRES_URL=postgres://...
+POSTGRES_URL_NON_POOLING=postgres://...
+POSTGRES_PRISMA_URL=postgres://...
+```
+
+### 방식 B) 개별 PG 변수
+
+```bash
+PGHOST=
+PGPORT=
+PGUSER=
+PGPASSWORD=
+PGDATABASE=
+POSTGRES_HOST=
+POSTGRES_PORT=
+POSTGRES_USER=
+POSTGRES_PASSWORD=
+POSTGRES_DATABASE=
+```
+
+## Vercel 배포 가이드
+
+1. Vercel 프로젝트에 Git 연결
+2. Vercel Marketplace에서 Postgres(예: Neon) 연동
+3. 환경변수(`DATABASE_URL` 또는 `PG*`)가 주입됐는지 확인
+4. 배포
+
+첫 실행 시 `pms_state` 테이블이 자동 생성되고 초기 프로젝트가 시드됩니다.
+
+## 운영 참고
+
+- 서버 저장 실패 시에도 로컬 캐시에 임시 저장됩니다.
+- 동기화 상태는 화면 우상단 배지에서 확인할 수 있습니다.
+- 장기 보관이 필요하면 정기적으로 `전체 JSON 백업` 파일을 외부 저장소에 보관하세요.
+- `서버 저장 실패: 로컬 캐시에만 저장됨`이 보이면 Vercel 환경변수 적용 범위(Production/Preview)와 재배포 여부를 먼저 확인하세요.
+
+## 최근 UI 변경사항
+
+- `제품 개발` 하위 부수 일정(제품명 선정/포장 단위 선정/관능도 테스트/패키지 디자인)을 **태스크 관리 표의 제품 개발 라인 바로 아래**에서 직접 편집하도록 통합
+- 프로젝트 생성은 팝업 입력 대신 **신규 페이지**(`/projects/new`)에서 일괄 입력
+- 담당자 입력을 `PM`, `AM`으로 분리하고, 카테고리는 드롭다운, 시작일은 달력 선택 방식으로 구성
+- 상단 즉시 수정 방식 대신 `기본정보 수정` 탭에서 프로젝트명/PM/AM/카테고리/시작일 수정
+- 기본정보 저장 시 변경 이력(`changeLog`) 자동 기록
+- `태스크 관리` 우측에 `자문약사 의견` 탭 추가(이름/일시/대화내용 저장 및 기록)
+- 기본 샘플 프로젝트(김개발/이기획/박출시) 제거
+- 프로젝트 삭제 기능 추가(삭제 시 확인창 표시)
