@@ -120,6 +120,10 @@ export default function ProjectSidebar({
           </div>
         ))}
       </div>
+
+      <div style={{ padding: "8px 10px 2px", borderTop: "1px solid #1e293b", color: "#64748b", fontSize: 10, fontWeight: 700, letterSpacing: 0 }}>
+        made by JB, Charmacist
+      </div>
     </aside>
   );
 }
