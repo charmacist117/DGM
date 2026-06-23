@@ -5,16 +5,18 @@ import { useRouter } from "next/navigation";
 import ProjectSidebar from "@/components/ProjectSidebar";
 import {
   CATEGORIES,
+  DRAFT_CHECKLIST_FIELDS,
   PHASES,
   PHASE_CATS,
   STATUS_COLOR,
   STATUS_LABEL,
   getDefaultDevelopSubTimeline,
-  getInitialProjects
+  getInitialProjects,
+  normalizeDraftChecklist
 } from "@/lib/pms/defaults";
 import { TODAY, addDays, diff, fmt, toStr } from "@/lib/pms/date";
 import { calcSchedule } from "@/lib/pms/schedule";
-import { downloadFile, projectFromBackupCsv, projectToBackupCsv } from "@/lib/pms/exporters";
+import { downloadFile, projectFromBackupCsv, projectToBackupCsv, projectsToCsvBackupZip } from "@/lib/pms/exporters";
 
 const LOCAL_CACHE_KEY = "pharmadev_pms_cache_v2";
 const DEVELOP_TASK_ID = "develop";
@@ -287,7 +289,8 @@ function normalizeProject(project) {
     decisionLog: Array.isArray(project.decisionLog) ? project.decisionLog : [],
     advisorLog: Array.isArray(project.advisorLog) ? project.advisorLog : [],
     stageCheckLog: Array.isArray(project.stageCheckLog) ? project.stageCheckLog : [],
-    changeLog: Array.isArray(project.changeLog) ? project.changeLog : []
+    changeLog: Array.isArray(project.changeLog) ? project.changeLog : [],
+    draftChecklist: normalizeDraftChecklist(project.draftChecklist)
   };
 }
 
@@ -326,6 +329,14 @@ function errorMessage(error, fallback = "알 수 없는 오류") {
   if (typeof error === "string") return error;
   if (error instanceof Error) return error.message || fallback;
   return String(error?.message || error || fallback);
+}
+
+function summarizeDraftChecklistChanges(before = {}, after = {}) {
+  const prev = normalizeDraftChecklist(before);
+  const next = normalizeDraftChecklist(after);
+  return DRAFT_CHECKLIST_FIELDS
+    .filter((field) => (prev[field.key] || "").trim() !== (next[field.key] || "").trim())
+    .map((field) => `${field.label} 수정`);
 }
 
 function useProjectsStore() {
@@ -1240,13 +1251,40 @@ function CommunicationTab({ project, onSaveLog }) {
   );
 }
 
+const DECISION_IMPACT_OPTIONS = ["낮음", "보통", "높음", "매우 높음"];
+const DECISION_STATUS_OPTIONS = ["검토 요청", "결정 완료", "보류/재검토", "반려", "후속 확인 필요"];
+
+function normalizeDecisionImpact(value) {
+  if (value === "크리티컬") return "매우 높음";
+  if (DECISION_IMPACT_OPTIONS.includes(value)) return value;
+  return value || "보통";
+}
+
+function normalizeDecisionStatus(value) {
+  if (value === "의사결정 완료") return "결정 완료";
+  if (value === "검토중") return "검토 요청";
+  if (value === "보류") return "보류/재검토";
+  if (DECISION_STATUS_OPTIONS.includes(value)) return value;
+  return value || "결정 완료";
+}
+
+function DecisionField({ label, helper, children }) {
+  return (
+    <div>
+      <label style={{ display: "block", fontSize: 12, color: "#334155", fontWeight: 800, marginBottom: 4 }}>{label}</label>
+      {children}
+      {helper && <div style={{ fontSize: 11, color: "#64748b", marginTop: 3 }}>{helper}</div>}
+    </div>
+  );
+}
+
 function DecisionTab({ project, onSaveLog }) {
   const emptyForm = {
     date: TODAY,
     decider: "대표",
     title: "",
     impact: "보통",
-    status: "의사결정 완료",
+    status: "결정 완료",
     description: ""
   };
   const [form, setForm] = useState({
@@ -1254,7 +1292,7 @@ function DecisionTab({ project, onSaveLog }) {
     decider: "대표",
     title: "",
     impact: "보통",
-    status: "의사결정 완료",
+    status: "결정 완료",
     description: ""
   });
   const [editingId, setEditingId] = useState(null);
@@ -1280,8 +1318,8 @@ function DecisionTab({ project, onSaveLog }) {
       date: item.date || TODAY,
       decider: item.decider || "대표",
       title: item.title || "",
-      impact: item.impact || "보통",
-      status: item.status || "의사결정 완료",
+      impact: normalizeDecisionImpact(item.impact),
+      status: normalizeDecisionStatus(item.status),
       description: item.description || ""
     });
   };
@@ -1290,19 +1328,31 @@ function DecisionTab({ project, onSaveLog }) {
     <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 14 }}>
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
         <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10 }}>{editingId ? "대표/부대표 의사결정 수정" : "대표/부대표 의사결정 기록"}</div>
-        <div style={{ display: "grid", gap: 8 }}>
-          <input type="date" value={form.date} onChange={(e) => setForm((prev) => ({ ...prev, date: e.target.value }))} style={inputStyle} />
-          <select value={form.decider} onChange={(e) => setForm((prev) => ({ ...prev, decider: e.target.value }))} style={inputStyle}>
-            {["대표", "부대표", "공동결정"].map((value) => <option key={value}>{value}</option>)}
-          </select>
-          <input placeholder="안건명*" value={form.title} onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))} style={inputStyle} />
-          <select value={form.impact} onChange={(e) => setForm((prev) => ({ ...prev, impact: e.target.value }))} style={inputStyle}>
-            {["낮음", "보통", "높음", "크리티컬"].map((value) => <option key={value}>{value}</option>)}
-          </select>
-          <select value={form.status} onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))} style={inputStyle}>
-            {["검토중", "의사결정 완료", "보류"].map((value) => <option key={value}>{value}</option>)}
-          </select>
-          <textarea rows={5} placeholder="의사결정 배경/결론/조건*" value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} style={{ ...inputStyle, resize: "vertical" }} />
+        <div style={{ display: "grid", gap: 10 }}>
+          <DecisionField label="결정일" helper="대표/부대표가 검토하거나 결정을 남긴 날짜입니다.">
+            <input type="date" value={form.date} onChange={(e) => setForm((prev) => ({ ...prev, date: e.target.value }))} style={inputStyle} />
+          </DecisionField>
+          <DecisionField label="결정권자" helper="최종 판단 주체를 선택합니다.">
+            <select value={form.decider} onChange={(e) => setForm((prev) => ({ ...prev, decider: e.target.value }))} style={inputStyle}>
+              {["대표", "부대표", "공동결정"].map((value) => <option key={value}>{value}</option>)}
+            </select>
+          </DecisionField>
+          <DecisionField label="안건명 *" helper="결정해야 하는 주제를 한 줄로 적습니다.">
+            <input placeholder="예: 이부프로펜 200/400 및 용량 결정" value={form.title} onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))} style={inputStyle} />
+          </DecisionField>
+          <DecisionField label="사업 영향도" helper="일정, 비용, 허가, 판매 전략에 미치는 영향 수준입니다.">
+            <select value={form.impact} onChange={(e) => setForm((prev) => ({ ...prev, impact: e.target.value }))} style={inputStyle}>
+              {DECISION_IMPACT_OPTIONS.map((value) => <option key={value}>{value}</option>)}
+            </select>
+          </DecisionField>
+          <DecisionField label="처리상태" helper="안건이 현재 검토 중인지, 결정 완료인지, 후속 확인이 필요한지 표시합니다.">
+            <select value={form.status} onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))} style={inputStyle}>
+              {DECISION_STATUS_OPTIONS.map((value) => <option key={value}>{value}</option>)}
+            </select>
+          </DecisionField>
+          <DecisionField label="결정 내용 및 요청사항 *" helper="결정 배경, 결론, 조건, 후속 요청사항을 함께 남깁니다.">
+            <textarea rows={5} placeholder="예: 참여약사 핵심지부장 간담회 참석자에게 제품 관련 성선언 요청 진행" value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} style={{ ...inputStyle, resize: "vertical" }} />
+          </DecisionField>
           <button onClick={save} style={primaryButton}>{editingId ? "수정 저장" : "저장"}</button>
           {editingId && (
             <button
@@ -1328,7 +1378,12 @@ function DecisionTab({ project, onSaveLog }) {
             <div key={item.id} style={{ border: "1px solid #e2e8f0", borderRadius: 8, background: "#fff", overflow: "hidden" }}>
               <div style={{ padding: "8px 10px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between" }}>
                 <div style={{ fontWeight: 800 }}>{item.title}</div>
-                <div style={{ fontSize: 11, color: "#64748b" }}>{item.decider} · {fmt(item.date)}</div>
+                <div style={{ fontSize: 11, color: "#64748b" }}>결정일 {fmt(item.date)}</div>
+              </div>
+              <div style={{ padding: "8px 10px", display: "flex", gap: 6, flexWrap: "wrap", borderBottom: "1px solid #f1f5f9" }}>
+                <span style={{ fontSize: 11, color: "#334155", background: "#e0f2fe", borderRadius: 999, padding: "3px 8px", fontWeight: 700 }}>결정권자: {item.decider || "-"}</span>
+                <span style={{ fontSize: 11, color: "#334155", background: "#fef3c7", borderRadius: 999, padding: "3px 8px", fontWeight: 700 }}>사업 영향도: {normalizeDecisionImpact(item.impact)}</span>
+                <span style={{ fontSize: 11, color: "#334155", background: "#dcfce7", borderRadius: 999, padding: "3px 8px", fontWeight: 700 }}>처리상태: {normalizeDecisionStatus(item.status)}</span>
               </div>
               <div style={{ padding: 10, fontSize: 13, whiteSpace: "pre-wrap" }}>{item.description}</div>
               <div style={{ padding: "0 10px 10px" }}>
@@ -1360,6 +1415,11 @@ function BackupTab({ projects, adminLogs, selectedProject, onRestore, isAdmin })
     downloadFile(`${selectedProject.name}_project_backup.csv`, csv, "text/csv;charset=utf-8;");
   };
 
+  const exportCsvWorkbook = () => {
+    const zip = projectsToCsvBackupZip(projects);
+    downloadFile(`Charmacist_PB_CSV_backup_${toStr(new Date())}.zip`, zip, "application/zip");
+  };
+
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
@@ -1369,11 +1429,12 @@ function BackupTab({ projects, adminLogs, selectedProject, onRestore, isAdmin })
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button onClick={exportAllJson} style={primaryButton}>전체 JSON 백업</button>
+          <button onClick={exportCsvWorkbook} style={subtleButton}>전체 프로젝트/체크리스트 CSV 묶음</button>
           <button onClick={exportProjectCsv} style={subtleButton}>현재 프로젝트 전체 CSV 백업</button>
           {isAdmin && <button onClick={() => fileInputRef.current?.click()} style={subtleButton}>JSON/CSV 백업파일 불러오기</button>}
         </div>
         <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>
-          CSV 백업에는 태스크, 자문약사 의견, 업체 소통 기록, 의사결정 기록, 변경 이력, 프로젝트 관련 이력 로그가 포함됩니다.
+          CSV 묶음에는 전체 프로젝트 요약 CSV와 사전 체크리스트 CSV가 포함됩니다. 현재 프로젝트 전체 CSV 백업은 복원용 원장 데이터입니다.
         </div>
         {!isAdmin && <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>복원 기능은 admin 권한에서만 가능합니다.</div>}
       </div>
@@ -1434,22 +1495,36 @@ function BackupTab({ projects, adminLogs, selectedProject, onRestore, isAdmin })
 function BasicInfoTab({ project, onSave }) {
   const [form, setForm] = useState({
     name: project.name || "",
+    desc: project.desc || "",
     pmName: project.pmName || "",
     amName: project.amName || "",
     category: project.category || CATEGORIES[0],
-    start: project.start || TODAY
+    start: project.start || TODAY,
+    draftChecklist: normalizeDraftChecklist(project.draftChecklist)
   });
   const categoryOptions = CATEGORIES.includes(form.category) ? CATEGORIES : [form.category, ...CATEGORIES];
 
   useEffect(() => {
     setForm({
       name: project.name || "",
+      desc: project.desc || "",
       pmName: project.pmName || "",
       amName: project.amName || "",
       category: project.category || CATEGORIES[0],
-      start: project.start || TODAY
+      start: project.start || TODAY,
+      draftChecklist: normalizeDraftChecklist(project.draftChecklist)
     });
-  }, [project.id, project.name, project.pmName, project.amName, project.category, project.start]);
+  }, [project.id, project.name, project.desc, project.pmName, project.amName, project.category, project.start, project.draftChecklist]);
+
+  const updateChecklist = (key, value) => {
+    setForm((prev) => ({
+      ...prev,
+      draftChecklist: {
+        ...prev.draftChecklist,
+        [key]: value
+      }
+    }));
+  };
 
   const metaLogs = (project.changeLog || [])
     .filter((log) => log?.type === "project_meta")
@@ -1460,7 +1535,7 @@ function BasicInfoTab({ project, onSave }) {
     <div style={{ display: "grid", gap: 12 }}>
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
         <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10 }}>프로젝트 기본정보 수정</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
           <div>
             <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>프로젝트명</label>
             <input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} style={inputStyle} />
@@ -1487,9 +1562,39 @@ function BasicInfoTab({ project, onSave }) {
           </div>
         </div>
         <div style={{ marginTop: 10 }}>
+          <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>기안 요약</label>
+          <textarea
+            rows={3}
+            value={form.desc}
+            onChange={(event) => setForm((prev) => ({ ...prev, desc: event.target.value }))}
+            style={{ ...inputStyle, resize: "vertical" }}
+          />
+        </div>
+        <div style={{ marginTop: 14, borderTop: "1px solid #e2e8f0", paddingTop: 14 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 4 }}>사전 체크리스트 및 기안내용</div>
+          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+            수정 저장 시 변경된 항목이 기본정보 변경 이력에 남습니다.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
+            {DRAFT_CHECKLIST_FIELDS.map((field) => (
+              <div key={field.key}>
+                <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>{field.label}</label>
+                <textarea
+                  rows={4}
+                  value={form.draftChecklist[field.key] || ""}
+                  onChange={(event) => updateChecklist(field.key, event.target.value)}
+                  placeholder={field.placeholder}
+                  style={{ ...inputStyle, resize: "vertical", minHeight: 88 }}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ marginTop: 10 }}>
           <button
             onClick={() => {
               const nextName = form.name.trim();
+              const nextDesc = form.desc.trim();
               const nextPm = form.pmName.trim();
               const nextAm = form.amName.trim();
               if (!nextName) {
@@ -1502,10 +1607,12 @@ function BasicInfoTab({ project, onSave }) {
               }
               onSave({
                 name: nextName,
+                desc: nextDesc,
                 pmName: nextPm,
                 amName: nextAm,
                 category: form.category,
-                start: form.start || TODAY
+                start: form.start || TODAY,
+                draftChecklist: normalizeDraftChecklist(form.draftChecklist)
               });
             }}
             style={primaryButton}
@@ -2411,33 +2518,39 @@ export default function PmsApp() {
             {tab === "basic" && (
               <BasicInfoTab
                 project={selectedProject}
-                onSave={({ name, pmName, amName, category, start }) => {
+                onSave={({ name, desc, pmName, amName, category, start, draftChecklist }) => {
                   const historyParts = [];
                   if (selectedProject.name !== name) historyParts.push(`프로젝트명 ${selectedProject.name} -> ${name}`);
+                  if ((selectedProject.desc || "") !== desc) historyParts.push("기안 요약 수정");
                   if ((selectedProject.pmName || "") !== pmName) historyParts.push(`PM: ${selectedProject.pmName || "-"} -> ${pmName || "-"}`);
                   if ((selectedProject.amName || "") !== amName) historyParts.push(`AM: ${selectedProject.amName || "-"} -> ${amName || "-"}`);
                   if (selectedProject.category !== category) historyParts.push(`카테고리: ${selectedProject.category} -> ${category}`);
                   if (selectedProject.start !== start) historyParts.push(`시작일 ${selectedProject.start} -> ${start}`);
+                  historyParts.push(...summarizeDraftChecklistChanges(selectedProject.draftChecklist, draftChecklist));
                   if (historyParts.length === 0) return;
 
                   updateProject(selectedProject.id, (project) => {
                     const historyParts = [];
                     if (project.name !== name) historyParts.push(`프로젝트명 ${project.name} -> ${name}`);
+                    if ((project.desc || "") !== desc) historyParts.push("기안 요약 수정");
                     if ((project.pmName || "") !== pmName) historyParts.push(`PM: ${project.pmName || "-"} -> ${pmName || "-"}`);
                     if ((project.amName || "") !== amName) historyParts.push(`AM: ${project.amName || "-"} -> ${amName || "-"}`);
                     if (project.category !== category) historyParts.push(`카테고리: ${project.category} -> ${category}`);
                     if (project.start !== start) historyParts.push(`시작일 ${project.start} -> ${start}`);
+                    historyParts.push(...summarizeDraftChecklistChanges(project.draftChecklist, draftChecklist));
                     if (historyParts.length === 0) return project;
 
                     const manager = [pmName, amName].filter(Boolean).join(" / ") || "미정";
                     return {
                       ...project,
                       name,
+                      desc,
                       pmName,
                       amName,
                       manager,
                       category,
                       start,
+                      draftChecklist: normalizeDraftChecklist(draftChecklist),
                       changeLog: [
                         ...(project.changeLog || []),
                         {

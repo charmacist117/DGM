@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CATEGORIES, createProjectFromForm } from "@/lib/pms/defaults";
+import {
+  CATEGORIES,
+  DRAFT_CHECKLIST_FIELDS,
+  createEmptyDraftChecklist,
+  createProjectFromForm
+} from "@/lib/pms/defaults";
 import { TODAY } from "@/lib/pms/date";
 
 const fieldStyle = {
@@ -11,6 +16,13 @@ const fieldStyle = {
   borderRadius: 8,
   border: "1px solid #e2e8f0",
   fontSize: 14,
+  background: "#fff"
+};
+
+const sectionStyle = {
+  border: "1px solid #e2e8f0",
+  borderRadius: 10,
+  padding: 14,
   background: "#fff"
 };
 
@@ -44,8 +56,19 @@ export default function NewProjectPage() {
     pmName: "",
     amName: "",
     category: CATEGORIES[0],
-    start: TODAY
+    start: TODAY,
+    draftChecklist: createEmptyDraftChecklist()
   });
+
+  const updateChecklist = (key, value) => {
+    setForm((prev) => ({
+      ...prev,
+      draftChecklist: {
+        ...prev.draftChecklist,
+        [key]: value
+      }
+    }));
+  };
 
   const save = async () => {
     const name = form.name.trim();
@@ -82,7 +105,8 @@ export default function NewProjectPage() {
         pmName,
         amName,
         category: form.category,
-        start: form.start || TODAY
+        start: form.start || TODAY,
+        draftChecklist: form.draftChecklist
       });
 
       const createLog = {
@@ -90,7 +114,7 @@ export default function NewProjectPage() {
         type: "project_create",
         projectId: id,
         projectName: newProject.name,
-        reason: `새 프로젝트 생성 (PM: ${pmName || "-"}, AM: ${amName || "-"}, 카테고리: ${form.category})`,
+        reason: `신규 프로젝트 기안 생성 (PM: ${pmName || "-"}, AM: ${amName || "-"}, 카테고리: ${form.category})`,
         actor: "관리자",
         createdAt: new Date().toISOString()
       };
@@ -117,49 +141,79 @@ export default function NewProjectPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#f1f5f9", padding: 24 }}>
-      <div style={{ maxWidth: 920, margin: "0 auto", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden" }}>
+      <div style={{ maxWidth: 980, margin: "0 auto", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden" }}>
         <div style={{ padding: "16px 18px", borderBottom: "1px solid #e2e8f0", background: "#f8fafc" }}>
-          <div style={{ fontSize: 19, fontWeight: 900, color: "#0f172a" }}>새 프로젝트 생성</div>
+          <div style={{ fontSize: 19, fontWeight: 900, color: "#0f172a" }}>새 프로젝트 기안 작성</div>
           <div style={{ fontSize: 12, color: "#64748b", marginTop: 3 }}>
-            프로젝트명, 담당자(PM/AM), 카테고리, 시작일을 입력해 프로젝트를 생성합니다.
+            프로젝트 시작 전 기본정보와 선정/판매/허가/물량/생산 체크리스트를 먼저 작성합니다.
           </div>
         </div>
 
-        <div style={{ padding: 18, display: "grid", gap: 12 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div>
-              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>프로젝트명*</label>
-              <input value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} style={fieldStyle} />
+        <div style={{ padding: 18, display: "grid", gap: 14 }}>
+          <section style={sectionStyle}>
+            <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10 }}>기본정보</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>프로젝트명 *</label>
+                <input value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} style={fieldStyle} />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>카테고리 *</label>
+                <select value={form.category} onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))} style={fieldStyle}>
+                  {CATEGORIES.map((category) => (
+                    <option key={category} value={category}>{category}</option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div>
-              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>카테고리 *</label>
-              <select value={form.category} onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))} style={fieldStyle}>
-                {CATEGORIES.map((category) => (
-                  <option key={category} value={category}>{category}</option>
-                ))}
-              </select>
-            </div>
-          </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-            <div>
-              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>PM</label>
-              <input value={form.pmName} onChange={(e) => setForm((p) => ({ ...p, pmName: e.target.value }))} style={fieldStyle} />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginTop: 12 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>PM</label>
+                <input value={form.pmName} onChange={(e) => setForm((p) => ({ ...p, pmName: e.target.value }))} style={fieldStyle} />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>AM</label>
+                <input value={form.amName} onChange={(e) => setForm((p) => ({ ...p, amName: e.target.value }))} style={fieldStyle} />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>시작일 *</label>
+                <input type="date" value={form.start} onChange={(e) => setForm((p) => ({ ...p, start: e.target.value }))} style={fieldStyle} />
+              </div>
             </div>
-            <div>
-              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>AM</label>
-              <input value={form.amName} onChange={(e) => setForm((p) => ({ ...p, amName: e.target.value }))} style={fieldStyle} />
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>시작일*</label>
-              <input type="date" value={form.start} onChange={(e) => setForm((p) => ({ ...p, start: e.target.value }))} style={fieldStyle} />
-            </div>
-          </div>
 
-          <div>
-            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>설명</label>
-            <textarea rows={4} value={form.desc} onChange={(e) => setForm((p) => ({ ...p, desc: e.target.value }))} style={{ ...fieldStyle, resize: "vertical" }} />
-          </div>
+            <div style={{ marginTop: 12 }}>
+              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>기안 요약</label>
+              <textarea
+                rows={3}
+                value={form.desc}
+                onChange={(e) => setForm((p) => ({ ...p, desc: e.target.value }))}
+                placeholder="프로젝트 목적, 제안 배경, 기대 효과를 간단히 적어주세요."
+                style={{ ...fieldStyle, resize: "vertical" }}
+              />
+            </div>
+          </section>
+
+          <section style={sectionStyle}>
+            <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 4 }}>사전 체크리스트 및 기안내용</div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 12 }}>
+              작성한 내용은 프로젝트 기본정보에서 추후 수정할 수 있으며, 수정 시 변경 이력이 남습니다.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
+              {DRAFT_CHECKLIST_FIELDS.map((field) => (
+                <div key={field.key}>
+                  <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>{field.label}</label>
+                  <textarea
+                    rows={4}
+                    value={form.draftChecklist[field.key] || ""}
+                    onChange={(e) => updateChecklist(field.key, e.target.value)}
+                    placeholder={field.placeholder}
+                    style={{ ...fieldStyle, resize: "vertical", minHeight: 92 }}
+                  />
+                </div>
+              ))}
+            </div>
+          </section>
 
           {error && (
             <div style={{ fontSize: 12, color: "#dc2626", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "8px 10px" }}>
@@ -167,10 +221,10 @@ export default function NewProjectPage() {
             </div>
           )}
 
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2 }}>
             <button onClick={() => router.push("/")} style={buttonGhost}>목록으로</button>
             <button onClick={save} disabled={saving} style={{ ...buttonPrimary, opacity: saving ? 0.7 : 1 }}>
-              {saving ? "생성 중..." : "프로젝트 생성"}
+              {saving ? "생성 중..." : "기안 저장 후 프로젝트 생성"}
             </button>
           </div>
         </div>
