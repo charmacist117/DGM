@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { diff } from "@/lib/pms/date";
 
 export default function ProjectSidebar({
@@ -11,12 +12,17 @@ export default function ProjectSidebar({
   goToProjectLogsPage,
   groupedProjects,
   projectBuckets,
-  moveProjectToBucket,
+  reorderProject,
   selectedId,
   openProject,
   formatOwners,
   TODAY
 }) {
+  const [draggingProjectId, setDraggingProjectId] = useState(null);
+  const [dragOverTarget, setDragOverTarget] = useState(null);
+
+  const readDraggedProjectId = (event) => event.dataTransfer.getData("text/project-id");
+
   return (
     <aside style={{ width: 280, background: "#0f172a", color: "#fff", padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -75,12 +81,24 @@ export default function ProjectSidebar({
         {projectBuckets.map((bucket) => (
           <div
             key={bucket.id}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              const projectId = Number(e.dataTransfer.getData("text/project-id"));
-              if (Number.isFinite(projectId)) moveProjectToBucket(projectId, bucket.id);
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOverTarget(`bucket:${bucket.id}`);
             }}
-            style={{ border: "1px solid #334155", borderRadius: 8, padding: 8, background: "#111827" }}
+            onDragLeave={() => setDragOverTarget(null)}
+            onDrop={(e) => {
+              e.preventDefault();
+              const projectId = readDraggedProjectId(e);
+              if (projectId) reorderProject(projectId, bucket.id);
+              setDragOverTarget(null);
+            }}
+            style={{
+              border: "1px solid " + (dragOverTarget === `bucket:${bucket.id}` ? bucket.color : "#334155"),
+              borderRadius: 8,
+              padding: 8,
+              background: dragOverTarget === `bucket:${bucket.id}` ? "#172033" : "#111827",
+              transition: "border-color .12s ease, background .12s ease"
+            }}
           >
             <div style={{ fontSize: 11, fontWeight: 800, color: bucket.color, marginBottom: 6 }}>
               {bucket.label} ({groupedProjects[bucket.id].length})
@@ -94,16 +112,40 @@ export default function ProjectSidebar({
                   <button
                     key={project.id}
                     draggable
-                    onDragStart={(e) => e.dataTransfer.setData("text/project-id", String(project.id))}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("text/project-id", String(project.id));
+                      e.dataTransfer.effectAllowed = "move";
+                      setDraggingProjectId(project.id);
+                    }}
+                    onDragEnd={() => {
+                      setDraggingProjectId(null);
+                      setDragOverTarget(null);
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDragOverTarget(`project:${project.id}`);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const draggedProjectId = readDraggedProjectId(e);
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const position = e.clientY > rect.top + rect.height / 2 ? "after" : "before";
+                      if (draggedProjectId) reorderProject(draggedProjectId, bucket.id, project.id, position);
+                      setDragOverTarget(null);
+                    }}
                     onClick={() => openProject(project.id)}
                     style={{
                       textAlign: "left",
                       borderRadius: 9,
-                      border: "1px solid " + (active ? "#475569" : "transparent"),
+                      border: "1px solid " + (dragOverTarget === `project:${project.id}` ? bucket.color : (active ? "#475569" : "transparent")),
                       background: active ? "#1e293b" : "transparent",
                       color: "#f8fafc",
                       padding: 10,
-                      cursor: "pointer"
+                      cursor: "grab",
+                      opacity: draggingProjectId === project.id ? 0.45 : 1,
+                      transition: "opacity .12s ease, border-color .12s ease, background .12s ease"
                     }}
                   >
                     <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 2 }}>{project.name}</div>

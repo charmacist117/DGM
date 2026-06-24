@@ -2031,8 +2031,61 @@ export default function PmsApp() {
     return groups;
   }, [projects]);
 
-  const moveProjectToBucket = (projectId, status) => {
-    setProjects((prev) => normalizeProjects(prev.map((p) => (p.id === projectId ? { ...p, status } : p))));
+  const bucketOrder = Object.fromEntries(PROJECT_BUCKETS.map((bucket, index) => [bucket.id, index]));
+  const getProjectBucketId = (project) => (
+    project?.status === "completed" || project?.status === "on_hold" ? project.status : "in_progress"
+  );
+
+  const reorderProject = (projectId, targetStatus, targetProjectId = null, position = "before") => {
+    setProjects((prev) => {
+      const draggedId = String(projectId);
+      const targetId = targetProjectId == null ? null : String(targetProjectId);
+      const dragged = prev.find((project) => String(project.id) === draggedId);
+      if (!dragged) return prev;
+      if (targetId && draggedId === targetId) return prev;
+
+      const nextProject = { ...dragged, status: targetStatus };
+      const withoutDragged = prev.filter((project) => String(project.id) !== draggedId);
+      const targetIndex = targetId
+        ? withoutDragged.findIndex((project) => String(project.id) === targetId)
+        : -1;
+
+      if (targetIndex >= 0) {
+        const insertIndex = position === "after" ? targetIndex + 1 : targetIndex;
+        return normalizeProjects([
+          ...withoutDragged.slice(0, insertIndex),
+          nextProject,
+          ...withoutDragged.slice(insertIndex)
+        ]);
+      }
+
+      const lastSameBucketIndex = withoutDragged.reduce((lastIndex, project, index) => (
+        getProjectBucketId(project) === targetStatus ? index : lastIndex
+      ), -1);
+
+      if (lastSameBucketIndex >= 0) {
+        return normalizeProjects([
+          ...withoutDragged.slice(0, lastSameBucketIndex + 1),
+          nextProject,
+          ...withoutDragged.slice(lastSameBucketIndex + 1)
+        ]);
+      }
+
+      const targetOrder = bucketOrder[targetStatus] ?? 0;
+      const firstLaterBucketIndex = withoutDragged.findIndex((project) => (
+        (bucketOrder[getProjectBucketId(project)] ?? 0) > targetOrder
+      ));
+
+      if (firstLaterBucketIndex >= 0) {
+        return normalizeProjects([
+          ...withoutDragged.slice(0, firstLaterBucketIndex),
+          nextProject,
+          ...withoutDragged.slice(firstLaterBucketIndex)
+        ]);
+      }
+
+      return normalizeProjects([...withoutDragged, nextProject]);
+    });
   };
 
   const handleReminderYes = (project, task) => {
@@ -2137,7 +2190,7 @@ export default function PmsApp() {
         goToProjectLogsPage={goToProjectLogsPage}
         groupedProjects={groupedProjects}
         projectBuckets={PROJECT_BUCKETS}
-        moveProjectToBucket={moveProjectToBucket}
+        reorderProject={reorderProject}
         selectedId={selectedId}
         openProject={openProject}
         formatOwners={formatOwners}
