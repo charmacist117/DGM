@@ -331,6 +331,28 @@ function errorMessage(error, fallback = "알 수 없는 오류") {
   return String(error?.message || error || fallback);
 }
 
+function readLocalCacheState() {
+  if (typeof window === "undefined") return { projects: [], adminLogs: [], hasData: false };
+  try {
+    const cached = window.localStorage.getItem(LOCAL_CACHE_KEY);
+    if (!cached) return { projects: [], adminLogs: [], hasData: false };
+    const parsed = JSON.parse(cached);
+    const projects = Array.isArray(parsed)
+      ? normalizeProjects(parsed)
+      : normalizeProjects(Array.isArray(parsed?.projects) ? parsed.projects : []);
+    const adminLogs = Array.isArray(parsed)
+      ? []
+      : normalizeAdminLogs(Array.isArray(parsed?.adminLogs) ? parsed.adminLogs : []);
+    return {
+      projects,
+      adminLogs,
+      hasData: projects.length > 0 || adminLogs.length > 0
+    };
+  } catch {
+    return { projects: [], adminLogs: [], hasData: false };
+  }
+}
+
 function summarizeDraftChecklistChanges(before = {}, after = {}) {
   const prev = normalizeDraftChecklist(before);
   const next = normalizeDraftChecklist(after);
@@ -341,29 +363,11 @@ function summarizeDraftChecklistChanges(before = {}, after = {}) {
 
 function useProjectsStore() {
   const [projects, setProjects] = useState(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const cached = window.localStorage.getItem(LOCAL_CACHE_KEY);
-      if (!cached) return [];
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed)) return normalizeProjects(parsed);
-      return normalizeProjects(Array.isArray(parsed?.projects) ? parsed.projects : []);
-    } catch {
-      return [];
-    }
+    return readLocalCacheState().projects;
   });
 
   const [adminLogs, setAdminLogs] = useState(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const cached = window.localStorage.getItem(LOCAL_CACHE_KEY);
-      if (!cached) return [];
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed)) return [];
-      return normalizeAdminLogs(Array.isArray(parsed?.adminLogs) ? parsed.adminLogs : []);
-    } catch {
-      return [];
-    }
+    return readLocalCacheState().adminLogs;
   });
 
   const [syncState, setSyncState] = useState({ status: "loading", message: "서버 데이터 확인 중..." });
@@ -383,8 +387,21 @@ function useProjectsStore() {
         }
 
         if (!disposed) {
+          const localCache = readLocalCacheState();
           const nextProjects = normalizeProjects(Array.isArray(payload.projects) ? payload.projects : []);
           const nextAdminLogs = normalizeAdminLogs(Array.isArray(payload.adminLogs) ? payload.adminLogs : []);
+          const serverIsEmpty = nextProjects.length === 0 && nextAdminLogs.length === 0;
+          if (serverIsEmpty && localCache.hasData) {
+            setProjects(localCache.projects);
+            setAdminLogs(localCache.adminLogs);
+            serverAvailableRef.current = true;
+            setSyncState({
+              status: "warning",
+              message: "서버 DB가 비어 있어 이 브라우저의 로컬 캐시를 복구 대상으로 사용합니다. 곧 서버에 다시 저장합니다."
+            });
+            readyRef.current = true;
+            return;
+          }
           setProjects(nextProjects);
           setAdminLogs(nextAdminLogs);
           serverAvailableRef.current = true;
@@ -420,7 +437,7 @@ function useProjectsStore() {
     if (!readyRef.current) return;
 
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify({ projects, adminLogs }));
+      window.localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify({ projects, adminLogs, cachedAt: new Date().toISOString() }));
     }
 
     if (!serverAvailableRef.current) {
@@ -442,10 +459,10 @@ function useProjectsStore() {
         }
         setSyncState({ status: "saved", message: `저장 완료 (${new Date(payload.updatedAt).toLocaleString()})` });
       } catch (error) {
-        serverAvailableRef.current = false;
+        serverAvailableRef.current = true;
         setSyncState({
           status: "warning",
-          message: `서버 저장 실패 (${errorMessage(error, "원인 확인 필요")}): 로컬 캐시에만 저장됨`
+          message: `서버 저장 실패 (${errorMessage(error, "원인 확인 필요")}): 이 브라우저 로컬 캐시에 보관했고 다음 변경 시 서버 저장을 재시도합니다.`
         });
       }
     }, 700);
@@ -1345,13 +1362,13 @@ function DecisionTab({ project, onSaveLog }) {
               {DECISION_IMPACT_OPTIONS.map((value) => <option key={value}>{value}</option>)}
             </select>
           </DecisionField>
-          <DecisionField label="처리상태" helper="안건이 현재 검토 중인지, 결정 완료인지, 후속 확인이 필요한지 표시합니다.">
+          <DecisionField label="처리상태" helper="이 안건의 현재 단계입니다. 아직 검토 중인지, 결정됐는지, 추가 확인이 필요한지 선택합니다.">
             <select value={form.status} onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))} style={inputStyle}>
               {DECISION_STATUS_OPTIONS.map((value) => <option key={value}>{value}</option>)}
             </select>
           </DecisionField>
-          <DecisionField label="결정 내용 및 요청사항 *" helper="결정 배경, 결론, 조건, 후속 요청사항을 함께 남깁니다.">
-            <textarea rows={5} placeholder="예: 참여약사 핵심지부장 간담회 참석자에게 제품 관련 성선언 요청 진행" value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} style={{ ...inputStyle, resize: "vertical" }} />
+          <DecisionField label="결정 내용 및 요청사항 *" helper="결정된 내용, 판단 근거, 조건, 다음 조치가 있으면 함께 남깁니다.">
+            <textarea rows={5} placeholder="예: 참여약사 핵심지부장 간담회 참석자에게 제품 관련 선언문 요청 진행" value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} style={{ ...inputStyle, resize: "vertical" }} />
           </DecisionField>
           <button onClick={save} style={primaryButton}>{editingId ? "수정 저장" : "저장"}</button>
           {editingId && (
@@ -1426,6 +1443,10 @@ function BackupTab({ projects, adminLogs, selectedProject, onRestore, isAdmin })
         <div style={{ fontWeight: 800, marginBottom: 8 }}>백업/복원</div>
         <div style={{ fontSize: 13, color: "#475569", marginBottom: 10 }}>
           서버 DB가 기본 저장소이며, JSON/CSV 파일 백업은 데이터 이전/복구용입니다.
+        </div>
+        <div style={{ fontSize: 12, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
+          GitHub에 코드 파일을 업로드해도 의사결정/업체 소통 기록 같은 운영 데이터는 함께 업로드되지 않습니다.
+          상단 저장 상태가 "로컬 캐시에만 저장됨"으로 보이면 Vercel/PostgreSQL 환경변수를 확인하고, 배포 전 JSON 백업을 내려받아 보관하세요.
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button onClick={exportAllJson} style={primaryButton}>전체 JSON 백업</button>
@@ -1575,7 +1596,7 @@ function BasicInfoTab({ project, onSave }) {
           <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
             수정 저장 시 변경된 항목이 기본정보 변경 이력에 남습니다.
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
             {DRAFT_CHECKLIST_FIELDS.map((field) => (
               <div key={field.key}>
                 <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>{field.label}</label>
