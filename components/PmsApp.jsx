@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ProjectSidebar from "@/components/ProjectSidebar";
 import {
@@ -457,6 +457,8 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     category: normalizeSupplyCategory(source.category || source.supplyCategory || source.productCategory),
     manufacturer: String(source.manufacturer || ""),
     ingredients: normalizeSupplyIngredients(source),
+    packagingUnit: String(source.packagingUnit || source.packageUnit || ""),
+    packagingForm: String(source.packagingForm || source.packageForm || ""),
     dosage: String(source.dosage || ""),
     efficacy: String(source.efficacy || ""),
     supplyUnitPrice: String(source.supplyUnitPrice || ""),
@@ -1483,217 +1485,242 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
         </div>
       </div>
 
-      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", minWidth: 1380, borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: "#f8fafc" }}>
-                {["카테고리", "제조사", "공급 성분 / 함량", "공급단가", "VAT 포함", "VAT 포함 가격"].map((header) => (
-                  <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 11, color: "#64748b", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
-                    {header}
-                  </th>
-                ))}
-                <th rowSpan={2} style={{ textAlign: "left", padding: "9px 10px", fontSize: 11, color: "#64748b", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap", verticalAlign: "middle" }}>
-                  관리
-                </th>
-              </tr>
-              <tr style={{ background: "#f8fafc" }}>
-                {["허가사 수수료", "견적일자", "용법용량", "효능효과", "첨부파일", "비고"].map((header) => (
-                  <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 11, color: "#64748b", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
-                    {header}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filteredItems.map((item) => {
-                const isEditing = editingIds.has(String(item.id));
-                const ingredients = item.ingredients || [normalizeSupplyIngredient()];
-                return (
-                <Fragment key={item.id}>
-                <tr style={{ borderTop: "1px solid #e2e8f0", verticalAlign: "top" }}>
-                  <td style={{ padding: 8, width: 130 }}>
-                    {isEditing ? (
-                      <select value={item.category} onChange={(event) => updateItem(item.id, { category: event.target.value })} style={compactInput}>
-                        {SUPPLY_PRICE_CATEGORIES.map((category) => (
-                          <option key={category.id} value={category.id}>{category.label}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <div style={textCellStyle}>{categoryLabelById[item.category] || item.category || "-"}</div>
-                    )}
-                  </td>
-                  <td style={{ padding: 8, width: 150 }}>
-                    {isEditing ? (
-                      <input value={item.manufacturer} onChange={(event) => updateItem(item.id, { manufacturer: event.target.value })} placeholder="제조사" style={compactInput} />
-                    ) : (
-                      <div style={textCellStyle}>{item.manufacturer || "-"}</div>
-                    )}
-                  </td>
-                  <td style={{ padding: 8, width: 340 }}>
-                    {isEditing ? (
-                      <div style={{ display: "grid", gap: 6 }}>
-                        {ingredients.map((ingredient, index) => (
-                          <div key={`${item.id}_ingredient_${index}`} style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6, alignItems: "center" }}>
-                            <input value={ingredient.name} onChange={(event) => updateIngredient(item.id, index, { name: event.target.value })} placeholder="성분명" style={compactInput} />
-                            <input value={ingredient.content} onChange={(event) => updateIngredient(item.id, index, { content: event.target.value })} placeholder="예: 500mg/정" style={compactInput} />
-                            <button onClick={() => removeIngredient(item.id, index)} style={{ ...subtleButton, padding: "5px 7px", fontSize: 11 }}>삭제</button>
+      <div style={{ display: "grid", gap: 12 }}>
+        {filteredItems.map((item) => {
+          const isEditing = editingIds.has(String(item.id));
+          const ingredients = item.ingredients || [normalizeSupplyIngredient()];
+          return (
+            <div key={item.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", minWidth: 1180, borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: "#f8fafc" }}>
+                      {["카테고리", "제조사", "공급 성분 / 함량 / 포장", "공급단가", "VAT 포함", "VAT 포함 가격", "관리"].map((header) => (
+                        <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 11, color: "#64748b", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr style={{ verticalAlign: "top" }}>
+                      <td style={{ padding: 8, width: 130 }}>
+                        {isEditing ? (
+                          <select value={item.category} onChange={(event) => updateItem(item.id, { category: event.target.value })} style={compactInput}>
+                            {SUPPLY_PRICE_CATEGORIES.map((category) => (
+                              <option key={category.id} value={category.id}>{category.label}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div style={textCellStyle}>{categoryLabelById[item.category] || item.category || "-"}</div>
+                        )}
+                      </td>
+                      <td style={{ padding: 8, width: 150 }}>
+                        {isEditing ? (
+                          <input value={item.manufacturer} onChange={(event) => updateItem(item.id, { manufacturer: event.target.value })} placeholder="제조사" style={compactInput} />
+                        ) : (
+                          <div style={textCellStyle}>{item.manufacturer || "-"}</div>
+                        )}
+                      </td>
+                      <td style={{ padding: 8, width: 430 }}>
+                        {isEditing ? (
+                          <div style={{ display: "grid", gap: 6 }}>
+                            {ingredients.map((ingredient, index) => (
+                              <div key={`${item.id}_ingredient_${index}`} style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6, alignItems: "center" }}>
+                                <input value={ingredient.name} onChange={(event) => updateIngredient(item.id, index, { name: event.target.value })} placeholder="성분명" style={compactInput} />
+                                <input value={ingredient.content} onChange={(event) => updateIngredient(item.id, index, { content: event.target.value })} placeholder="예: 500mg/정" style={compactInput} />
+                                <button onClick={() => removeIngredient(item.id, index)} style={{ ...subtleButton, padding: "5px 7px", fontSize: 11 }}>삭제</button>
+                              </div>
+                            ))}
+                            <button onClick={() => addIngredient(item.id)} style={{ ...subtleButton, width: 116 }}>
+                              + 성분 추가
+                            </button>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, paddingTop: 4, borderTop: "1px dashed #e2e8f0" }}>
+                              <input
+                                value={item.packagingUnit}
+                                onChange={(event) => updateItem(item.id, { packagingUnit: event.target.value })}
+                                placeholder="포장단위"
+                                style={compactInput}
+                              />
+                              <input
+                                value={item.packagingForm}
+                                onChange={(event) => updateItem(item.id, { packagingForm: event.target.value })}
+                                placeholder="포장형태"
+                                style={compactInput}
+                              />
+                            </div>
                           </div>
-                        ))}
-                        <button onClick={() => addIngredient(item.id)} style={{ ...subtleButton, width: 116 }}>
-                          + 성분 추가
-                        </button>
-                      </div>
-                    ) : (
-                      <div style={{ display: "grid", gap: 4 }}>
-                        {ingredients.some((ingredient) => ingredient.name || ingredient.content) ? ingredients.map((ingredient, index) => (
-                          <div key={`${item.id}_ingredient_view_${index}`} style={textCellStyle}>
-                            {ingredient.name || "-"}{ingredient.content ? ` / ${ingredient.content}` : ""}
+                        ) : (
+                          <div style={{ display: "grid", gap: 4 }}>
+                            {ingredients.some((ingredient) => ingredient.name || ingredient.content) ? ingredients.map((ingredient, index) => (
+                              <div key={`${item.id}_ingredient_view_${index}`} style={textCellStyle}>
+                                {ingredient.name || "-"}{ingredient.content ? ` / ${ingredient.content}` : ""}
+                              </div>
+                            )) : <div style={textCellStyle}>-</div>}
+                            {(item.packagingUnit || item.packagingForm) && (
+                              <div style={{ ...textCellStyle, color: "#64748b", paddingTop: 4, borderTop: "1px dashed #e2e8f0" }}>
+                                {item.packagingUnit ? `포장단위: ${item.packagingUnit}` : ""}
+                                {item.packagingUnit && item.packagingForm ? " · " : ""}
+                                {item.packagingForm ? `포장형태: ${item.packagingForm}` : ""}
+                              </div>
+                            )}
                           </div>
-                        )) : <div style={textCellStyle}>-</div>}
-                      </div>
-                    )}
-                  </td>
-                  <td style={{ padding: 8, width: 130 }}>
-                    {isEditing ? (
-                      <input value={item.supplyUnitPrice} onChange={(event) => updateItem(item.id, { supplyUnitPrice: event.target.value })} placeholder="예: 1,250원" style={compactInput} />
-                    ) : (
-                      <div style={textCellStyle}>{item.supplyUnitPrice || "-"}</div>
-                    )}
-                  </td>
-                  <td style={{ padding: 8, width: 92 }}>
-                    {isEditing ? (
-                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#334155", fontWeight: 700 }}>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(item.vatIncluded)}
-                          onChange={(event) => updateItem(item.id, { vatIncluded: event.target.checked })}
-                        />
-                        포함
-                      </label>
-                    ) : (
-                      <div style={textCellStyle}>{item.vatIncluded ? "포함" : "-"}</div>
-                    )}
-                  </td>
-                  <td style={{ padding: 8, width: 130 }}>
-                    {isEditing ? (
-                      <input
-                        value={item.vatIncluded ? formatVatIncludedPrice(item.supplyUnitPrice) : ""}
-                        readOnly
-                        placeholder="자동계산"
-                        style={{ ...compactInput, background: "#f8fafc", color: item.vatIncluded ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
-                      />
-                    ) : item.vatIncluded ? (
-                      <div style={{ ...textCellStyle, fontWeight: 800, color: "#0f172a" }}>
-                        {formatVatIncludedPrice(item.supplyUnitPrice) || "-"}
-                      </div>
-                    ) : (
-                      <div style={textCellStyle}>-</div>
-                    )}
-                  </td>
-                  <td rowSpan={2} style={{ padding: 8, width: 112, verticalAlign: "middle", borderBottom: "1px solid #f1f5f9" }}>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      {isEditing ? (
-                        <>
-                          <button onClick={() => saveItem(item.id)} style={{ ...primaryButton, padding: "6px 9px", fontSize: 12 }}>
-                            저장
-                          </button>
-                          <button onClick={() => requestDelete(item.id)} style={{ ...subtleButton, borderColor: "#fecaca", color: "#dc2626" }}>
-                            삭제
-                          </button>
-                        </>
-                      ) : (
-                        <button onClick={() => setEditing(item.id, true)} style={subtleButton}>
-                          수정
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-                <tr style={{ borderBottom: "1px solid #f1f5f9", verticalAlign: "top", background: "#fbfdff" }}>
-                  <td style={{ padding: 8, width: 118 }}>
-                    {isEditing ? (
-                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#334155", fontWeight: 700 }}>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(item.permitCompanyFee)}
-                          onChange={(event) => updateItem(item.id, { permitCompanyFee: event.target.checked })}
-                        />
-                        해당
-                      </label>
-                    ) : (
-                      <div style={textCellStyle}>{item.permitCompanyFee ? "해당" : "-"}</div>
-                    )}
-                  </td>
-                  <td style={{ padding: 8, width: 130 }}>
-                    {isEditing ? (
-                      <input type="date" value={item.quoteDate} onChange={(event) => updateItem(item.id, { quoteDate: event.target.value })} style={compactInput} />
-                    ) : (
-                      <div style={textCellStyle}>{item.quoteDate ? fmt(item.quoteDate) : "-"}</div>
-                    )}
-                  </td>
-                  <td style={{ padding: 8, width: 190 }}>
-                    {isEditing ? (
-                      <textarea value={item.dosage} onChange={(event) => updateItem(item.id, { dosage: event.target.value })} placeholder="용법용량" style={compactTextarea} />
-                    ) : (
-                      <div style={textCellStyle}>{item.dosage || "-"}</div>
-                    )}
-                  </td>
-                  <td style={{ padding: 8, width: 190 }}>
-                    {isEditing ? (
-                      <textarea value={item.efficacy} onChange={(event) => updateItem(item.id, { efficacy: event.target.value })} placeholder="효능효과" style={compactTextarea} />
-                    ) : (
-                      <div style={textCellStyle}>{item.efficacy || "-"}</div>
-                    )}
-                  </td>
-                  <td style={{ padding: 8, width: 240 }}>
-                    {isEditing && (
-                      <input
-                        type="file"
-                        accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,application/pdf"
-                        onChange={(event) => handleAttachmentChange(item.id, event)}
-                        style={{ width: "100%", fontSize: 11, marginBottom: 5 }}
-                      />
-                    )}
-                    {item.attachment ? (
-                      <div style={{ display: "grid", gap: 4 }}>
-                        <span style={{ fontSize: 11, color: "#475569", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {item.attachment.name} ({formatBytes(item.attachment.size)})
-                        </span>
-                        <div style={{ display: "flex", gap: 6 }}>
-                          {item.attachment.dataUrl && (
-                            <a href={item.attachment.dataUrl} download={item.attachment.name} style={{ fontSize: 11, color: "#2563eb", fontWeight: 700, textDecoration: "none" }}>
-                              다운로드
-                            </a>
+                        )}
+                      </td>
+                      <td style={{ padding: 8, width: 130 }}>
+                        {isEditing ? (
+                          <input value={item.supplyUnitPrice} onChange={(event) => updateItem(item.id, { supplyUnitPrice: event.target.value })} placeholder="예: 1,250원" style={compactInput} />
+                        ) : (
+                          <div style={textCellStyle}>{item.supplyUnitPrice || "-"}</div>
+                        )}
+                      </td>
+                      <td style={{ padding: 8, width: 92 }}>
+                        {isEditing ? (
+                          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#334155", fontWeight: 700 }}>
+                            <input
+                              type="checkbox"
+                              checked={Boolean(item.vatIncluded)}
+                              onChange={(event) => updateItem(item.id, { vatIncluded: event.target.checked })}
+                            />
+                            포함
+                          </label>
+                        ) : (
+                          <div style={textCellStyle}>{item.vatIncluded ? "포함" : "-"}</div>
+                        )}
+                      </td>
+                      <td style={{ padding: 8, width: 140 }}>
+                        {isEditing ? (
+                          <input
+                            value={item.vatIncluded ? formatVatIncludedPrice(item.supplyUnitPrice) : ""}
+                            readOnly
+                            placeholder="자동계산"
+                            style={{ ...compactInput, background: "#f8fafc", color: item.vatIncluded ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
+                          />
+                        ) : item.vatIncluded ? (
+                          <div style={{ ...textCellStyle, fontWeight: 800, color: "#0f172a" }}>
+                            {formatVatIncludedPrice(item.supplyUnitPrice) || "-"}
+                          </div>
+                        ) : (
+                          <div style={textCellStyle}>-</div>
+                        )}
+                      </td>
+                      <td style={{ padding: 8, width: 112 }}>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {isEditing ? (
+                            <>
+                              <button onClick={() => saveItem(item.id)} style={{ ...primaryButton, padding: "6px 9px", fontSize: 12 }}>
+                                저장
+                              </button>
+                              <button onClick={() => requestDelete(item.id)} style={{ ...subtleButton, borderColor: "#fecaca", color: "#dc2626" }}>
+                                삭제
+                              </button>
+                            </>
+                          ) : (
+                            <button onClick={() => setEditing(item.id, true)} style={subtleButton}>
+                              수정
+                            </button>
                           )}
-                          {isEditing && <button onClick={() => updateItem(item.id, { attachment: null })} style={{ ...subtleButton, padding: "3px 6px", fontSize: 11 }}>삭제</button>}
                         </div>
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: 11, color: "#94a3b8" }}>첨부파일 없음</div>
-                    )}
-                  </td>
-                  <td style={{ padding: 8, width: 260 }}>
-                    {isEditing ? (
-                      <textarea value={item.memo} onChange={(event) => updateItem(item.id, { memo: event.target.value })} placeholder="비고" style={compactTextarea} />
-                    ) : (
-                      <div style={textCellStyle}>{item.memo || "-"}</div>
-                    )}
-                  </td>
-                </tr>
-                </Fragment>
-                );
-              })}
-              {filteredItems.length === 0 && (
-                <tr>
-                  <td colSpan={7} style={{ padding: 24, fontSize: 12, color: "#94a3b8", textAlign: "center" }}>
-                    {safeItems.length === 0 ? "아직 등록된 공급단가가 없습니다." : "현재 카테고리에서 표시할 공급단가가 없습니다."}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ borderTop: "1px solid #e2e8f0", overflowX: "auto" }}>
+                <table style={{ width: "100%", minWidth: 1180, borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: "#f8fafc" }}>
+                      {["허가사 수수료", "견적일자", "용법용량", "효능효과", "첨부파일", "비고"].map((header) => (
+                        <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 11, color: "#64748b", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr style={{ verticalAlign: "top" }}>
+                      <td style={{ padding: 8, width: 118 }}>
+                        {isEditing ? (
+                          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#334155", fontWeight: 700 }}>
+                            <input
+                              type="checkbox"
+                              checked={Boolean(item.permitCompanyFee)}
+                              onChange={(event) => updateItem(item.id, { permitCompanyFee: event.target.checked })}
+                            />
+                            해당
+                          </label>
+                        ) : (
+                          <div style={textCellStyle}>{item.permitCompanyFee ? "해당" : "-"}</div>
+                        )}
+                      </td>
+                      <td style={{ padding: 8, width: 130 }}>
+                        {isEditing ? (
+                          <input type="date" value={item.quoteDate} onChange={(event) => updateItem(item.id, { quoteDate: event.target.value })} style={compactInput} />
+                        ) : (
+                          <div style={textCellStyle}>{item.quoteDate ? fmt(item.quoteDate) : "-"}</div>
+                        )}
+                      </td>
+                      <td style={{ padding: 8, width: 220 }}>
+                        {isEditing ? (
+                          <textarea value={item.dosage} onChange={(event) => updateItem(item.id, { dosage: event.target.value })} placeholder="용법용량" style={compactTextarea} />
+                        ) : (
+                          <div style={textCellStyle}>{item.dosage || "-"}</div>
+                        )}
+                      </td>
+                      <td style={{ padding: 8, width: 220 }}>
+                        {isEditing ? (
+                          <textarea value={item.efficacy} onChange={(event) => updateItem(item.id, { efficacy: event.target.value })} placeholder="효능효과" style={compactTextarea} />
+                        ) : (
+                          <div style={textCellStyle}>{item.efficacy || "-"}</div>
+                        )}
+                      </td>
+                      <td style={{ padding: 8, width: 240 }}>
+                        {isEditing && (
+                          <input
+                            type="file"
+                            accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,application/pdf"
+                            onChange={(event) => handleAttachmentChange(item.id, event)}
+                            style={{ width: "100%", fontSize: 11, marginBottom: 5 }}
+                          />
+                        )}
+                        {item.attachment ? (
+                          <div style={{ display: "grid", gap: 4 }}>
+                            <span style={{ fontSize: 11, color: "#475569", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {item.attachment.name} ({formatBytes(item.attachment.size)})
+                            </span>
+                            <div style={{ display: "flex", gap: 6 }}>
+                              {item.attachment.dataUrl && (
+                                <a href={item.attachment.dataUrl} download={item.attachment.name} style={{ fontSize: 11, color: "#2563eb", fontWeight: 700, textDecoration: "none" }}>
+                                  다운로드
+                                </a>
+                              )}
+                              {isEditing && <button onClick={() => updateItem(item.id, { attachment: null })} style={{ ...subtleButton, padding: "3px 6px", fontSize: 11 }}>삭제</button>}
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 11, color: "#94a3b8" }}>첨부파일 없음</div>
+                        )}
+                      </td>
+                      <td style={{ padding: 8, width: 260 }}>
+                        {isEditing ? (
+                          <textarea value={item.memo} onChange={(event) => updateItem(item.id, { memo: event.target.value })} placeholder="비고" style={compactTextarea} />
+                        ) : (
+                          <div style={textCellStyle}>{item.memo || "-"}</div>
+                        )}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })}
+        {filteredItems.length === 0 && (
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 24, fontSize: 12, color: "#94a3b8", textAlign: "center" }}>
+            {safeItems.length === 0 ? "아직 등록된 공급단가가 없습니다." : "현재 카테고리에서 표시할 공급단가가 없습니다."}
+          </div>
+        )}
       </div>
 
       {deleteTargetId !== null && (
