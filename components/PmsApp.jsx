@@ -12,7 +12,8 @@ import {
   STATUS_LABEL,
   getDefaultDevelopSubTimeline,
   getInitialProjects,
-  normalizeDraftChecklist
+  normalizeDraftChecklist,
+  normalizeProductSupplySheet
 } from "@/lib/pms/defaults";
 import { TODAY, addDays, diff, fmt, toStr } from "@/lib/pms/date";
 import { calcSchedule } from "@/lib/pms/schedule";
@@ -275,6 +276,15 @@ function normalizeProject(project) {
   const finalOrderedTasks = finalTasks.map((task) => phaseTaskMap[task.id] || task);
   const developTask = phaseTaskMap[DEVELOP_TASK_ID] || PHASE_TEMPLATE_BY_ID[DEVELOP_TASK_ID];
   const developSubTimeline = normalizeDevelopSubTimeline(project.developSubTimeline, developTask.duration);
+  const hasProductSupplySheet = project.productSupplySheet && typeof project.productSupplySheet === "object" && !Array.isArray(project.productSupplySheet);
+  const productSupplySheet = normalizeProductSupplySheet(
+    hasProductSupplySheet
+      ? project.productSupplySheet
+      : {
+          manufacturer: project.manufacturer || "",
+          permitCompany: project.permitCompany || ""
+        }
+  );
 
   return {
     ...project,
@@ -283,6 +293,9 @@ function normalizeProject(project) {
     manager: project.manager || [project.pmName, project.amName].filter(Boolean).join(" / ") || "미정",
     category: project.category || "건강기능식품",
     start: startDate,
+    manufacturer: productSupplySheet.manufacturer,
+    permitCompany: productSupplySheet.permitCompany,
+    productSupplySheet,
     tasks: finalOrderedTasks,
     developSubTimeline,
     communicationLog: Array.isArray(project.communicationLog) ? project.communicationLog : [],
@@ -359,6 +372,55 @@ function summarizeDraftChecklistChanges(before = {}, after = {}) {
   return DRAFT_CHECKLIST_FIELDS
     .filter((field) => (prev[field.key] || "").trim() !== (next[field.key] || "").trim())
     .map((field) => `${field.label} 수정`);
+}
+
+const PRODUCT_SUPPLY_SHEET_LABELS = {
+  manufacturer: "제조사",
+  permitCompany: "허가사",
+  ingredientName: "공급 성분",
+  ingredientContent: "공급 성분 함량",
+  dosage: "용법용량",
+  efficacy: "효능효과",
+  supplyUnitPrice: "공급단가",
+  quoteDate: "견적일자",
+  attachment: "첨부파일"
+};
+
+function summarizeProductSupplySheetChanges(before = {}, after = {}) {
+  const prev = normalizeProductSupplySheet(before);
+  const next = normalizeProductSupplySheet(after);
+  return Object.keys(PRODUCT_SUPPLY_SHEET_LABELS)
+    .filter((key) => {
+      if (key === "attachment") {
+        return [
+          prev.attachment?.name || "",
+          prev.attachment?.size || 0,
+          prev.attachment?.uploadedAt || ""
+        ].join("|") !== [
+          next.attachment?.name || "",
+          next.attachment?.size || 0,
+          next.attachment?.uploadedAt || ""
+        ].join("|");
+      }
+      return String(prev[key] || "").trim() !== String(next[key] || "").trim();
+    })
+    .map((key) => `${PRODUCT_SUPPLY_SHEET_LABELS[key]} 수정`);
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("파일을 읽지 못했습니다."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function formatBytes(size = 0) {
+  const value = Number(size) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function useProjectsStore() {
@@ -1162,6 +1224,171 @@ function TasksTab({
   );
 }
 
+function ProductSupplySheetTab({ project, onSave }) {
+  const fileInputRef = useRef(null);
+  const [form, setForm] = useState(() => normalizeProductSupplySheet(project.productSupplySheet));
+
+  useEffect(() => {
+    setForm(normalizeProductSupplySheet(project.productSupplySheet));
+  }, [project.id, project.productSupplySheet]);
+
+  const updateField = (key, value) => {
+    setForm((prev) => ({
+      ...prev,
+      [key]: value
+    }));
+  };
+
+  const handleAttachmentChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const maxSize = 10 * 1024 * 1024;
+      if (file.size > maxSize) {
+        window.alert("첨부파일은 10MB 이하만 업로드할 수 있습니다.");
+        return;
+      }
+      const dataUrl = await readFileAsDataUrl(file);
+      setForm((prev) => ({
+        ...prev,
+        attachment: {
+          name: file.name,
+          type: file.type || "application/octet-stream",
+          size: file.size,
+          dataUrl,
+          uploadedAt: new Date().toISOString()
+        }
+      }));
+    } catch (error) {
+      window.alert(`파일 업로드 실패: ${errorMessage(error, "파일을 읽지 못했습니다.")}`);
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  const enabledTasks = (project.tasks || []).filter((task) => task.isEnabled !== false);
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
+        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 12 }}>제품 공급단가</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>제조사</label>
+            <input value={form.manufacturer} onChange={(event) => updateField("manufacturer", event.target.value)} style={inputStyle} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>허가사</label>
+            <input value={form.permitCompany} onChange={(event) => updateField("permitCompany", event.target.value)} style={inputStyle} />
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10, marginTop: 10 }}>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>공급 성분</label>
+            <input value={form.ingredientName} onChange={(event) => updateField("ingredientName", event.target.value)} style={inputStyle} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>공급 성분 함량 및 단위</label>
+            <input value={form.ingredientContent} onChange={(event) => updateField("ingredientContent", event.target.value)} placeholder="예: 500mg/정" style={inputStyle} />
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, marginTop: 10 }}>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>공급단가</label>
+            <input value={form.supplyUnitPrice} onChange={(event) => updateField("supplyUnitPrice", event.target.value)} placeholder="예: 1,250원/병" style={inputStyle} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>견적일자</label>
+            <input type="date" value={form.quoteDate} onChange={(event) => updateField("quoteDate", event.target.value)} style={inputStyle} />
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 10, marginTop: 10 }}>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>용법용량</label>
+            <textarea rows={4} value={form.dosage} onChange={(event) => updateField("dosage", event.target.value)} style={{ ...inputStyle, resize: "vertical", minHeight: 92 }} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>효능효과</label>
+            <textarea rows={4} value={form.efficacy} onChange={(event) => updateField("efficacy", event.target.value)} style={{ ...inputStyle, resize: "vertical", minHeight: 92 }} />
+          </div>
+        </div>
+
+        <div style={{ marginTop: 10 }}>
+          <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>첨부파일</label>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,application/pdf"
+            style={{ display: "none" }}
+            onChange={handleAttachmentChange}
+          />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => fileInputRef.current?.click()} style={subtleButton}>파일 업로드</button>
+            {form.attachment ? (
+              <>
+                <span style={{ fontSize: 12, color: "#475569", fontWeight: 700 }}>
+                  {form.attachment.name} ({formatBytes(form.attachment.size)})
+                </span>
+                {form.attachment.dataUrl && (
+                  <a
+                    href={form.attachment.dataUrl}
+                    download={form.attachment.name}
+                    style={{ fontSize: 12, color: "#2563eb", fontWeight: 700, textDecoration: "none" }}
+                  >
+                    다운로드
+                  </a>
+                )}
+                <button onClick={() => setForm((prev) => ({ ...prev, attachment: null }))} style={subtleButton}>삭제</button>
+              </>
+            ) : (
+              <span style={{ fontSize: 12, color: "#94a3b8" }}>첨부파일 없음</span>
+            )}
+          </div>
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          <button onClick={() => onSave(normalizeProductSupplySheet(form))} style={primaryButton}>
+            공급단가 시트 저장
+          </button>
+        </div>
+      </div>
+
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
+        <div style={{ padding: "11px 14px", borderBottom: "1px solid #e2e8f0", fontWeight: 800 }}>개발일정</div>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: "#f8fafc" }}>
+              {["단계", "시작일", "완료일", "기간", "상태", "진행률"].map((header) => (
+                <th key={header} style={{ textAlign: "left", padding: "9px 12px", fontSize: 11, color: "#64748b", borderBottom: "1px solid #e2e8f0" }}>{header}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {enabledTasks.map((task) => (
+              <tr key={task.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                <td style={{ padding: "9px 12px", fontSize: 13, fontWeight: 700 }}>{task.icon} {task.name}</td>
+                <td style={{ padding: "9px 12px", fontSize: 12 }}>{fmt(task.scheduledStart)}</td>
+                <td style={{ padding: "9px 12px", fontSize: 12 }}>{fmt(task.scheduledEnd)}</td>
+                <td style={{ padding: "9px 12px", fontSize: 12 }}>{task.duration}일</td>
+                <td style={{ padding: "9px 12px", fontSize: 12 }}>{STATUS_LABEL[task.taskStatus] || task.taskStatus}</td>
+                <td style={{ padding: "9px 12px", fontSize: 12, fontWeight: 700 }}>{task.progress || 0}%</td>
+              </tr>
+            ))}
+            {enabledTasks.length === 0 && (
+              <tr>
+                <td colSpan={6} style={{ padding: 20, fontSize: 12, color: "#94a3b8", textAlign: "center" }}>표시할 개발일정이 없습니다.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function CommunicationTab({ project, onSaveLog }) {
   const emptyForm = {
     date: TODAY,
@@ -1867,6 +2094,7 @@ function ProjectLifecycleLogTab({ logs, onDeleteLog, onToggleHiddenForManager, i
     if (type === "task_start_date_change") return "태스크 일정";
     if (type === "project_start_date_change") return "프로젝트 날짜";
     if (type === "basic_info_update") return "기본정보";
+    if (type === "product_supply_sheet_update") return "공급단가";
     if (type === "advisor_log_add") return "자문약사";
     if (type === "communication_log_add") return "업체소통";
     if (type === "decision_log_add") return "의사결정";
@@ -1880,6 +2108,7 @@ function ProjectLifecycleLogTab({ logs, onDeleteLog, onToggleHiddenForManager, i
     if (type === "project_delete") return { fg: "#b91c1c", bg: "#fee2e2" };
     if (type === "task_start_date_change" || type === "project_start_date_change") return { fg: "#1d4ed8", bg: "#dbeafe" };
     if (type === "basic_info_update") return { fg: "#7c3aed", bg: "#f3e8ff" };
+    if (type === "product_supply_sheet_update") return { fg: "#047857", bg: "#d1fae5" };
     if (type === "advisor_log_add" || type === "communication_log_add" || type === "decision_log_add") return { fg: "#0f766e", bg: "#ccfbf1" };
     if (type === "stage_check_yes") return { fg: "#166534", bg: "#dcfce7" };
     if (type === "stage_check_issue") return { fg: "#b91c1c", bg: "#fee2e2" };
@@ -2297,6 +2526,7 @@ export default function PmsApp() {
               {[
                 ["overview", "개요"],
                 ["tasks", "태스크 관리"],
+                ["product_supply", "개발일정/공급단가"],
                 ["advisor", "자문약사 의견"],
                 ["communication", "업체 소통 기록"],
                 ["decision", "의사결정 기록"],
@@ -2548,6 +2778,40 @@ export default function PmsApp() {
                 }}
                 forcedEditTaskId={forcedEdit && forcedEdit.projectId === selectedProject.id ? forcedEdit.taskId : null}
                 onForcedEditHandled={() => setForcedEdit(null)}
+              />
+            )}
+
+            {tab === "product_supply" && (
+              <ProductSupplySheetTab
+                project={selectedProject}
+                onSave={(nextSheet) => {
+                  const normalizedSheet = normalizeProductSupplySheet(nextSheet);
+                  const changeParts = summarizeProductSupplySheetChanges(selectedProject.productSupplySheet, normalizedSheet);
+                  if (changeParts.length === 0) return;
+                  updateProject(selectedProject.id, (project) => ({
+                    ...project,
+                    manufacturer: normalizedSheet.manufacturer,
+                    permitCompany: normalizedSheet.permitCompany,
+                    productSupplySheet: normalizedSheet,
+                    changeLog: [
+                      ...(project.changeLog || []),
+                      {
+                        id: Date.now(),
+                        type: "product_supply_sheet",
+                        taskId: "_product_supply_sheet",
+                        taskName: "개발일정 및 제품 공급단가",
+                        date: TODAY,
+                        reason: changeParts.join(" / ")
+                      }
+                    ]
+                  }));
+                  appendAdminLog({
+                    type: "product_supply_sheet_update",
+                    projectId: selectedProject.id,
+                    projectName: selectedProject.name,
+                    reason: changeParts.join(" / ")
+                  });
+                }}
               />
             )}
 
