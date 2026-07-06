@@ -1320,9 +1320,11 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
       ))
     : categoryFilteredItems;
 
-  const compactInput = { ...inputStyle, padding: "6px 8px", fontSize: 12 };
+  const compactInput = { ...inputStyle, padding: "6px 8px", fontSize: 15 };
   const compactTextarea = { ...compactInput, resize: "vertical", minHeight: 64 };
-  const textCellStyle = { fontSize: 12, color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.45 };
+  const textCellStyle = { fontSize: 15, color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.45 };
+  const supplyPrimaryButton = { ...primaryButton, fontSize: 15 };
+  const supplySubtleButton = { ...subtleButton, fontSize: 15 };
   const vatPriceFormat = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 });
 
   const parseSupplyPriceNumber = (value) => {
@@ -1464,8 +1466,8 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
           <div>
-            <div style={{ fontSize: 20, fontWeight: 900 }}>공급단가</div>
-            <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+            <div style={{ fontSize: 23, fontWeight: 900 }}>공급단가</div>
+            <div style={{ fontSize: 15, color: "#64748b", marginTop: 2 }}>
               {currentCategoryLabel} 공급단가를 건별로 추가하고 성분명으로 검색합니다.
             </div>
           </div>
@@ -1476,10 +1478,10 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="성분명 검색"
-            style={inputStyle}
+            style={{ ...inputStyle, fontSize: 15 }}
           />
-          <button onClick={addItem} style={primaryButton}>+ 공급단가 건 추가</button>
-          <div style={{ fontSize: 12, color: "#64748b", textAlign: "right" }}>
+          <button onClick={addItem} style={supplyPrimaryButton}>+ 공급단가 건 추가</button>
+          <div style={{ fontSize: 15, color: "#64748b", textAlign: "right" }}>
             전체 {safeItems.length}건 · 현재 {categoryFilteredItems.length}건 · 표시 {filteredItems.length}건
           </div>
         </div>
@@ -1492,11 +1494,11 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
           return (
             <div key={item.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
               <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", minWidth: 1180, borderCollapse: "collapse" }}>
+                <table style={{ width: "100%", minWidth: 1340, borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={{ background: "#f8fafc" }}>
                       {["카테고리", "제조사", "공급 성분 / 함량 / 포장", "공급단가", "VAT 포함", "VAT 포함 가격", "관리"].map((header) => (
-                        <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 11, color: "#64748b", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
+                        <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#64748b", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
                           {header}
                         </th>
                       ))}
@@ -1529,10 +1531,10 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                               <div key={`${item.id}_ingredient_${index}`} style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6, alignItems: "center" }}>
                                 <input value={ingredient.name} onChange={(event) => updateIngredient(item.id, index, { name: event.target.value })} placeholder="성분명" style={compactInput} />
                                 <input value={ingredient.content} onChange={(event) => updateIngredient(item.id, index, { content: event.target.value })} placeholder="예: 500mg/정" style={compactInput} />
-                                <button onClick={() => removeIngredient(item.id, index)} style={{ ...subtleButton, padding: "5px 7px", fontSize: 11 }}>삭제</button>
+                                <button onClick={() => removeIngredient(item.id, index)} style={{ ...supplySubtleButton, padding: "5px 7px", fontSize: 14 }}>삭제</button>
                               </div>
                             ))}
-                            <button onClick={() => addIngredient(item.id)} style={{ ...subtleButton, width: 116 }}>
+                            <button onClick={() => addIngredient(item.id)} style={{ ...supplySubtleButton, width: 128 }}>
                               + 성분 추가
                             </button>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, paddingTop: 4, borderTop: "1px dashed #e2e8f0" }}>
@@ -1576,7 +1578,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                       </td>
                       <td style={{ padding: 8, width: 92 }}>
                         {isEditing ? (
-                          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#334155", fontWeight: 700 }}>
+                          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 15, color: "#334155", fontWeight: 700 }}>
                             <input
                               type="checkbox"
                               checked={Boolean(item.vatIncluded)}
@@ -1608,15 +1610,15 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                           {isEditing ? (
                             <>
-                              <button onClick={() => saveItem(item.id)} style={{ ...primaryButton, padding: "6px 9px", fontSize: 12 }}>
+                              <button onClick={() => saveItem(item.id)} style={{ ...supplyPrimaryButton, padding: "6px 9px", fontSize: 15 }}>
                                 저장
                               </button>
-                              <button onClick={() => requestDelete(item.id)} style={{ ...subtleButton, borderColor: "#fecaca", color: "#dc2626" }}>
+                              <button onClick={() => requestDelete(item.id)} style={{ ...supplySubtleButton, borderColor: "#fecaca", color: "#dc2626" }}>
                                 삭제
                               </button>
                             </>
                           ) : (
-                            <button onClick={() => setEditing(item.id, true)} style={subtleButton}>
+                            <button onClick={() => setEditing(item.id, true)} style={supplySubtleButton}>
                               수정
                             </button>
                           )}
@@ -1628,11 +1630,11 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
               </div>
 
               <div style={{ borderTop: "1px solid #e2e8f0", overflowX: "auto" }}>
-                <table style={{ width: "100%", minWidth: 1180, borderCollapse: "collapse" }}>
+                <table style={{ width: "100%", minWidth: 1340, borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={{ background: "#f8fafc" }}>
                       {["허가사 수수료", "견적일자", "용법용량", "효능효과", "첨부파일", "비고"].map((header) => (
-                        <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 11, color: "#64748b", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
+                        <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#64748b", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
                           {header}
                         </th>
                       ))}
@@ -1642,7 +1644,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                     <tr style={{ verticalAlign: "top" }}>
                       <td style={{ padding: 8, width: 118 }}>
                         {isEditing ? (
-                          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#334155", fontWeight: 700 }}>
+                          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 15, color: "#334155", fontWeight: 700 }}>
                             <input
                               type="checkbox"
                               checked={Boolean(item.permitCompanyFee)}
@@ -1681,25 +1683,25 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                             type="file"
                             accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,application/pdf"
                             onChange={(event) => handleAttachmentChange(item.id, event)}
-                            style={{ width: "100%", fontSize: 11, marginBottom: 5 }}
+                            style={{ width: "100%", fontSize: 14, marginBottom: 5 }}
                           />
                         )}
                         {item.attachment ? (
                           <div style={{ display: "grid", gap: 4 }}>
-                            <span style={{ fontSize: 11, color: "#475569", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            <span style={{ fontSize: 14, color: "#475569", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                               {item.attachment.name} ({formatBytes(item.attachment.size)})
                             </span>
                             <div style={{ display: "flex", gap: 6 }}>
                               {item.attachment.dataUrl && (
-                                <a href={item.attachment.dataUrl} download={item.attachment.name} style={{ fontSize: 11, color: "#2563eb", fontWeight: 700, textDecoration: "none" }}>
+                                <a href={item.attachment.dataUrl} download={item.attachment.name} style={{ fontSize: 14, color: "#2563eb", fontWeight: 700, textDecoration: "none" }}>
                                   다운로드
                                 </a>
                               )}
-                              {isEditing && <button onClick={() => updateItem(item.id, { attachment: null })} style={{ ...subtleButton, padding: "3px 6px", fontSize: 11 }}>삭제</button>}
+                              {isEditing && <button onClick={() => updateItem(item.id, { attachment: null })} style={{ ...supplySubtleButton, padding: "3px 6px", fontSize: 14 }}>삭제</button>}
                             </div>
                           </div>
                         ) : (
-                          <div style={{ fontSize: 11, color: "#94a3b8" }}>첨부파일 없음</div>
+                          <div style={{ fontSize: 14, color: "#94a3b8" }}>첨부파일 없음</div>
                         )}
                       </td>
                       <td style={{ padding: 8, width: 260 }}>
@@ -1717,7 +1719,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
           );
         })}
         {filteredItems.length === 0 && (
-          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 24, fontSize: 12, color: "#94a3b8", textAlign: "center" }}>
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 24, fontSize: 15, color: "#94a3b8", textAlign: "center" }}>
             {safeItems.length === 0 ? "아직 등록된 공급단가가 없습니다." : "현재 카테고리에서 표시할 공급단가가 없습니다."}
           </div>
         )}
@@ -1726,22 +1728,22 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
       {deleteTargetId !== null && (
         <div style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(15,23,42,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div style={{ width: 420, maxWidth: "94vw", background: "#fff", borderRadius: 10, border: "1px solid #fecaca", boxShadow: "0 20px 60px rgba(0,0,0,.22)", padding: 18 }}>
-            <div style={{ fontSize: 16, fontWeight: 900, color: "#991b1b", marginBottom: 8 }}>공급단가 항목 삭제</div>
-            <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.5, marginBottom: 12 }}>
+            <div style={{ fontSize: 19, fontWeight: 900, color: "#991b1b", marginBottom: 8 }}>공급단가 항목 삭제</div>
+            <div style={{ fontSize: 16, color: "#475569", lineHeight: 1.5, marginBottom: 12 }}>
               정말 삭제하시겠습니까? 아래 칸에 <b>삭제합니다</b> 를 입력하세요.
             </div>
             <input
               value={deleteConfirmText}
               onChange={(event) => setDeleteConfirmText(event.target.value)}
               placeholder="삭제합니다"
-              style={inputStyle}
+              style={{ ...inputStyle, fontSize: 15 }}
               autoFocus
             />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
-              <button onClick={closeDeleteConfirm} style={subtleButton}>취소</button>
+              <button onClick={closeDeleteConfirm} style={supplySubtleButton}>취소</button>
               <button
                 onClick={confirmDelete}
-                style={{ ...primaryButton, background: deleteConfirmText.trim() === "삭제합니다" ? "#dc2626" : "#94a3b8" }}
+                style={{ ...supplyPrimaryButton, background: deleteConfirmText.trim() === "삭제합니다" ? "#dc2626" : "#94a3b8" }}
               >
                 삭제 완료
               </button>
