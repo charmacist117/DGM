@@ -27,10 +27,10 @@ export default function ProjectSidebar({
     <aside style={{
       width: 280,
       flex: "0 0 280px",
-      height: "100vh",
-      maxHeight: "100vh",
+      height: "calc(100vh - var(--app-topbar-height, 0px))",
+      maxHeight: "calc(100vh - var(--app-topbar-height, 0px))",
       position: "sticky",
-      top: 0,
+      top: "var(--app-topbar-height, 0px)",
       alignSelf: "flex-start",
       overflow: "hidden",
       boxSizing: "border-box",

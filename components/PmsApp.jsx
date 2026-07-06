@@ -405,16 +405,34 @@ function normalizeSupplyAttachment(value) {
   };
 }
 
+function normalizeSupplyIngredient(value = {}) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    name: String(source.name || source.ingredientName || ""),
+    content: String(source.content || source.ingredientContent || "")
+  };
+}
+
+function normalizeSupplyIngredients(item = {}) {
+  const source = item && typeof item === "object" && !Array.isArray(item) ? item : {};
+  const ingredients = Array.isArray(source.ingredients)
+    ? source.ingredients.map(normalizeSupplyIngredient)
+    : [
+        normalizeSupplyIngredient({
+          name: source.ingredientName || "",
+          content: source.ingredientContent || ""
+        })
+      ];
+  return ingredients.length > 0 ? ingredients : [normalizeSupplyIngredient()];
+}
+
 function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
   const source = item && typeof item === "object" && !Array.isArray(item) ? item : {};
   const id = source.id ?? fallbackId;
   return {
     id,
-    productName: String(source.productName || ""),
     manufacturer: String(source.manufacturer || ""),
-    permitCompany: String(source.permitCompany || ""),
-    ingredientName: String(source.ingredientName || ""),
-    ingredientContent: String(source.ingredientContent || ""),
+    ingredients: normalizeSupplyIngredients(source),
     dosage: String(source.dosage || ""),
     efficacy: String(source.efficacy || ""),
     supplyUnitPrice: String(source.supplyUnitPrice || ""),
@@ -1253,17 +1271,22 @@ function TasksTab({
 
 function SupplyPriceTab({ items, onItemsChange, syncState }) {
   const [search, setSearch] = useState("");
+  const [editingIds, setEditingIds] = useState(new Set());
+  const [deleteTargetId, setDeleteTargetId] = useState(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const safeItems = normalizeSupplyPriceItems(items);
   const query = search.trim().toLowerCase();
   const filteredItems = query
     ? safeItems.filter((item) => (
-        item.productName.toLowerCase().includes(query) ||
-        item.ingredientName.toLowerCase().includes(query)
+        (item.ingredients || []).some((ingredient) => (
+          ingredient.name.toLowerCase().includes(query)
+        ))
       ))
     : safeItems;
 
   const compactInput = { ...inputStyle, padding: "6px 8px", fontSize: 12 };
   const compactTextarea = { ...compactInput, resize: "vertical", minHeight: 64 };
+  const textCellStyle = { fontSize: 12, color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.45 };
 
   const replaceItems = (nextItems) => {
     onItemsChange(normalizeSupplyPriceItems(nextItems));
@@ -1278,12 +1301,83 @@ function SupplyPriceTab({ items, onItemsChange, syncState }) {
   };
 
   const addItem = () => {
-    replaceItems([createSupplyPriceItem(), ...safeItems]);
+    const nextItem = createSupplyPriceItem();
+    replaceItems([nextItem, ...safeItems]);
+    setEditingIds((prev) => new Set([...prev, String(nextItem.id)]));
   };
 
   const deleteItem = (itemId) => {
-    if (!window.confirm("이 공급단가 항목을 삭제하시겠습니까?")) return;
     replaceItems(safeItems.filter((item) => String(item.id) !== String(itemId)));
+    setEditingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(String(itemId));
+      return next;
+    });
+  };
+
+  const requestDelete = (itemId) => {
+    setDeleteTargetId(itemId);
+    setDeleteConfirmText("");
+  };
+
+  const closeDeleteConfirm = () => {
+    setDeleteTargetId(null);
+    setDeleteConfirmText("");
+  };
+
+  const confirmDelete = () => {
+    if (deleteConfirmText.trim() !== "삭제합니다") {
+      window.alert("'삭제합니다'를 정확히 입력해야 삭제할 수 있습니다.");
+      return;
+    }
+    deleteItem(deleteTargetId);
+    closeDeleteConfirm();
+  };
+
+  const setEditing = (itemId, editing) => {
+    setEditingIds((prev) => {
+      const next = new Set(prev);
+      if (editing) next.add(String(itemId));
+      else next.delete(String(itemId));
+      return next;
+    });
+  };
+
+  const saveItem = (itemId) => {
+    const item = safeItems.find((candidate) => String(candidate.id) === String(itemId));
+    if (!item) return;
+    const hasIngredient = (item.ingredients || []).some((ingredient) => ingredient.name.trim());
+    if (!item.manufacturer.trim() && !hasIngredient && !item.supplyUnitPrice.trim()) {
+      window.alert("제조사, 성분명, 공급단가 중 하나 이상 입력해주세요.");
+      return;
+    }
+    updateItem(itemId, {});
+    setEditing(itemId, false);
+  };
+
+  const updateIngredient = (itemId, index, patch) => {
+    const item = safeItems.find((candidate) => String(candidate.id) === String(itemId));
+    if (!item) return;
+    const ingredients = [...(item.ingredients || [normalizeSupplyIngredient()])];
+    ingredients[index] = normalizeSupplyIngredient({ ...ingredients[index], ...patch });
+    updateItem(itemId, { ingredients });
+  };
+
+  const addIngredient = (itemId) => {
+    const item = safeItems.find((candidate) => String(candidate.id) === String(itemId));
+    if (!item) return;
+    updateItem(itemId, {
+      ingredients: [...(item.ingredients || []), normalizeSupplyIngredient()]
+    });
+  };
+
+  const removeIngredient = (itemId, index) => {
+    const item = safeItems.find((candidate) => String(candidate.id) === String(itemId));
+    if (!item) return;
+    const ingredients = (item.ingredients || []).filter((_, currentIndex) => currentIndex !== index);
+    updateItem(itemId, {
+      ingredients: ingredients.length ? ingredients : [normalizeSupplyIngredient()]
+    });
   };
 
   const handleAttachmentChange = async (itemId, event) => {
@@ -1319,7 +1413,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState }) {
           <div>
             <div style={{ fontSize: 20, fontWeight: 900 }}>공급단가</div>
             <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-              제품별 공급단가를 건별로 추가하고 제품명 또는 성분명으로 검색합니다.
+              공급단가를 건별로 추가하고 성분명으로 검색합니다.
             </div>
           </div>
           <SyncBadge syncState={syncState} />
@@ -1328,7 +1422,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState }) {
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="제품명 또는 성분명 검색"
+            placeholder="성분명 검색"
             style={inputStyle}
           />
           <button onClick={addItem} style={primaryButton}>+ 공급단가 건 추가</button>
@@ -1340,15 +1434,12 @@ function SupplyPriceTab({ items, onItemsChange, syncState }) {
 
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", minWidth: 1780, borderCollapse: "collapse" }}>
+          <table style={{ width: "100%", minWidth: 1420, borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "#f8fafc" }}>
                 {[
-                  "제품명",
                   "제조사",
-                  "허가사",
-                  "공급 성분",
-                  "함량 및 단위",
+                  "공급 성분 / 함량",
                   "공급단가",
                   "견적일자",
                   "용법용량",
@@ -1363,42 +1454,79 @@ function SupplyPriceTab({ items, onItemsChange, syncState }) {
               </tr>
             </thead>
             <tbody>
-              {filteredItems.map((item) => (
+              {filteredItems.map((item) => {
+                const isEditing = editingIds.has(String(item.id));
+                const ingredients = item.ingredients || [normalizeSupplyIngredient()];
+                return (
                 <tr key={item.id} style={{ borderBottom: "1px solid #f1f5f9", verticalAlign: "top" }}>
-                  <td style={{ padding: 8, width: 160 }}>
-                    <input value={item.productName} onChange={(event) => updateItem(item.id, { productName: event.target.value })} placeholder="제품명" style={compactInput} />
-                  </td>
                   <td style={{ padding: 8, width: 150 }}>
-                    <input value={item.manufacturer} onChange={(event) => updateItem(item.id, { manufacturer: event.target.value })} placeholder="제조사" style={compactInput} />
+                    {isEditing ? (
+                      <input value={item.manufacturer} onChange={(event) => updateItem(item.id, { manufacturer: event.target.value })} placeholder="제조사" style={compactInput} />
+                    ) : (
+                      <div style={textCellStyle}>{item.manufacturer || "-"}</div>
+                    )}
                   </td>
-                  <td style={{ padding: 8, width: 150 }}>
-                    <input value={item.permitCompany} onChange={(event) => updateItem(item.id, { permitCompany: event.target.value })} placeholder="허가사" style={compactInput} />
-                  </td>
-                  <td style={{ padding: 8, width: 150 }}>
-                    <input value={item.ingredientName} onChange={(event) => updateItem(item.id, { ingredientName: event.target.value })} placeholder="성분명" style={compactInput} />
-                  </td>
-                  <td style={{ padding: 8, width: 150 }}>
-                    <input value={item.ingredientContent} onChange={(event) => updateItem(item.id, { ingredientContent: event.target.value })} placeholder="예: 500mg/정" style={compactInput} />
+                  <td style={{ padding: 8, width: 340 }}>
+                    {isEditing ? (
+                      <div style={{ display: "grid", gap: 6 }}>
+                        {ingredients.map((ingredient, index) => (
+                          <div key={`${item.id}_ingredient_${index}`} style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6, alignItems: "center" }}>
+                            <input value={ingredient.name} onChange={(event) => updateIngredient(item.id, index, { name: event.target.value })} placeholder="성분명" style={compactInput} />
+                            <input value={ingredient.content} onChange={(event) => updateIngredient(item.id, index, { content: event.target.value })} placeholder="예: 500mg/정" style={compactInput} />
+                            <button onClick={() => removeIngredient(item.id, index)} style={{ ...subtleButton, padding: "5px 7px", fontSize: 11 }}>삭제</button>
+                          </div>
+                        ))}
+                        <button onClick={() => addIngredient(item.id)} style={{ ...subtleButton, width: 116 }}>
+                          + 성분 추가
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "grid", gap: 4 }}>
+                        {ingredients.some((ingredient) => ingredient.name || ingredient.content) ? ingredients.map((ingredient, index) => (
+                          <div key={`${item.id}_ingredient_view_${index}`} style={textCellStyle}>
+                            {ingredient.name || "-"}{ingredient.content ? ` / ${ingredient.content}` : ""}
+                          </div>
+                        )) : <div style={textCellStyle}>-</div>}
+                      </div>
+                    )}
                   </td>
                   <td style={{ padding: 8, width: 130 }}>
-                    <input value={item.supplyUnitPrice} onChange={(event) => updateItem(item.id, { supplyUnitPrice: event.target.value })} placeholder="예: 1,250원" style={compactInput} />
+                    {isEditing ? (
+                      <input value={item.supplyUnitPrice} onChange={(event) => updateItem(item.id, { supplyUnitPrice: event.target.value })} placeholder="예: 1,250원" style={compactInput} />
+                    ) : (
+                      <div style={textCellStyle}>{item.supplyUnitPrice || "-"}</div>
+                    )}
                   </td>
                   <td style={{ padding: 8, width: 130 }}>
-                    <input type="date" value={item.quoteDate} onChange={(event) => updateItem(item.id, { quoteDate: event.target.value })} style={compactInput} />
+                    {isEditing ? (
+                      <input type="date" value={item.quoteDate} onChange={(event) => updateItem(item.id, { quoteDate: event.target.value })} style={compactInput} />
+                    ) : (
+                      <div style={textCellStyle}>{item.quoteDate ? fmt(item.quoteDate) : "-"}</div>
+                    )}
                   </td>
                   <td style={{ padding: 8, width: 190 }}>
-                    <textarea value={item.dosage} onChange={(event) => updateItem(item.id, { dosage: event.target.value })} placeholder="용법용량" style={compactTextarea} />
+                    {isEditing ? (
+                      <textarea value={item.dosage} onChange={(event) => updateItem(item.id, { dosage: event.target.value })} placeholder="용법용량" style={compactTextarea} />
+                    ) : (
+                      <div style={textCellStyle}>{item.dosage || "-"}</div>
+                    )}
                   </td>
                   <td style={{ padding: 8, width: 190 }}>
-                    <textarea value={item.efficacy} onChange={(event) => updateItem(item.id, { efficacy: event.target.value })} placeholder="효능효과" style={compactTextarea} />
+                    {isEditing ? (
+                      <textarea value={item.efficacy} onChange={(event) => updateItem(item.id, { efficacy: event.target.value })} placeholder="효능효과" style={compactTextarea} />
+                    ) : (
+                      <div style={textCellStyle}>{item.efficacy || "-"}</div>
+                    )}
                   </td>
                   <td style={{ padding: 8, width: 240 }}>
-                    <input
-                      type="file"
-                      accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,application/pdf"
-                      onChange={(event) => handleAttachmentChange(item.id, event)}
-                      style={{ width: "100%", fontSize: 11, marginBottom: 5 }}
-                    />
+                    {isEditing && (
+                      <input
+                        type="file"
+                        accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,application/pdf"
+                        onChange={(event) => handleAttachmentChange(item.id, event)}
+                        style={{ width: "100%", fontSize: 11, marginBottom: 5 }}
+                      />
+                    )}
                     {item.attachment ? (
                       <div style={{ display: "grid", gap: 4 }}>
                         <span style={{ fontSize: 11, color: "#475569", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1410,23 +1538,37 @@ function SupplyPriceTab({ items, onItemsChange, syncState }) {
                               다운로드
                             </a>
                           )}
-                          <button onClick={() => updateItem(item.id, { attachment: null })} style={{ ...subtleButton, padding: "3px 6px", fontSize: 11 }}>삭제</button>
+                          {isEditing && <button onClick={() => updateItem(item.id, { attachment: null })} style={{ ...subtleButton, padding: "3px 6px", fontSize: 11 }}>삭제</button>}
                         </div>
                       </div>
                     ) : (
                       <div style={{ fontSize: 11, color: "#94a3b8" }}>첨부파일 없음</div>
                     )}
                   </td>
-                  <td style={{ padding: 8, width: 72 }}>
-                    <button onClick={() => deleteItem(item.id)} style={{ ...subtleButton, borderColor: "#fecaca", color: "#dc2626" }}>
-                      삭제
-                    </button>
+                  <td style={{ padding: 8, width: 112 }}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {isEditing ? (
+                        <>
+                          <button onClick={() => saveItem(item.id)} style={{ ...primaryButton, padding: "6px 9px", fontSize: 12 }}>
+                            저장
+                          </button>
+                          <button onClick={() => requestDelete(item.id)} style={{ ...subtleButton, borderColor: "#fecaca", color: "#dc2626" }}>
+                            삭제
+                          </button>
+                        </>
+                      ) : (
+                        <button onClick={() => setEditing(item.id, true)} style={subtleButton}>
+                          수정
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {filteredItems.length === 0 && (
                 <tr>
-                  <td colSpan={11} style={{ padding: 24, fontSize: 12, color: "#94a3b8", textAlign: "center" }}>
+                  <td colSpan={8} style={{ padding: 24, fontSize: 12, color: "#94a3b8", textAlign: "center" }}>
                     {safeItems.length === 0 ? "아직 등록된 공급단가가 없습니다." : "검색 결과가 없습니다."}
                   </td>
                 </tr>
@@ -1435,6 +1577,33 @@ function SupplyPriceTab({ items, onItemsChange, syncState }) {
           </table>
         </div>
       </div>
+
+      {deleteTargetId !== null && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(15,23,42,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ width: 420, maxWidth: "94vw", background: "#fff", borderRadius: 10, border: "1px solid #fecaca", boxShadow: "0 20px 60px rgba(0,0,0,.22)", padding: 18 }}>
+            <div style={{ fontSize: 16, fontWeight: 900, color: "#991b1b", marginBottom: 8 }}>공급단가 항목 삭제</div>
+            <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.5, marginBottom: 12 }}>
+              정말 삭제하시겠습니까? 아래 칸에 <b>삭제합니다</b> 를 입력하세요.
+            </div>
+            <input
+              value={deleteConfirmText}
+              onChange={(event) => setDeleteConfirmText(event.target.value)}
+              placeholder="삭제합니다"
+              style={inputStyle}
+              autoFocus
+            />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+              <button onClick={closeDeleteConfirm} style={subtleButton}>취소</button>
+              <button
+                onClick={confirmDelete}
+                style={{ ...primaryButton, background: deleteConfirmText.trim() === "삭제합니다" ? "#dc2626" : "#94a3b8" }}
+              >
+                삭제 완료
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2493,8 +2662,40 @@ export default function PmsApp() {
   };
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
-            <ProjectSidebar
+    <div style={{ minHeight: "100vh", background: "#f1f5f9", "--app-topbar-height": "58px" }}>
+      <div style={{
+        height: "var(--app-topbar-height)",
+        borderBottom: "1px solid #e2e8f0",
+        background: "#fff",
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "0 16px",
+        boxSizing: "border-box",
+        position: "sticky",
+        top: 0,
+        zIndex: 20
+      }}>
+        {[
+          ["development", "제품개발"],
+          ["supply", "공급단가"]
+        ].map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setModuleTab(id)}
+            style={{
+              ...tabButtonStyle(moduleTab === id),
+              padding: "9px 14px",
+              fontSize: 13
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", minHeight: "calc(100vh - var(--app-topbar-height))" }}>
+        <ProjectSidebar
         isHome={isHome}
         setIsHome={setIsHome}
         setTab={setTab}
@@ -2512,25 +2713,6 @@ export default function PmsApp() {
       />
 
       <main style={{ flex: 1, padding: 16, minWidth: 0 }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-          {[
-            ["development", "제품개발"],
-            ["supply", "공급단가"]
-          ].map(([id, label]) => (
-            <button
-              key={id}
-              onClick={() => setModuleTab(id)}
-              style={{
-                ...tabButtonStyle(moduleTab === id),
-                padding: "9px 14px",
-                fontSize: 13
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
         {moduleTab === "supply" ? (
           <SupplyPriceTab
             items={supplyPriceItems}
@@ -3043,7 +3225,8 @@ export default function PmsApp() {
         )}
           </>
         )}
-      </main>
+        </main>
+      </div>
     </div>
   );
 }
