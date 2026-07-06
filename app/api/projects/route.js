@@ -14,6 +14,7 @@ export async function GET() {
       ok: true,
       projects: result.projects,
       adminLogs: result.adminLogs,
+      supplyPriceItems: result.supplyPriceItems,
       updatedAt: result.updatedAt,
       source: result.source
     });
@@ -38,12 +39,18 @@ export async function PUT(request) {
     }
 
     let adminLogs = Array.isArray(body.adminLogs) ? body.adminLogs : null;
-    if (adminLogs === null) {
+    let supplyPriceItems = Array.isArray(body.supplyPriceItems) ? body.supplyPriceItems : null;
+    if (adminLogs === null || supplyPriceItems === null) {
       const current = await loadProjects();
-      adminLogs = Array.isArray(current.adminLogs) ? current.adminLogs : [];
+      if (adminLogs === null) {
+        adminLogs = Array.isArray(current.adminLogs) ? current.adminLogs : [];
+      }
+      if (supplyPriceItems === null) {
+        supplyPriceItems = Array.isArray(current.supplyPriceItems) ? current.supplyPriceItems : [];
+      }
     }
 
-    const result = await saveProjects(body.projects, adminLogs);
+    const result = await saveProjects(body.projects, adminLogs, supplyPriceItems);
     return Response.json({ ok: true, updatedAt: result.updatedAt });
   } catch (error) {
     console.error("[PUT /api/projects] failed:", error);

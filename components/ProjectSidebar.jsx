@@ -7,6 +7,7 @@ export default function ProjectSidebar({
   isHome,
   setIsHome,
   setTab,
+  setModuleTab,
   isAdmin,
   goToNewProjectPage,
   goToProjectLogsPage,
@@ -18,13 +19,28 @@ export default function ProjectSidebar({
   formatOwners,
   TODAY
 }) {
-  const [draggingProjectId, setDraggingProjectId] = useState(null);
   const [dragOverTarget, setDragOverTarget] = useState(null);
 
   const readDraggedProjectId = (event) => event.dataTransfer.getData("text/project-id");
 
   return (
-    <aside style={{ width: 280, background: "#0f172a", color: "#fff", padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+    <aside style={{
+      width: 280,
+      flex: "0 0 280px",
+      height: "100vh",
+      maxHeight: "100vh",
+      position: "sticky",
+      top: 0,
+      alignSelf: "flex-start",
+      overflow: "hidden",
+      boxSizing: "border-box",
+      background: "#0f172a",
+      color: "#fff",
+      padding: 12,
+      display: "flex",
+      flexDirection: "column",
+      gap: 10
+    }}>
       <div style={{ padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 900 }}>참약사 PB 제품개발 시트</div>
@@ -32,6 +48,7 @@ export default function ProjectSidebar({
         </div>
         <button
           onClick={() => {
+            setModuleTab?.("development");
             setIsHome(true);
             setTab("overview");
             if (typeof window !== "undefined") {
@@ -77,7 +94,16 @@ export default function ProjectSidebar({
         </button>
       )}
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "grid", gap: 8, paddingRight: 4 }}>
+      <div style={{
+        flex: 1,
+        minHeight: 0,
+        overflowY: "auto",
+        display: "grid",
+        gridAutoRows: "max-content",
+        alignContent: "start",
+        gap: 8,
+        paddingRight: 4
+      }}>
         {projectBuckets.map((bucket) => (
           <div
             key={bucket.id}
@@ -115,10 +141,8 @@ export default function ProjectSidebar({
                     onDragStart={(e) => {
                       e.dataTransfer.setData("text/project-id", String(project.id));
                       e.dataTransfer.effectAllowed = "move";
-                      setDraggingProjectId(project.id);
                     }}
                     onDragEnd={() => {
-                      setDraggingProjectId(null);
                       setDragOverTarget(null);
                     }}
                     onDragOver={(e) => {
@@ -144,8 +168,7 @@ export default function ProjectSidebar({
                       color: "#f8fafc",
                       padding: 10,
                       cursor: "grab",
-                      opacity: draggingProjectId === project.id ? 0.45 : 1,
-                      transition: "opacity .12s ease, border-color .12s ease, background .12s ease"
+                      transition: "border-color .12s ease, background .12s ease"
                     }}
                   >
                     <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 2 }}>{project.name}</div>
