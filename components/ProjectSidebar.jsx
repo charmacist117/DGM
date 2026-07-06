@@ -7,12 +7,17 @@ export default function ProjectSidebar({
   isHome,
   setIsHome,
   setTab,
+  moduleTab,
   setModuleTab,
   isAdmin,
   goToNewProjectPage,
   goToProjectLogsPage,
   groupedProjects,
   projectBuckets,
+  supplyCategories = [],
+  supplyCategory = "all",
+  setSupplyCategory,
+  supplyCategoryCounts = {},
   reorderProject,
   selectedId,
   openProject,
@@ -20,6 +25,15 @@ export default function ProjectSidebar({
   TODAY
 }) {
   const [dragOverTarget, setDragOverTarget] = useState(null);
+  const isSupplyMode = moduleTab === "supply";
+  const totalSupplyCount = Object.values(supplyCategoryCounts || {}).reduce((sum, count) => sum + Number(count || 0), 0);
+  const supplyCategoryOptions = [
+    { id: "all", label: "전체", color: "#e2e8f0", count: totalSupplyCount },
+    ...supplyCategories.map((category) => ({
+      ...category,
+      count: Number(supplyCategoryCounts?.[category.id] || 0)
+    }))
+  ];
 
   const readDraggedProjectId = (event) => event.dataTransfer.getData("text/project-id");
 
@@ -44,7 +58,9 @@ export default function ProjectSidebar({
       <div style={{ padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 900 }}>참약사 PB 제품개발 시트</div>
-          <div style={{ fontSize: 11, color: "#94a3b8" }}>Vercel Neon Storage</div>
+          <div style={{ fontSize: 11, color: "#94a3b8" }}>
+            {isSupplyMode ? "공급단가 카테고리" : "Vercel Neon Storage"}
+          </div>
         </div>
         <button
           onClick={() => {
@@ -61,8 +77,8 @@ export default function ProjectSidebar({
             width: 34,
             height: 34,
             borderRadius: 8,
-            border: isHome ? "1px solid #7c3aed" : "1px solid #475569",
-            background: isHome ? "#7c3aed" : "transparent",
+            border: !isSupplyMode && isHome ? "1px solid #7c3aed" : "1px solid #475569",
+            background: !isSupplyMode && isHome ? "#7c3aed" : "transparent",
             color: "#fff",
             cursor: "pointer",
             fontSize: 16,
@@ -77,7 +93,7 @@ export default function ProjectSidebar({
         </button>
       </div>
 
-      {isAdmin && (
+      {!isSupplyMode && isAdmin && (
         <button
           onClick={goToNewProjectPage}
           style={{ width: "100%", borderRadius: 8, padding: "8px 10px", border: "1px dashed #475569", background: "transparent", color: "#cbd5e1", cursor: "pointer", fontWeight: 700 }}
@@ -85,7 +101,7 @@ export default function ProjectSidebar({
           + 새 프로젝트
         </button>
       )}
-      {isAdmin && (
+      {!isSupplyMode && isAdmin && (
         <button
           onClick={goToProjectLogsPage}
           style={{ width: "100%", borderRadius: 8, padding: "8px 10px", border: "1px solid #334155", background: "#111827", color: "#cbd5e1", cursor: "pointer", fontWeight: 700, fontSize: 12 }}
@@ -94,97 +110,147 @@ export default function ProjectSidebar({
         </button>
       )}
 
-      <div style={{
-        flex: 1,
-        minHeight: 0,
-        overflowY: "auto",
-        display: "grid",
-        gridAutoRows: "max-content",
-        alignContent: "start",
-        gap: 8,
-        paddingRight: 4
-      }}>
-        {projectBuckets.map((bucket) => (
-          <div
-            key={bucket.id}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragOverTarget(`bucket:${bucket.id}`);
-            }}
-            onDragLeave={() => setDragOverTarget(null)}
-            onDrop={(e) => {
-              e.preventDefault();
-              const projectId = readDraggedProjectId(e);
-              if (projectId) reorderProject(projectId, bucket.id);
-              setDragOverTarget(null);
-            }}
-            style={{
-              border: "1px solid " + (dragOverTarget === `bucket:${bucket.id}` ? bucket.color : "#334155"),
-              borderRadius: 8,
-              padding: 8,
-              background: dragOverTarget === `bucket:${bucket.id}` ? "#172033" : "#111827",
-              transition: "border-color .12s ease, background .12s ease"
-            }}
-          >
-            <div style={{ fontSize: 11, fontWeight: 800, color: bucket.color, marginBottom: 6 }}>
-              {bucket.label} ({groupedProjects[bucket.id].length})
-            </div>
-            <div style={{ display: "grid", gap: 6 }}>
-              {groupedProjects[bucket.id].map((project) => {
-                const launch = project.tasks[project.tasks.length - 1];
-                const dDay = diff(TODAY, launch?.scheduledEnd || TODAY);
-                const active = !isHome && project.id === selectedId;
-                return (
-                  <button
-                    key={project.id}
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData("text/project-id", String(project.id));
-                      e.dataTransfer.effectAllowed = "move";
-                    }}
-                    onDragEnd={() => {
-                      setDragOverTarget(null);
-                    }}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setDragOverTarget(`project:${project.id}`);
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const draggedProjectId = readDraggedProjectId(e);
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      const position = e.clientY > rect.top + rect.height / 2 ? "after" : "before";
-                      if (draggedProjectId) reorderProject(draggedProjectId, bucket.id, project.id, position);
-                      setDragOverTarget(null);
-                    }}
-                    onClick={() => openProject(project.id)}
-                    style={{
-                      textAlign: "left",
-                      borderRadius: 9,
-                      border: "1px solid " + (dragOverTarget === `project:${project.id}` ? bucket.color : (active ? "#475569" : "transparent")),
-                      background: active ? "#1e293b" : "transparent",
-                      color: "#f8fafc",
-                      padding: 10,
-                      cursor: "grab",
-                      transition: "border-color .12s ease, background .12s ease"
-                    }}
-                  >
-                    <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 2 }}>{project.name}</div>
-                    <div style={{ fontSize: 11, color: "#94a3b8" }}>
-                      {project.category} · D-{dDay} · {formatOwners(project)}
-                    </div>
-                  </button>
-                );
-              })}
-              {groupedProjects[bucket.id].length === 0 && (
-                <div style={{ fontSize: 11, color: "#64748b", padding: "6px 2px" }}>프로젝트 없음</div>
-              )}
-            </div>
+      {isSupplyMode ? (
+        <div style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          display: "grid",
+          gridAutoRows: "max-content",
+          alignContent: "start",
+          gap: 8,
+          paddingRight: 4
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 900, color: "#94a3b8", padding: "0 4px 2px" }}>
+            공급단가 카테고리
           </div>
-        ))}
-      </div>
+          {supplyCategoryOptions.map((category) => {
+            const active = supplyCategory === category.id;
+            return (
+              <button
+                key={category.id}
+                onClick={() => setSupplyCategory?.(category.id)}
+                style={{
+                  width: "100%",
+                  borderRadius: 8,
+                  border: "1px solid " + (active ? category.color : "#334155"),
+                  background: active ? "#1e293b" : "#111827",
+                  color: "#f8fafc",
+                  cursor: "pointer",
+                  padding: "11px 10px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  textAlign: "left"
+                }}
+              >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 99, background: category.color, flex: "0 0 8px" }} />
+                  <span style={{ fontSize: 13, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {category.label}
+                  </span>
+                </span>
+                <span style={{ flex: "0 0 auto", fontSize: 11, color: active ? "#e2e8f0" : "#94a3b8", fontWeight: 800 }}>
+                  {category.count}건
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          display: "grid",
+          gridAutoRows: "max-content",
+          alignContent: "start",
+          gap: 8,
+          paddingRight: 4
+        }}>
+          {projectBuckets.map((bucket) => (
+            <div
+              key={bucket.id}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOverTarget(`bucket:${bucket.id}`);
+              }}
+              onDragLeave={() => setDragOverTarget(null)}
+              onDrop={(e) => {
+                e.preventDefault();
+                const projectId = readDraggedProjectId(e);
+                if (projectId) reorderProject(projectId, bucket.id);
+                setDragOverTarget(null);
+              }}
+              style={{
+                border: "1px solid " + (dragOverTarget === `bucket:${bucket.id}` ? bucket.color : "#334155"),
+                borderRadius: 8,
+                padding: 8,
+                background: dragOverTarget === `bucket:${bucket.id}` ? "#172033" : "#111827",
+                transition: "border-color .12s ease, background .12s ease"
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 800, color: bucket.color, marginBottom: 6 }}>
+                {bucket.label} ({groupedProjects[bucket.id].length})
+              </div>
+              <div style={{ display: "grid", gap: 6 }}>
+                {groupedProjects[bucket.id].map((project) => {
+                  const launch = project.tasks[project.tasks.length - 1];
+                  const dDay = diff(TODAY, launch?.scheduledEnd || TODAY);
+                  const active = !isHome && project.id === selectedId;
+                  return (
+                    <button
+                      key={project.id}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("text/project-id", String(project.id));
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onDragEnd={() => {
+                        setDragOverTarget(null);
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setDragOverTarget(`project:${project.id}`);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const draggedProjectId = readDraggedProjectId(e);
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const position = e.clientY > rect.top + rect.height / 2 ? "after" : "before";
+                        if (draggedProjectId) reorderProject(draggedProjectId, bucket.id, project.id, position);
+                        setDragOverTarget(null);
+                      }}
+                      onClick={() => openProject(project.id)}
+                      style={{
+                        textAlign: "left",
+                        borderRadius: 9,
+                        border: "1px solid " + (dragOverTarget === `project:${project.id}` ? bucket.color : (active ? "#475569" : "transparent")),
+                        background: active ? "#1e293b" : "transparent",
+                        color: "#f8fafc",
+                        padding: 10,
+                        cursor: "grab",
+                        transition: "border-color .12s ease, background .12s ease"
+                      }}
+                    >
+                      <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 2, color: "#f8fafc" }}>{project.name}</div>
+                      <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                        {project.category} · D-{dDay} · {formatOwners(project)}
+                      </div>
+                    </button>
+                  );
+                })}
+                {groupedProjects[bucket.id].length === 0 && (
+                  <div style={{ fontSize: 11, color: "#64748b", padding: "6px 2px" }}>프로젝트 없음</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ padding: "8px 10px 2px", borderTop: "1px solid #1e293b", color: "#64748b", fontSize: 10, fontWeight: 700, letterSpacing: 0 }}>
         made by JB, Charmacist

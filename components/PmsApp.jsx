@@ -405,6 +405,29 @@ function normalizeSupplyAttachment(value) {
   };
 }
 
+const SUPPLY_PRICE_CATEGORIES = [
+  { id: "OTC", label: "OTC", color: "#0ea5e9" },
+  { id: "건강기능식품", label: "건강기능식품", color: "#10b981" },
+  { id: "일반식품", label: "일반식품", color: "#f59e0b" },
+  { id: "의약외품", label: "의약외품", color: "#8b5cf6" },
+  { id: "기타", label: "기타", color: "#64748b" }
+];
+const DEFAULT_SUPPLY_PRICE_CATEGORY = SUPPLY_PRICE_CATEGORIES[0].id;
+const MISC_SUPPLY_PRICE_CATEGORY = SUPPLY_PRICE_CATEGORIES[SUPPLY_PRICE_CATEGORIES.length - 1].id;
+
+function normalizeSupplyCategory(value) {
+  const raw = String(value || "").trim();
+  if (SUPPLY_PRICE_CATEGORIES.some((category) => category.id === raw)) return raw;
+  return raw ? MISC_SUPPLY_PRICE_CATEGORY : DEFAULT_SUPPLY_PRICE_CATEGORY;
+}
+
+function normalizeSupplyVatIncluded(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  if (typeof value === "string") return ["1", "true", "yes", "y", "on"].includes(value.trim().toLowerCase());
+  return false;
+}
+
 function normalizeSupplyIngredient(value = {}) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return {
@@ -431,11 +454,13 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
   const id = source.id ?? fallbackId;
   return {
     id,
+    category: normalizeSupplyCategory(source.category || source.supplyCategory || source.productCategory),
     manufacturer: String(source.manufacturer || ""),
     ingredients: normalizeSupplyIngredients(source),
     dosage: String(source.dosage || ""),
     efficacy: String(source.efficacy || ""),
     supplyUnitPrice: String(source.supplyUnitPrice || ""),
+    vatIncluded: normalizeSupplyVatIncluded(source.vatIncluded ?? source.includeVat ?? source.hasVat),
     quoteDate: String(source.quoteDate || ""),
     memo: String(source.memo || ""),
     attachment: normalizeSupplyAttachment(source.attachment),
@@ -1269,24 +1294,44 @@ function TasksTab({
   );
 }
 
-function SupplyPriceTab({ items, onItemsChange, syncState }) {
+function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "all" }) {
   const [search, setSearch] = useState("");
   const [editingIds, setEditingIds] = useState(new Set());
   const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const safeItems = normalizeSupplyPriceItems(items);
+  const categoryLabelById = Object.fromEntries(SUPPLY_PRICE_CATEGORIES.map((category) => [category.id, category.label]));
+  const currentCategory = selectedCategory === "all" ? "all" : normalizeSupplyCategory(selectedCategory);
+  const categoryFilteredItems = currentCategory === "all"
+    ? safeItems
+    : safeItems.filter((item) => item.category === currentCategory);
+  const currentCategoryLabel = currentCategory === "all" ? "전체" : (categoryLabelById[currentCategory] || currentCategory);
   const query = search.trim().toLowerCase();
   const filteredItems = query
-    ? safeItems.filter((item) => (
+    ? categoryFilteredItems.filter((item) => (
         (item.ingredients || []).some((ingredient) => (
           ingredient.name.toLowerCase().includes(query)
         ))
       ))
-    : safeItems;
+    : categoryFilteredItems;
 
   const compactInput = { ...inputStyle, padding: "6px 8px", fontSize: 12 };
   const compactTextarea = { ...compactInput, resize: "vertical", minHeight: 64 };
   const textCellStyle = { fontSize: 12, color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.45 };
+  const vatPriceFormat = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 });
+
+  const parseSupplyPriceNumber = (value) => {
+    const cleaned = String(value || "").replace(/,/g, "").replace(/[^\d.-]/g, "");
+    if (!cleaned || cleaned === "-" || cleaned === "." || cleaned === "-.") return null;
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const formatVatIncludedPrice = (value) => {
+    const price = parseSupplyPriceNumber(value);
+    if (price === null) return "";
+    return `${vatPriceFormat.format(price * 1.1)}원`;
+  };
 
   const replaceItems = (nextItems) => {
     onItemsChange(normalizeSupplyPriceItems(nextItems));
@@ -1301,7 +1346,10 @@ function SupplyPriceTab({ items, onItemsChange, syncState }) {
   };
 
   const addItem = () => {
-    const nextItem = createSupplyPriceItem();
+    const nextItem = normalizeSupplyPriceItem({
+      ...createSupplyPriceItem(),
+      category: currentCategory === "all" ? DEFAULT_SUPPLY_PRICE_CATEGORY : currentCategory
+    });
     replaceItems([nextItem, ...safeItems]);
     setEditingIds((prev) => new Set([...prev, String(nextItem.id)]));
   };
@@ -1413,7 +1461,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState }) {
           <div>
             <div style={{ fontSize: 20, fontWeight: 900 }}>공급단가</div>
             <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-              공급단가를 건별로 추가하고 성분명으로 검색합니다.
+              {currentCategoryLabel} 공급단가를 건별로 추가하고 성분명으로 검색합니다.
             </div>
           </div>
           <SyncBadge syncState={syncState} />
@@ -1427,20 +1475,23 @@ function SupplyPriceTab({ items, onItemsChange, syncState }) {
           />
           <button onClick={addItem} style={primaryButton}>+ 공급단가 건 추가</button>
           <div style={{ fontSize: 12, color: "#64748b", textAlign: "right" }}>
-            전체 {safeItems.length}건 · 표시 {filteredItems.length}건
+            전체 {safeItems.length}건 · 현재 {categoryFilteredItems.length}건 · 표시 {filteredItems.length}건
           </div>
         </div>
       </div>
 
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", minWidth: 1420, borderCollapse: "collapse" }}>
+          <table style={{ width: "100%", minWidth: 1620, borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "#f8fafc" }}>
                 {[
+                  "카테고리",
                   "제조사",
                   "공급 성분 / 함량",
                   "공급단가",
+                  "VAT 포함",
+                  "VAT 포함 가격",
                   "견적일자",
                   "용법용량",
                   "효능효과",
@@ -1459,6 +1510,17 @@ function SupplyPriceTab({ items, onItemsChange, syncState }) {
                 const ingredients = item.ingredients || [normalizeSupplyIngredient()];
                 return (
                 <tr key={item.id} style={{ borderBottom: "1px solid #f1f5f9", verticalAlign: "top" }}>
+                  <td style={{ padding: 8, width: 130 }}>
+                    {isEditing ? (
+                      <select value={item.category} onChange={(event) => updateItem(item.id, { category: event.target.value })} style={compactInput}>
+                        {SUPPLY_PRICE_CATEGORIES.map((category) => (
+                          <option key={category.id} value={category.id}>{category.label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div style={textCellStyle}>{categoryLabelById[item.category] || item.category || "-"}</div>
+                    )}
+                  </td>
                   <td style={{ padding: 8, width: 150 }}>
                     {isEditing ? (
                       <input value={item.manufacturer} onChange={(event) => updateItem(item.id, { manufacturer: event.target.value })} placeholder="제조사" style={compactInput} />
@@ -1495,6 +1557,36 @@ function SupplyPriceTab({ items, onItemsChange, syncState }) {
                       <input value={item.supplyUnitPrice} onChange={(event) => updateItem(item.id, { supplyUnitPrice: event.target.value })} placeholder="예: 1,250원" style={compactInput} />
                     ) : (
                       <div style={textCellStyle}>{item.supplyUnitPrice || "-"}</div>
+                    )}
+                  </td>
+                  <td style={{ padding: 8, width: 92 }}>
+                    {isEditing ? (
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#334155", fontWeight: 700 }}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(item.vatIncluded)}
+                          onChange={(event) => updateItem(item.id, { vatIncluded: event.target.checked })}
+                        />
+                        포함
+                      </label>
+                    ) : (
+                      <div style={textCellStyle}>{item.vatIncluded ? "포함" : "-"}</div>
+                    )}
+                  </td>
+                  <td style={{ padding: 8, width: 130 }}>
+                    {isEditing ? (
+                      <input
+                        value={item.vatIncluded ? formatVatIncludedPrice(item.supplyUnitPrice) : ""}
+                        readOnly
+                        placeholder="자동계산"
+                        style={{ ...compactInput, background: "#f8fafc", color: item.vatIncluded ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
+                      />
+                    ) : item.vatIncluded ? (
+                      <div style={{ ...textCellStyle, fontWeight: 800, color: "#0f172a" }}>
+                        {formatVatIncludedPrice(item.supplyUnitPrice) || "-"}
+                      </div>
+                    ) : (
+                      <div style={textCellStyle}>-</div>
                     )}
                   </td>
                   <td style={{ padding: 8, width: 130 }}>
@@ -1568,8 +1660,8 @@ function SupplyPriceTab({ items, onItemsChange, syncState }) {
               })}
               {filteredItems.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ padding: 24, fontSize: 12, color: "#94a3b8", textAlign: "center" }}>
-                    {safeItems.length === 0 ? "아직 등록된 공급단가가 없습니다." : "검색 결과가 없습니다."}
+                  <td colSpan={11} style={{ padding: 24, fontSize: 12, color: "#94a3b8", textAlign: "center" }}>
+                    {safeItems.length === 0 ? "아직 등록된 공급단가가 없습니다." : "현재 카테고리에서 표시할 공급단가가 없습니다."}
                   </td>
                 </tr>
               )}
@@ -2404,6 +2496,7 @@ export default function PmsApp() {
   } = useProjectsStore();
   const [userRole, setUserRole] = useState(ROLE_GUEST);
   const [moduleTab, setModuleTab] = useState("development");
+  const [supplyCategory, setSupplyCategory] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
   const [tab, setTab] = useState("overview");
   const initialUrlAppliedRef = useRef(false);
@@ -2512,6 +2605,14 @@ export default function PmsApp() {
     });
     return groups;
   }, [projects]);
+
+  const supplyCategoryCounts = useMemo(() => {
+    const counts = Object.fromEntries(SUPPLY_PRICE_CATEGORIES.map((category) => [category.id, 0]));
+    normalizeSupplyPriceItems(supplyPriceItems).forEach((item) => {
+      counts[item.category] = (counts[item.category] || 0) + 1;
+    });
+    return counts;
+  }, [supplyPriceItems]);
 
   const bucketOrder = Object.fromEntries(PROJECT_BUCKETS.map((bucket, index) => [bucket.id, index]));
   const getProjectBucketId = (project) => (
@@ -2699,12 +2800,17 @@ export default function PmsApp() {
         isHome={isHome}
         setIsHome={setIsHome}
         setTab={setTab}
+        moduleTab={moduleTab}
         setModuleTab={setModuleTab}
         isAdmin={isAdmin}
         goToNewProjectPage={goToNewProjectPage}
         goToProjectLogsPage={goToProjectLogsPage}
         groupedProjects={groupedProjects}
         projectBuckets={PROJECT_BUCKETS}
+        supplyCategories={SUPPLY_PRICE_CATEGORIES}
+        supplyCategory={supplyCategory}
+        setSupplyCategory={setSupplyCategory}
+        supplyCategoryCounts={supplyCategoryCounts}
         reorderProject={reorderProject}
         selectedId={selectedId}
         openProject={openProject}
@@ -2718,6 +2824,7 @@ export default function PmsApp() {
             items={supplyPriceItems}
             onItemsChange={setSupplyPriceItems}
             syncState={syncState}
+            selectedCategory={supplyCategory}
           />
         ) : isHome ? (
           <>
