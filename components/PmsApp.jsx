@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ProjectSidebar from "@/components/ProjectSidebar";
 import {
@@ -421,7 +421,7 @@ function normalizeSupplyCategory(value) {
   return raw ? MISC_SUPPLY_PRICE_CATEGORY : DEFAULT_SUPPLY_PRICE_CATEGORY;
 }
 
-function normalizeSupplyVatIncluded(value) {
+function normalizeSupplyCheckedValue(value) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value === 1;
   if (typeof value === "string") return ["1", "true", "yes", "y", "on"].includes(value.trim().toLowerCase());
@@ -460,7 +460,10 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     dosage: String(source.dosage || ""),
     efficacy: String(source.efficacy || ""),
     supplyUnitPrice: String(source.supplyUnitPrice || ""),
-    vatIncluded: normalizeSupplyVatIncluded(source.vatIncluded ?? source.includeVat ?? source.hasVat),
+    vatIncluded: normalizeSupplyCheckedValue(source.vatIncluded ?? source.includeVat ?? source.hasVat),
+    permitCompanyFee: normalizeSupplyCheckedValue(
+      source.permitCompanyFee ?? source.licenseCompanyFee ?? source.approvalCompanyFee ?? source.authorizationCompanyFee
+    ),
     quoteDate: String(source.quoteDate || ""),
     memo: String(source.memo || ""),
     attachment: normalizeSupplyAttachment(source.attachment),
@@ -1482,22 +1485,20 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
 
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", minWidth: 1620, borderCollapse: "collapse" }}>
+          <table style={{ width: "100%", minWidth: 1380, borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "#f8fafc" }}>
-                {[
-                  "카테고리",
-                  "제조사",
-                  "공급 성분 / 함량",
-                  "공급단가",
-                  "VAT 포함",
-                  "VAT 포함 가격",
-                  "견적일자",
-                  "용법용량",
-                  "효능효과",
-                  "첨부파일",
-                  ""
-                ].map((header) => (
+                {["카테고리", "제조사", "공급 성분 / 함량", "공급단가", "VAT 포함", "VAT 포함 가격"].map((header) => (
+                  <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 11, color: "#64748b", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
+                    {header}
+                  </th>
+                ))}
+                <th rowSpan={2} style={{ textAlign: "left", padding: "9px 10px", fontSize: 11, color: "#64748b", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap", verticalAlign: "middle" }}>
+                  관리
+                </th>
+              </tr>
+              <tr style={{ background: "#f8fafc" }}>
+                {["허가사 수수료", "견적일자", "용법용량", "효능효과", "첨부파일", "비고"].map((header) => (
                   <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 11, color: "#64748b", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
                     {header}
                   </th>
@@ -1509,7 +1510,8 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                 const isEditing = editingIds.has(String(item.id));
                 const ingredients = item.ingredients || [normalizeSupplyIngredient()];
                 return (
-                <tr key={item.id} style={{ borderBottom: "1px solid #f1f5f9", verticalAlign: "top" }}>
+                <Fragment key={item.id}>
+                <tr style={{ borderTop: "1px solid #e2e8f0", verticalAlign: "top" }}>
                   <td style={{ padding: 8, width: 130 }}>
                     {isEditing ? (
                       <select value={item.category} onChange={(event) => updateItem(item.id, { category: event.target.value })} style={compactInput}>
@@ -1589,6 +1591,40 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                       <div style={textCellStyle}>-</div>
                     )}
                   </td>
+                  <td rowSpan={2} style={{ padding: 8, width: 112, verticalAlign: "middle", borderBottom: "1px solid #f1f5f9" }}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {isEditing ? (
+                        <>
+                          <button onClick={() => saveItem(item.id)} style={{ ...primaryButton, padding: "6px 9px", fontSize: 12 }}>
+                            저장
+                          </button>
+                          <button onClick={() => requestDelete(item.id)} style={{ ...subtleButton, borderColor: "#fecaca", color: "#dc2626" }}>
+                            삭제
+                          </button>
+                        </>
+                      ) : (
+                        <button onClick={() => setEditing(item.id, true)} style={subtleButton}>
+                          수정
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+                <tr style={{ borderBottom: "1px solid #f1f5f9", verticalAlign: "top", background: "#fbfdff" }}>
+                  <td style={{ padding: 8, width: 118 }}>
+                    {isEditing ? (
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#334155", fontWeight: 700 }}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(item.permitCompanyFee)}
+                          onChange={(event) => updateItem(item.id, { permitCompanyFee: event.target.checked })}
+                        />
+                        해당
+                      </label>
+                    ) : (
+                      <div style={textCellStyle}>{item.permitCompanyFee ? "해당" : "-"}</div>
+                    )}
+                  </td>
                   <td style={{ padding: 8, width: 130 }}>
                     {isEditing ? (
                       <input type="date" value={item.quoteDate} onChange={(event) => updateItem(item.id, { quoteDate: event.target.value })} style={compactInput} />
@@ -1637,30 +1673,20 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                       <div style={{ fontSize: 11, color: "#94a3b8" }}>첨부파일 없음</div>
                     )}
                   </td>
-                  <td style={{ padding: 8, width: 112 }}>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      {isEditing ? (
-                        <>
-                          <button onClick={() => saveItem(item.id)} style={{ ...primaryButton, padding: "6px 9px", fontSize: 12 }}>
-                            저장
-                          </button>
-                          <button onClick={() => requestDelete(item.id)} style={{ ...subtleButton, borderColor: "#fecaca", color: "#dc2626" }}>
-                            삭제
-                          </button>
-                        </>
-                      ) : (
-                        <button onClick={() => setEditing(item.id, true)} style={subtleButton}>
-                          수정
-                        </button>
-                      )}
-                    </div>
+                  <td style={{ padding: 8, width: 260 }}>
+                    {isEditing ? (
+                      <textarea value={item.memo} onChange={(event) => updateItem(item.id, { memo: event.target.value })} placeholder="비고" style={compactTextarea} />
+                    ) : (
+                      <div style={textCellStyle}>{item.memo || "-"}</div>
+                    )}
                   </td>
                 </tr>
+                </Fragment>
                 );
               })}
               {filteredItems.length === 0 && (
                 <tr>
-                  <td colSpan={11} style={{ padding: 24, fontSize: 12, color: "#94a3b8", textAlign: "center" }}>
+                  <td colSpan={7} style={{ padding: 24, fontSize: 12, color: "#94a3b8", textAlign: "center" }}>
                     {safeItems.length === 0 ? "아직 등록된 공급단가가 없습니다." : "현재 카테고리에서 표시할 공급단가가 없습니다."}
                   </td>
                 </tr>
