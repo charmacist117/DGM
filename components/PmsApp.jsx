@@ -75,6 +75,28 @@ const subtleButton = {
   fontSize: 12
 };
 
+const supplyCompactInputStyle = { ...inputStyle, padding: "6px 8px", fontSize: 15 };
+const supplyCompactTextareaStyle = { ...supplyCompactInputStyle, resize: "vertical", minHeight: 64 };
+const supplyTextCellStyle = { fontSize: 15, color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.45 };
+const supplyPrimaryButtonStyle = { ...primaryButton, fontSize: 15 };
+const supplySubtleButtonStyle = { ...subtleButton, fontSize: 15 };
+const supplyPanelStyle = {
+  background: "#ffffff",
+  border: "1px solid #cbd5e1",
+  borderRadius: 12,
+  boxShadow: "0 10px 26px rgba(15, 23, 42, .08)"
+};
+const supplyCardStyle = {
+  ...supplyPanelStyle,
+  overflow: "hidden",
+  borderLeft: "5px solid #2563eb"
+};
+const supplyHeaderRowStyle = { background: "#e0f2fe" };
+const supplyDetailHeaderRowStyle = { background: "#eef2ff" };
+const supplyBodyRowStyle = { background: "#ffffff" };
+const supplyDetailBodyRowStyle = { background: "#fbfdff" };
+const supplyPriceFormat = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 });
+
 function formatOwners(project) {
   const pm = (project?.pmName || "").trim();
   const am = (project?.amName || "").trim();
@@ -414,11 +436,37 @@ const SUPPLY_PRICE_CATEGORIES = [
 ];
 const DEFAULT_SUPPLY_PRICE_CATEGORY = SUPPLY_PRICE_CATEGORIES[0].id;
 const MISC_SUPPLY_PRICE_CATEGORY = SUPPLY_PRICE_CATEGORIES[SUPPLY_PRICE_CATEGORIES.length - 1].id;
+const SUPPLY_PRICE_CATEGORY_LABEL_BY_ID = Object.fromEntries(SUPPLY_PRICE_CATEGORIES.map((category) => [category.id, category.label]));
 
 function normalizeSupplyCategory(value) {
   const raw = String(value || "").trim();
   if (SUPPLY_PRICE_CATEGORIES.some((category) => category.id === raw)) return raw;
   return raw ? MISC_SUPPLY_PRICE_CATEGORY : DEFAULT_SUPPLY_PRICE_CATEGORY;
+}
+
+function getSupplyQuoteMonth(value) {
+  const raw = String(value || "").trim();
+  return /^\d{4}-\d{2}/.test(raw) ? raw.slice(0, 7) : "";
+}
+
+function parseSupplyPriceNumber(value) {
+  const cleaned = String(value || "").replace(/,/g, "").replace(/[^\d.-]/g, "");
+  if (!cleaned || cleaned === "-" || cleaned === "." || cleaned === "-.") return null;
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatVatIncludedPrice(value) {
+  const price = parseSupplyPriceNumber(value);
+  if (price === null) return "";
+  return `${supplyPriceFormat.format(price * 1.1)}원`;
+}
+
+function formatTotalPrice(value, quantity, multiplier = 1) {
+  const price = parseSupplyPriceNumber(value);
+  const count = parseSupplyPriceNumber(quantity);
+  if (price === null || count === null) return "";
+  return `${supplyPriceFormat.format(price * multiplier * count)}원`;
 }
 
 function normalizeSupplyCheckedValue(value) {
@@ -1310,77 +1358,37 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
   const [editingIds, setEditingIds] = useState(new Set());
   const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
-  const safeItems = normalizeSupplyPriceItems(items);
-  const categoryLabelById = Object.fromEntries(SUPPLY_PRICE_CATEGORIES.map((category) => [category.id, category.label]));
-  const currentCategory = selectedCategory === "all" ? "all" : normalizeSupplyCategory(selectedCategory);
-  const categoryFilteredItems = currentCategory === "all"
-    ? safeItems
-    : safeItems.filter((item) => item.category === currentCategory);
-  const currentCategoryLabel = currentCategory === "all" ? "전체" : (categoryLabelById[currentCategory] || currentCategory);
+  const safeItems = useMemo(() => normalizeSupplyPriceItems(items), [items]);
+  const currentCategory = useMemo(() => (
+    selectedCategory === "all" ? "all" : normalizeSupplyCategory(selectedCategory)
+  ), [selectedCategory]);
+  const categoryFilteredItems = useMemo(() => {
+    if (currentCategory === "all") return safeItems;
+    return safeItems.filter((item) => item.category === currentCategory);
+  }, [currentCategory, safeItems]);
+  const currentCategoryLabel = currentCategory === "all"
+    ? "전체"
+    : (SUPPLY_PRICE_CATEGORY_LABEL_BY_ID[currentCategory] || currentCategory);
   const monthRangeActive = Boolean(fromMonth || toMonth);
-  const getQuoteMonth = (value) => {
-    const raw = String(value || "").trim();
-    return /^\d{4}-\d{2}/.test(raw) ? raw.slice(0, 7) : "";
-  };
-  const monthFilteredItems = monthRangeActive
-    ? categoryFilteredItems.filter((item) => {
-        const quoteMonth = getQuoteMonth(item.quoteDate);
-        if (!quoteMonth) return false;
-        if (fromMonth && quoteMonth < fromMonth) return false;
-        if (toMonth && quoteMonth > toMonth) return false;
-        return true;
-      })
-    : categoryFilteredItems;
-  const query = search.trim().toLowerCase();
-  const filteredItems = query
-    ? monthFilteredItems.filter((item) => (
-        (item.ingredients || []).some((ingredient) => (
-          ingredient.name.toLowerCase().includes(query)
-        ))
+  const monthFilteredItems = useMemo(() => {
+    if (!monthRangeActive) return categoryFilteredItems;
+    return categoryFilteredItems.filter((item) => {
+      const quoteMonth = getSupplyQuoteMonth(item.quoteDate);
+      if (!quoteMonth) return false;
+      if (fromMonth && quoteMonth < fromMonth) return false;
+      if (toMonth && quoteMonth > toMonth) return false;
+      return true;
+    });
+  }, [categoryFilteredItems, fromMonth, monthRangeActive, toMonth]);
+  const query = useMemo(() => search.trim().toLowerCase(), [search]);
+  const filteredItems = useMemo(() => {
+    if (!query) return monthFilteredItems;
+    return monthFilteredItems.filter((item) => (
+      (item.ingredients || []).some((ingredient) => (
+        ingredient.name.toLowerCase().includes(query)
       ))
-    : monthFilteredItems;
-
-  const compactInput = { ...inputStyle, padding: "6px 8px", fontSize: 15 };
-  const compactTextarea = { ...compactInput, resize: "vertical", minHeight: 64 };
-  const textCellStyle = { fontSize: 15, color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.45 };
-  const supplyPrimaryButton = { ...primaryButton, fontSize: 15 };
-  const supplySubtleButton = { ...subtleButton, fontSize: 15 };
-  const supplyPanelStyle = {
-    background: "#ffffff",
-    border: "1px solid #cbd5e1",
-    borderRadius: 12,
-    boxShadow: "0 10px 26px rgba(15, 23, 42, .08)"
-  };
-  const supplyCardStyle = {
-    ...supplyPanelStyle,
-    overflow: "hidden",
-    borderLeft: "5px solid #2563eb"
-  };
-  const supplyHeaderRowStyle = { background: "#e0f2fe" };
-  const supplyDetailHeaderRowStyle = { background: "#eef2ff" };
-  const supplyBodyRowStyle = { background: "#ffffff" };
-  const supplyDetailBodyRowStyle = { background: "#fbfdff" };
-  const vatPriceFormat = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 });
-
-  const parseSupplyPriceNumber = (value) => {
-    const cleaned = String(value || "").replace(/,/g, "").replace(/[^\d.-]/g, "");
-    if (!cleaned || cleaned === "-" || cleaned === "." || cleaned === "-.") return null;
-    const parsed = Number(cleaned);
-    return Number.isFinite(parsed) ? parsed : null;
-  };
-
-  const formatVatIncludedPrice = (value) => {
-    const price = parseSupplyPriceNumber(value);
-    if (price === null) return "";
-    return `${vatPriceFormat.format(price * 1.1)}원`;
-  };
-
-  const formatTotalPrice = (value, quantity, multiplier = 1) => {
-    const price = parseSupplyPriceNumber(value);
-    const count = parseSupplyPriceNumber(quantity);
-    if (price === null || count === null) return "";
-    return `${vatPriceFormat.format(price * multiplier * count)}원`;
-  };
+    ));
+  }, [monthFilteredItems, query]);
 
   const replaceItems = (nextItems) => {
     onItemsChange(normalizeSupplyPriceItems(nextItems));
@@ -1544,12 +1552,12 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                 setFromMonth("");
                 setToMonth("");
               }}
-              style={{ ...supplySubtleButton, padding: "8px 10px", whiteSpace: "nowrap" }}
+              style={{ ...supplySubtleButtonStyle, padding: "8px 10px", whiteSpace: "nowrap" }}
             >
               전체월
             </button>
           </div>
-          <button onClick={addItem} style={supplyPrimaryButton}>+ 공급단가 건 추가</button>
+          <button onClick={addItem} style={supplyPrimaryButtonStyle}>+ 공급단가 건 추가</button>
           <div style={{ fontSize: 15, color: "#64748b", textAlign: "right" }}>
             전체 {safeItems.length}건 · 현재 {categoryFilteredItems.length}건{monthRangeActive ? ` · 기간 ${monthFilteredItems.length}건` : ""} · 표시 {filteredItems.length}건
           </div>
@@ -1560,6 +1568,9 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
         {filteredItems.map((item) => {
           const isEditing = editingIds.has(String(item.id));
           const ingredients = item.ingredients || [normalizeSupplyIngredient()];
+          const totalPrice = formatTotalPrice(item.supplyUnitPrice, item.quantity);
+          const vatIncludedPrice = item.vatIncluded ? formatVatIncludedPrice(item.supplyUnitPrice) : "";
+          const vatTotalPrice = item.vatIncluded ? formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1) : "";
           return (
             <div key={item.id} style={supplyCardStyle}>
               <div style={{ overflowX: "auto" }}>
@@ -1577,20 +1588,20 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                     <tr style={{ ...supplyBodyRowStyle, verticalAlign: "top" }}>
                       <td style={{ padding: 8, width: 130 }}>
                         {isEditing ? (
-                          <select value={item.category} onChange={(event) => updateItem(item.id, { category: event.target.value })} style={compactInput}>
+                          <select value={item.category} onChange={(event) => updateItem(item.id, { category: event.target.value })} style={supplyCompactInputStyle}>
                             {SUPPLY_PRICE_CATEGORIES.map((category) => (
                               <option key={category.id} value={category.id}>{category.label}</option>
                             ))}
                           </select>
                         ) : (
-                          <div style={textCellStyle}>{categoryLabelById[item.category] || item.category || "-"}</div>
+                          <div style={supplyTextCellStyle}>{SUPPLY_PRICE_CATEGORY_LABEL_BY_ID[item.category] || item.category || "-"}</div>
                         )}
                       </td>
                       <td style={{ padding: 8, width: 150 }}>
                         {isEditing ? (
-                          <input value={item.manufacturer} onChange={(event) => updateItem(item.id, { manufacturer: event.target.value })} placeholder="제조사" style={compactInput} />
+                          <input value={item.manufacturer} onChange={(event) => updateItem(item.id, { manufacturer: event.target.value })} placeholder="제조사" style={supplyCompactInputStyle} />
                         ) : (
-                          <div style={textCellStyle}>{item.manufacturer || "-"}</div>
+                          <div style={supplyTextCellStyle}>{item.manufacturer || "-"}</div>
                         )}
                       </td>
                       <td style={{ padding: 8, width: 560 }}>
@@ -1598,12 +1609,12 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                           <div style={{ display: "grid", gap: 6 }}>
                             {ingredients.map((ingredient, index) => (
                               <div key={`${item.id}_ingredient_${index}`} style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6, alignItems: "center" }}>
-                                <input value={ingredient.name} onChange={(event) => updateIngredient(item.id, index, { name: event.target.value })} placeholder="성분명" style={compactInput} />
-                                <input value={ingredient.content} onChange={(event) => updateIngredient(item.id, index, { content: event.target.value })} placeholder="예: 500mg/정" style={compactInput} />
-                                <button onClick={() => removeIngredient(item.id, index)} style={{ ...supplySubtleButton, padding: "5px 7px", fontSize: 14 }}>삭제</button>
+                                <input value={ingredient.name} onChange={(event) => updateIngredient(item.id, index, { name: event.target.value })} placeholder="성분명" style={supplyCompactInputStyle} />
+                                <input value={ingredient.content} onChange={(event) => updateIngredient(item.id, index, { content: event.target.value })} placeholder="예: 500mg/정" style={supplyCompactInputStyle} />
+                                <button onClick={() => removeIngredient(item.id, index)} style={{ ...supplySubtleButtonStyle, padding: "5px 7px", fontSize: 14 }}>삭제</button>
                               </div>
                             ))}
-                            <button onClick={() => addIngredient(item.id)} style={{ ...supplySubtleButton, width: 128 }}>
+                            <button onClick={() => addIngredient(item.id)} style={{ ...supplySubtleButtonStyle, width: 128 }}>
                               + 성분 추가
                             </button>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, paddingTop: 4, borderTop: "1px dashed #e2e8f0" }}>
@@ -1611,19 +1622,19 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                                 value={item.packagingUnit}
                                 onChange={(event) => updateItem(item.id, { packagingUnit: event.target.value })}
                                 placeholder="포장단위"
-                                style={compactInput}
+                                style={supplyCompactInputStyle}
                               />
                               <input
                                 value={item.packagingForm}
                                 onChange={(event) => updateItem(item.id, { packagingForm: event.target.value })}
                                 placeholder="포장형태"
-                                style={compactInput}
+                                style={supplyCompactInputStyle}
                               />
                               <input
                                 value={item.quantity}
                                 onChange={(event) => updateItem(item.id, { quantity: event.target.value })}
                                 placeholder="수량"
-                                style={compactInput}
+                                style={supplyCompactInputStyle}
                               />
                             </div>
                             <input
@@ -1633,18 +1644,18 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                               value={item.minimumOrderBatchQuantity}
                               onChange={(event) => updateItem(item.id, { minimumOrderBatchQuantity: event.target.value })}
                               placeholder="최소 주문 배치 수량"
-                              style={compactInput}
+                              style={supplyCompactInputStyle}
                             />
                           </div>
                         ) : (
                           <div style={{ display: "grid", gap: 4 }}>
                             {ingredients.some((ingredient) => ingredient.name || ingredient.content) ? ingredients.map((ingredient, index) => (
-                              <div key={`${item.id}_ingredient_view_${index}`} style={textCellStyle}>
+                              <div key={`${item.id}_ingredient_view_${index}`} style={supplyTextCellStyle}>
                                 {ingredient.name || "-"}{ingredient.content ? ` / ${ingredient.content}` : ""}
                               </div>
-                            )) : <div style={textCellStyle}>-</div>}
+                            )) : <div style={supplyTextCellStyle}>-</div>}
                             {(item.packagingUnit || item.packagingForm || item.quantity || item.minimumOrderBatchQuantity) && (
-                              <div style={{ ...textCellStyle, color: "#64748b", paddingTop: 4, borderTop: "1px dashed #e2e8f0" }}>
+                              <div style={{ ...supplyTextCellStyle, color: "#64748b", paddingTop: 4, borderTop: "1px dashed #e2e8f0" }}>
                                 {item.packagingUnit ? `포장단위: ${item.packagingUnit}` : ""}
                                 {item.packagingUnit && (item.packagingForm || item.quantity || item.minimumOrderBatchQuantity) ? " · " : ""}
                                 {item.packagingForm ? `포장형태: ${item.packagingForm}` : ""}
@@ -1660,20 +1671,20 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                       <td style={{ padding: 8, width: 130 }}>
                         {isEditing ? (
                           <div style={{ display: "grid", gap: 6 }}>
-                            <input value={item.supplyUnitPrice} onChange={(event) => updateItem(item.id, { supplyUnitPrice: event.target.value })} placeholder="예: 1,250원" style={compactInput} />
+                            <input value={item.supplyUnitPrice} onChange={(event) => updateItem(item.id, { supplyUnitPrice: event.target.value })} placeholder="예: 1,250원" style={supplyCompactInputStyle} />
                             <input
-                              value={formatTotalPrice(item.supplyUnitPrice, item.quantity)}
+                              value={totalPrice}
                               readOnly
                               placeholder="총 금액"
-                              style={{ ...compactInput, background: "#f8fafc", color: formatTotalPrice(item.supplyUnitPrice, item.quantity) ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
+                              style={{ ...supplyCompactInputStyle, background: "#f8fafc", color: totalPrice ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
                             />
                           </div>
                         ) : (
                           <div style={{ display: "grid", gap: 4 }}>
-                            <div style={textCellStyle}>{item.supplyUnitPrice || "-"}</div>
-                            {formatTotalPrice(item.supplyUnitPrice, item.quantity) && (
-                              <div style={{ ...textCellStyle, fontWeight: 800, color: "#0f172a" }}>
-                                총 금액: {formatTotalPrice(item.supplyUnitPrice, item.quantity)}
+                            <div style={supplyTextCellStyle}>{item.supplyUnitPrice || "-"}</div>
+                            {totalPrice && (
+                              <div style={{ ...supplyTextCellStyle, fontWeight: 800, color: "#0f172a" }}>
+                                총 금액: {totalPrice}
                               </div>
                             )}
                           </div>
@@ -1690,53 +1701,53 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                             포함
                           </label>
                         ) : (
-                          <div style={textCellStyle}>{item.vatIncluded ? "포함" : "-"}</div>
+                          <div style={supplyTextCellStyle}>{item.vatIncluded ? "포함" : "-"}</div>
                         )}
                       </td>
                       <td style={{ padding: 8, width: 140 }}>
                         {isEditing ? (
                           <div style={{ display: "grid", gap: 6 }}>
                             <input
-                              value={item.vatIncluded ? formatVatIncludedPrice(item.supplyUnitPrice) : ""}
+                              value={vatIncludedPrice}
                               readOnly
                               placeholder="자동계산"
-                              style={{ ...compactInput, background: "#f8fafc", color: item.vatIncluded ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
+                              style={{ ...supplyCompactInputStyle, background: "#f8fafc", color: item.vatIncluded ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
                             />
                             <input
-                              value={item.vatIncluded ? formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1) : ""}
+                              value={vatTotalPrice}
                               readOnly
                               placeholder="총 금액"
-                              style={{ ...compactInput, background: "#f8fafc", color: item.vatIncluded && formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1) ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
+                              style={{ ...supplyCompactInputStyle, background: "#f8fafc", color: vatTotalPrice ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
                             />
                           </div>
                         ) : item.vatIncluded ? (
                           <div style={{ display: "grid", gap: 4 }}>
-                            <div style={{ ...textCellStyle, fontWeight: 800, color: "#0f172a" }}>
-                              {formatVatIncludedPrice(item.supplyUnitPrice) || "-"}
+                            <div style={{ ...supplyTextCellStyle, fontWeight: 800, color: "#0f172a" }}>
+                              {vatIncludedPrice || "-"}
                             </div>
-                            {formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1) && (
-                              <div style={{ ...textCellStyle, fontWeight: 800, color: "#0f172a" }}>
-                                총 금액: {formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1)}
+                            {vatTotalPrice && (
+                              <div style={{ ...supplyTextCellStyle, fontWeight: 800, color: "#0f172a" }}>
+                                총 금액: {vatTotalPrice}
                               </div>
                             )}
                           </div>
                         ) : (
-                          <div style={textCellStyle}>-</div>
+                          <div style={supplyTextCellStyle}>-</div>
                         )}
                       </td>
                       <td style={{ padding: 8, width: 112 }}>
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                           {isEditing ? (
                             <>
-                              <button onClick={() => saveItem(item.id)} style={{ ...supplyPrimaryButton, padding: "6px 9px", fontSize: 15 }}>
+                              <button onClick={() => saveItem(item.id)} style={{ ...supplyPrimaryButtonStyle, padding: "6px 9px", fontSize: 15 }}>
                                 저장
                               </button>
-                              <button onClick={() => requestDelete(item.id)} style={{ ...supplySubtleButton, borderColor: "#fecaca", color: "#dc2626" }}>
+                              <button onClick={() => requestDelete(item.id)} style={{ ...supplySubtleButtonStyle, borderColor: "#fecaca", color: "#dc2626" }}>
                                 삭제
                               </button>
                             </>
                           ) : (
-                            <button onClick={() => setEditing(item.id, true)} style={supplySubtleButton}>
+                            <button onClick={() => setEditing(item.id, true)} style={supplySubtleButtonStyle}>
                               수정
                             </button>
                           )}
@@ -1771,28 +1782,28 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                             해당
                           </label>
                         ) : (
-                          <div style={textCellStyle}>{item.permitCompanyFee ? "해당" : "-"}</div>
+                          <div style={supplyTextCellStyle}>{item.permitCompanyFee ? "해당" : "-"}</div>
                         )}
                       </td>
                       <td style={{ padding: 8, width: 130 }}>
                         {isEditing ? (
-                          <input type="date" value={item.quoteDate} onChange={(event) => updateItem(item.id, { quoteDate: event.target.value })} style={compactInput} />
+                          <input type="date" value={item.quoteDate} onChange={(event) => updateItem(item.id, { quoteDate: event.target.value })} style={supplyCompactInputStyle} />
                         ) : (
-                          <div style={textCellStyle}>{item.quoteDate ? fmt(item.quoteDate) : "-"}</div>
+                          <div style={supplyTextCellStyle}>{item.quoteDate ? fmt(item.quoteDate) : "-"}</div>
                         )}
                       </td>
                       <td style={{ padding: 8, width: 220 }}>
                         {isEditing ? (
-                          <textarea value={item.dosage} onChange={(event) => updateItem(item.id, { dosage: event.target.value })} placeholder="용법용량" style={compactTextarea} />
+                          <textarea value={item.dosage} onChange={(event) => updateItem(item.id, { dosage: event.target.value })} placeholder="용법용량" style={supplyCompactTextareaStyle} />
                         ) : (
-                          <div style={textCellStyle}>{item.dosage || "-"}</div>
+                          <div style={supplyTextCellStyle}>{item.dosage || "-"}</div>
                         )}
                       </td>
                       <td style={{ padding: 8, width: 220 }}>
                         {isEditing ? (
-                          <textarea value={item.efficacy} onChange={(event) => updateItem(item.id, { efficacy: event.target.value })} placeholder="효능효과" style={compactTextarea} />
+                          <textarea value={item.efficacy} onChange={(event) => updateItem(item.id, { efficacy: event.target.value })} placeholder="효능효과" style={supplyCompactTextareaStyle} />
                         ) : (
-                          <div style={textCellStyle}>{item.efficacy || "-"}</div>
+                          <div style={supplyTextCellStyle}>{item.efficacy || "-"}</div>
                         )}
                       </td>
                       <td style={{ padding: 8, width: 240 }}>
@@ -1815,7 +1826,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                                   다운로드
                                 </a>
                               )}
-                              {isEditing && <button onClick={() => updateItem(item.id, { attachment: null })} style={{ ...supplySubtleButton, padding: "3px 6px", fontSize: 14 }}>삭제</button>}
+                              {isEditing && <button onClick={() => updateItem(item.id, { attachment: null })} style={{ ...supplySubtleButtonStyle, padding: "3px 6px", fontSize: 14 }}>삭제</button>}
                             </div>
                           </div>
                         ) : (
@@ -1824,9 +1835,9 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                       </td>
                       <td style={{ padding: 8, width: 260 }}>
                         {isEditing ? (
-                          <textarea value={item.memo} onChange={(event) => updateItem(item.id, { memo: event.target.value })} placeholder="비고" style={compactTextarea} />
+                          <textarea value={item.memo} onChange={(event) => updateItem(item.id, { memo: event.target.value })} placeholder="비고" style={supplyCompactTextareaStyle} />
                         ) : (
-                          <div style={textCellStyle}>{item.memo || "-"}</div>
+                          <div style={supplyTextCellStyle}>{item.memo || "-"}</div>
                         )}
                       </td>
                     </tr>
@@ -1858,10 +1869,10 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
               autoFocus
             />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
-              <button onClick={closeDeleteConfirm} style={supplySubtleButton}>취소</button>
+              <button onClick={closeDeleteConfirm} style={supplySubtleButtonStyle}>취소</button>
               <button
                 onClick={confirmDelete}
-                style={{ ...supplyPrimaryButton, background: deleteConfirmText.trim() === "삭제합니다" ? "#dc2626" : "#94a3b8" }}
+                style={{ ...supplyPrimaryButtonStyle, background: deleteConfirmText.trim() === "삭제합니다" ? "#dc2626" : "#94a3b8" }}
               >
                 삭제 완료
               </button>
