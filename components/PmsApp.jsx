@@ -1326,6 +1326,21 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
   const textCellStyle = { fontSize: 15, color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.45 };
   const supplyPrimaryButton = { ...primaryButton, fontSize: 15 };
   const supplySubtleButton = { ...subtleButton, fontSize: 15 };
+  const supplyPanelStyle = {
+    background: "#ffffff",
+    border: "1px solid #cbd5e1",
+    borderRadius: 12,
+    boxShadow: "0 10px 26px rgba(15, 23, 42, .08)"
+  };
+  const supplyCardStyle = {
+    ...supplyPanelStyle,
+    overflow: "hidden",
+    borderLeft: "5px solid #2563eb"
+  };
+  const supplyHeaderRowStyle = { background: "#e0f2fe" };
+  const supplyDetailHeaderRowStyle = { background: "#eef2ff" };
+  const supplyBodyRowStyle = { background: "#ffffff" };
+  const supplyDetailBodyRowStyle = { background: "#fbfdff" };
   const vatPriceFormat = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 });
 
   const parseSupplyPriceNumber = (value) => {
@@ -1471,7 +1486,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
-      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
+      <div style={{ ...supplyPanelStyle, padding: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
           <div>
             <div style={{ fontSize: 23, fontWeight: 900 }}>공급단가</div>
@@ -1495,25 +1510,25 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
         </div>
       </div>
 
-      <div style={{ display: "grid", gap: 12 }}>
+      <div style={{ display: "grid", gap: 16 }}>
         {filteredItems.map((item) => {
           const isEditing = editingIds.has(String(item.id));
           const ingredients = item.ingredients || [normalizeSupplyIngredient()];
           return (
-            <div key={item.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
+            <div key={item.id} style={supplyCardStyle}>
               <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", minWidth: 1520, borderCollapse: "collapse" }}>
                   <thead>
-                    <tr style={{ background: "#f8fafc" }}>
+                    <tr style={supplyHeaderRowStyle}>
                       {["카테고리", "제조사", "공급 성분 / 함량 / 포장 / 수량", "공급단가", "VAT 포함", "VAT 포함 가격", "관리"].map((header) => (
-                        <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#64748b", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
+                        <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#1e3a8a", borderBottom: "1px solid #bfdbfe", whiteSpace: "nowrap" }}>
                           {header}
                         </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    <tr style={{ verticalAlign: "top" }}>
+                    <tr style={{ ...supplyBodyRowStyle, verticalAlign: "top" }}>
                       <td style={{ padding: 8, width: 130 }}>
                         {isEditing ? (
                           <select value={item.category} onChange={(event) => updateItem(item.id, { category: event.target.value })} style={compactInput}>
@@ -1675,19 +1690,19 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                 </table>
               </div>
 
-              <div style={{ borderTop: "1px solid #e2e8f0", overflowX: "auto" }}>
+              <div style={{ borderTop: "1px solid #cbd5e1", overflowX: "auto" }}>
                 <table style={{ width: "100%", minWidth: 1340, borderCollapse: "collapse" }}>
                   <thead>
-                    <tr style={{ background: "#f8fafc" }}>
+                    <tr style={supplyDetailHeaderRowStyle}>
                       {["허가사 수수료", "견적일자", "용법용량", "효능효과", "첨부파일", "비고"].map((header) => (
-                        <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#64748b", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
+                        <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#3730a3", borderBottom: "1px solid #c7d2fe", whiteSpace: "nowrap" }}>
                           {header}
                         </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    <tr style={{ verticalAlign: "top" }}>
+                    <tr style={{ ...supplyDetailBodyRowStyle, verticalAlign: "top" }}>
                       <td style={{ padding: 8, width: 118 }}>
                         {isEditing ? (
                           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 15, color: "#334155", fontWeight: 700 }}>
@@ -1765,7 +1780,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
           );
         })}
         {filteredItems.length === 0 && (
-          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 24, fontSize: 15, color: "#94a3b8", textAlign: "center" }}>
+          <div style={{ ...supplyPanelStyle, padding: 24, fontSize: 15, color: "#94a3b8", textAlign: "center" }}>
             {safeItems.length === 0 ? "아직 등록된 공급단가가 없습니다." : "현재 카테고리에서 표시할 공급단가가 없습니다."}
           </div>
         )}
