@@ -44,6 +44,20 @@ const tabButtonStyle = (active) => ({
   fontWeight: 700
 });
 
+const moduleTabButtonStyle = (active) => ({
+  minWidth: 178,
+  height: 48,
+  padding: "0 28px",
+  borderRadius: 10,
+  border: "1px solid " + (active ? "#ccfbf1" : "rgba(204, 251, 241, .32)"),
+  background: active ? "#f0fdfa" : "rgba(240, 253, 250, .12)",
+  color: active ? "#115e59" : "#ecfeff",
+  cursor: "pointer",
+  fontSize: 15,
+  fontWeight: 900,
+  boxShadow: active ? "0 8px 22px rgba(15, 23, 42, .16)" : "none"
+});
+
 const inputStyle = {
   width: "100%",
   padding: "8px 10px",
@@ -2936,36 +2950,50 @@ export default function PmsApp() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f1f5f9", "--app-topbar-height": "58px" }}>
+    <div style={{
+      minHeight: "100vh",
+      background: "#eef7f5",
+      "--app-topbar-height": "72px",
+      "--app-nav-bg": "#0f766e",
+      "--app-nav-bg-strong": "#115e59",
+      "--app-nav-bg-soft": "#ccfbf1",
+      "--app-nav-border": "rgba(204, 251, 241, .32)",
+      "--app-nav-muted": "#a7f3d0"
+    }}>
       <div style={{
         height: "var(--app-topbar-height)",
-        borderBottom: "1px solid #e2e8f0",
-        background: "#fff",
+        borderBottom: "1px solid rgba(204, 251, 241, .28)",
+        background: "var(--app-nav-bg)",
         display: "flex",
         alignItems: "center",
-        gap: 8,
-        padding: "0 16px",
+        gap: 12,
+        padding: "0 18px",
         boxSizing: "border-box",
         position: "sticky",
         top: 0,
         zIndex: 20
       }}>
-        {[
-          ["development", "제품개발"],
-          ["supply", "공급단가"]
-        ].map(([id, label]) => (
-          <button
-            key={id}
-            onClick={() => setModuleTab(id)}
-            style={{
-              ...tabButtonStyle(moduleTab === id),
-              padding: "9px 14px",
-              fontSize: 13
-            }}
-          >
-            {label}
-          </button>
-        ))}
+        <div style={{
+          display: "inline-flex",
+          gap: 8,
+          padding: 6,
+          borderRadius: 14,
+          background: "rgba(255, 255, 255, .1)",
+          border: "1px solid rgba(204, 251, 241, .22)"
+        }}>
+          {[
+            ["development", "제품개발"],
+            ["supply", "공급단가"]
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => setModuleTab(id)}
+              style={moduleTabButtonStyle(moduleTab === id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div style={{ display: "flex", minHeight: "calc(100vh - var(--app-topbar-height))" }}>
