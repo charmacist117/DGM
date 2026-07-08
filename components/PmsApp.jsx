@@ -460,6 +460,9 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     packagingUnit: String(source.packagingUnit || source.packageUnit || ""),
     packagingForm: String(source.packagingForm || source.packageForm || ""),
     quantity: String(source.quantity || source.supplyQuantity || source.qty || ""),
+    minimumOrderBatchQuantity: String(
+      source.minimumOrderBatchQuantity || source.minOrderBatchQuantity || source.minimumBatchQuantity || source.moq || ""
+    ),
     dosage: String(source.dosage || ""),
     efficacy: String(source.efficacy || ""),
     supplyUnitPrice: String(source.supplyUnitPrice || ""),
@@ -1302,6 +1305,8 @@ function TasksTab({
 
 function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "all" }) {
   const [search, setSearch] = useState("");
+  const [fromMonth, setFromMonth] = useState("");
+  const [toMonth, setToMonth] = useState("");
   const [editingIds, setEditingIds] = useState(new Set());
   const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
@@ -1312,14 +1317,28 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
     ? safeItems
     : safeItems.filter((item) => item.category === currentCategory);
   const currentCategoryLabel = currentCategory === "all" ? "전체" : (categoryLabelById[currentCategory] || currentCategory);
+  const monthRangeActive = Boolean(fromMonth || toMonth);
+  const getQuoteMonth = (value) => {
+    const raw = String(value || "").trim();
+    return /^\d{4}-\d{2}/.test(raw) ? raw.slice(0, 7) : "";
+  };
+  const monthFilteredItems = monthRangeActive
+    ? categoryFilteredItems.filter((item) => {
+        const quoteMonth = getQuoteMonth(item.quoteDate);
+        if (!quoteMonth) return false;
+        if (fromMonth && quoteMonth < fromMonth) return false;
+        if (toMonth && quoteMonth > toMonth) return false;
+        return true;
+      })
+    : categoryFilteredItems;
   const query = search.trim().toLowerCase();
   const filteredItems = query
-    ? categoryFilteredItems.filter((item) => (
+    ? monthFilteredItems.filter((item) => (
         (item.ingredients || []).some((ingredient) => (
           ingredient.name.toLowerCase().includes(query)
         ))
       ))
-    : categoryFilteredItems;
+    : monthFilteredItems;
 
   const compactInput = { ...inputStyle, padding: "6px 8px", fontSize: 15 };
   const compactTextarea = { ...compactInput, resize: "vertical", minHeight: 64 };
@@ -1496,16 +1515,43 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
           </div>
           <SyncBadge syncState={syncState} />
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 420px) auto 1fr", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 360px) minmax(360px, 460px) auto 1fr", gap: 8, alignItems: "center" }}>
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="성분명 검색"
             style={{ ...inputStyle, fontSize: 15 }}
           />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6, alignItems: "center" }}>
+            <input
+              type="month"
+              value={fromMonth}
+              max={toMonth || undefined}
+              onChange={(event) => setFromMonth(event.target.value)}
+              title="시작월"
+              style={{ ...inputStyle, fontSize: 15 }}
+            />
+            <input
+              type="month"
+              value={toMonth}
+              min={fromMonth || undefined}
+              onChange={(event) => setToMonth(event.target.value)}
+              title="종료월"
+              style={{ ...inputStyle, fontSize: 15 }}
+            />
+            <button
+              onClick={() => {
+                setFromMonth("");
+                setToMonth("");
+              }}
+              style={{ ...supplySubtleButton, padding: "8px 10px", whiteSpace: "nowrap" }}
+            >
+              전체월
+            </button>
+          </div>
           <button onClick={addItem} style={supplyPrimaryButton}>+ 공급단가 건 추가</button>
           <div style={{ fontSize: 15, color: "#64748b", textAlign: "right" }}>
-            전체 {safeItems.length}건 · 현재 {categoryFilteredItems.length}건 · 표시 {filteredItems.length}건
+            전체 {safeItems.length}건 · 현재 {categoryFilteredItems.length}건{monthRangeActive ? ` · 기간 ${monthFilteredItems.length}건` : ""} · 표시 {filteredItems.length}건
           </div>
         </div>
       </div>
@@ -1520,7 +1566,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                 <table style={{ width: "100%", minWidth: 1520, borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={supplyHeaderRowStyle}>
-                      {["카테고리", "제조사", "공급 성분 / 함량 / 포장 / 수량", "공급단가", "VAT 포함", "VAT 포함 가격", "관리"].map((header) => (
+                      {["카테고리", "제조사", "공급 성분 / 함량 / 포장 / 수량 / 배치", "공급단가", "VAT 포함", "VAT 포함 가격", "관리"].map((header) => (
                         <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#1e3a8a", borderBottom: "1px solid #bfdbfe", whiteSpace: "nowrap" }}>
                           {header}
                         </th>
@@ -1580,6 +1626,15 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                                 style={compactInput}
                               />
                             </div>
+                            <input
+                              type="number"
+                              min="0"
+                              inputMode="numeric"
+                              value={item.minimumOrderBatchQuantity}
+                              onChange={(event) => updateItem(item.id, { minimumOrderBatchQuantity: event.target.value })}
+                              placeholder="최소 주문 배치 수량"
+                              style={compactInput}
+                            />
                           </div>
                         ) : (
                           <div style={{ display: "grid", gap: 4 }}>
@@ -1588,13 +1643,15 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                                 {ingredient.name || "-"}{ingredient.content ? ` / ${ingredient.content}` : ""}
                               </div>
                             )) : <div style={textCellStyle}>-</div>}
-                            {(item.packagingUnit || item.packagingForm || item.quantity) && (
+                            {(item.packagingUnit || item.packagingForm || item.quantity || item.minimumOrderBatchQuantity) && (
                               <div style={{ ...textCellStyle, color: "#64748b", paddingTop: 4, borderTop: "1px dashed #e2e8f0" }}>
                                 {item.packagingUnit ? `포장단위: ${item.packagingUnit}` : ""}
-                                {item.packagingUnit && (item.packagingForm || item.quantity) ? " · " : ""}
+                                {item.packagingUnit && (item.packagingForm || item.quantity || item.minimumOrderBatchQuantity) ? " · " : ""}
                                 {item.packagingForm ? `포장형태: ${item.packagingForm}` : ""}
-                                {item.packagingForm && item.quantity ? " · " : ""}
+                                {item.packagingForm && (item.quantity || item.minimumOrderBatchQuantity) ? " · " : ""}
                                 {item.quantity ? `수량: ${item.quantity}` : ""}
+                                {item.quantity && item.minimumOrderBatchQuantity ? " · " : ""}
+                                {item.minimumOrderBatchQuantity ? `최소 주문 배치 수량: ${item.minimumOrderBatchQuantity}` : ""}
                               </div>
                             )}
                           </div>
