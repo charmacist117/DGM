@@ -48,7 +48,7 @@ export default function ProjectSidebar({
       alignSelf: "flex-start",
       overflow: "hidden",
       boxSizing: "border-box",
-      background: "var(--app-nav-bg-strong, #115e59)",
+      background: "var(--app-nav-bg-strong, #0f172a)",
       color: "#fff",
       padding: 12,
       display: "flex",
@@ -58,7 +58,7 @@ export default function ProjectSidebar({
       <div style={{ padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 900 }}>참약사 PB 제품개발 시트</div>
-          <div style={{ fontSize: 11, color: "var(--app-nav-muted, #a7f3d0)", fontWeight: 700 }}>
+          <div style={{ fontSize: 11, color: "var(--app-nav-muted, #94a3b8)", fontWeight: 700 }}>
             {isSupplyMode ? "공급단가 카테고리" : "제품개발 통합관리"}
           </div>
         </div>
@@ -77,9 +77,9 @@ export default function ProjectSidebar({
             width: 34,
             height: 34,
             borderRadius: 8,
-            border: !isSupplyMode && isHome ? "1px solid #ccfbf1" : "1px solid var(--app-nav-border, rgba(204, 251, 241, .32))",
-            background: !isSupplyMode && isHome ? "#f0fdfa" : "rgba(240, 253, 250, .1)",
-            color: !isSupplyMode && isHome ? "#115e59" : "#ecfeff",
+            border: !isSupplyMode && isHome ? "1px solid #e2e8f0" : "1px solid var(--app-nav-border, rgba(148, 163, 184, .32))",
+            background: !isSupplyMode && isHome ? "#fff" : "rgba(255, 255, 255, .06)",
+            color: !isSupplyMode && isHome ? "#0f172a" : "#e2e8f0",
             cursor: "pointer",
             fontSize: 16,
             display: "flex",
@@ -96,7 +96,7 @@ export default function ProjectSidebar({
       {!isSupplyMode && isAdmin && (
         <button
           onClick={goToNewProjectPage}
-          style={{ width: "100%", borderRadius: 8, padding: "9px 10px", border: "1px dashed rgba(204, 251, 241, .55)", background: "rgba(240, 253, 250, .08)", color: "#ecfeff", cursor: "pointer", fontWeight: 800 }}
+          style={{ width: "100%", borderRadius: 8, padding: "9px 10px", border: "1px dashed rgba(148, 163, 184, .55)", background: "rgba(255, 255, 255, .04)", color: "#e2e8f0", cursor: "pointer", fontWeight: 800 }}
         >
           + 새 프로젝트
         </button>
@@ -104,7 +104,7 @@ export default function ProjectSidebar({
       {!isSupplyMode && isAdmin && (
         <button
           onClick={goToProjectLogsPage}
-          style={{ width: "100%", borderRadius: 8, padding: "9px 10px", border: "1px solid rgba(204, 251, 241, .28)", background: "rgba(15, 118, 110, .52)", color: "#ecfeff", cursor: "pointer", fontWeight: 800, fontSize: 12 }}
+          style={{ width: "100%", borderRadius: 8, padding: "9px 10px", border: "1px solid rgba(148, 163, 184, .28)", background: "rgba(30, 41, 59, .65)", color: "#e2e8f0", cursor: "pointer", fontWeight: 800, fontSize: 12 }}
         >
           프로젝트 이력 전체보기
         </button>
@@ -133,9 +133,9 @@ export default function ProjectSidebar({
                 style={{
                   width: "100%",
                   borderRadius: 8,
-                  border: "1px solid " + (active ? "#ccfbf1" : "rgba(204, 251, 241, .28)"),
-                  background: active ? "#f0fdfa" : "rgba(15, 118, 110, .52)",
-                  color: active ? "#115e59" : "#ecfeff",
+                  border: "1px solid " + (active ? "#e2e8f0" : "rgba(148, 163, 184, .28)"),
+                  background: active ? "#fff" : "rgba(30, 41, 59, .65)",
+                  color: active ? "#0f172a" : "#e2e8f0",
                   cursor: "pointer",
                   padding: "11px 10px",
                   display: "flex",
@@ -151,7 +151,7 @@ export default function ProjectSidebar({
                     {category.label}
                   </span>
                 </span>
-                <span style={{ flex: "0 0 auto", fontSize: 11, color: active ? "#115e59" : "var(--app-nav-muted, #a7f3d0)", fontWeight: 800 }}>
+                <span style={{ flex: "0 0 auto", fontSize: 11, color: active ? "#0f172a" : "var(--app-nav-muted, #94a3b8)", fontWeight: 800 }}>
                   {category.count}건
                 </span>
               </button>
@@ -184,10 +184,10 @@ export default function ProjectSidebar({
                 setDragOverTarget(null);
               }}
               style={{
-                border: "1px solid " + (dragOverTarget === `bucket:${bucket.id}` ? "#ccfbf1" : "rgba(204, 251, 241, .28)"),
+                border: "1px solid " + (dragOverTarget === `bucket:${bucket.id}` ? "#e2e8f0" : "rgba(148, 163, 184, .28)"),
                 borderRadius: 8,
                 padding: 8,
-                background: dragOverTarget === `bucket:${bucket.id}` ? "rgba(240, 253, 250, .14)" : "rgba(15, 118, 110, .42)",
+                background: dragOverTarget === `bucket:${bucket.id}` ? "rgba(255, 255, 255, .08)" : "rgba(30, 41, 59, .62)",
                 transition: "border-color .12s ease, background .12s ease"
               }}
             >
@@ -228,8 +228,8 @@ export default function ProjectSidebar({
                       style={{
                         textAlign: "left",
                         borderRadius: 9,
-                        border: "1px solid " + (dragOverTarget === `project:${project.id}` ? "#ccfbf1" : (active ? "rgba(204, 251, 241, .5)" : "transparent")),
-                        background: active ? "rgba(240, 253, 250, .14)" : "transparent",
+                        border: "1px solid " + (dragOverTarget === `project:${project.id}` ? "#e2e8f0" : (active ? "rgba(148, 163, 184, .5)" : "transparent")),
+                        background: active ? "rgba(255, 255, 255, .08)" : "transparent",
                         color: "#f8fafc",
                         padding: 10,
                         cursor: "grab",
@@ -252,7 +252,7 @@ export default function ProjectSidebar({
         </div>
       )}
 
-      <div style={{ padding: "8px 10px 2px", borderTop: "1px solid rgba(204, 251, 241, .24)", color: "var(--app-nav-muted, #a7f3d0)", fontSize: 10, fontWeight: 700, letterSpacing: 0 }}>
+      <div style={{ padding: "8px 10px 2px", borderTop: "1px solid rgba(148, 163, 184, .24)", color: "var(--app-nav-muted, #94a3b8)", fontSize: 10, fontWeight: 700, letterSpacing: 0 }}>
         made by JB, Charmacist
       </div>
     </aside>

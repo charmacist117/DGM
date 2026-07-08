@@ -49,9 +49,9 @@ const moduleTabButtonStyle = (active) => ({
   height: 48,
   padding: "0 28px",
   borderRadius: 10,
-  border: "1px solid " + (active ? "#ccfbf1" : "rgba(204, 251, 241, .32)"),
-  background: active ? "#f0fdfa" : "rgba(240, 253, 250, .12)",
-  color: active ? "#115e59" : "#ecfeff",
+  border: "1px solid " + (active ? "#e2e8f0" : "rgba(148, 163, 184, .32)"),
+  background: active ? "#fff" : "rgba(255, 255, 255, .08)",
+  color: active ? "#0f172a" : "#e2e8f0",
   cursor: "pointer",
   fontSize: 15,
   fontWeight: 900,
@@ -2952,17 +2952,17 @@ export default function PmsApp() {
   return (
     <div style={{
       minHeight: "100vh",
-      background: "#eef7f5",
+      background: "#f1f5f9",
       "--app-topbar-height": "72px",
-      "--app-nav-bg": "#0f766e",
-      "--app-nav-bg-strong": "#115e59",
-      "--app-nav-bg-soft": "#ccfbf1",
-      "--app-nav-border": "rgba(204, 251, 241, .32)",
-      "--app-nav-muted": "#a7f3d0"
+      "--app-nav-bg": "#111827",
+      "--app-nav-bg-strong": "#0f172a",
+      "--app-nav-bg-soft": "#e2e8f0",
+      "--app-nav-border": "rgba(148, 163, 184, .32)",
+      "--app-nav-muted": "#94a3b8"
     }}>
       <div style={{
         height: "var(--app-topbar-height)",
-        borderBottom: "1px solid rgba(204, 251, 241, .28)",
+        borderBottom: "1px solid rgba(148, 163, 184, .22)",
         background: "var(--app-nav-bg)",
         display: "flex",
         alignItems: "center",
@@ -2978,8 +2978,8 @@ export default function PmsApp() {
           gap: 8,
           padding: 6,
           borderRadius: 14,
-          background: "rgba(255, 255, 255, .1)",
-          border: "1px solid rgba(204, 251, 241, .22)"
+          background: "rgba(255, 255, 255, .06)",
+          border: "1px solid rgba(148, 163, 184, .24)"
         }}>
           {[
             ["development", "제품개발"],
