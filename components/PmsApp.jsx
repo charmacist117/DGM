@@ -12,8 +12,7 @@ import {
   STATUS_LABEL,
   getDefaultDevelopSubTimeline,
   getInitialProjects,
-  normalizeDraftChecklist,
-  normalizeProductSupplySheet
+  normalizeDraftChecklist
 } from "@/lib/pms/defaults";
 import { TODAY, addDays, diff, fmt, toStr } from "@/lib/pms/date";
 import { calcSchedule } from "@/lib/pms/schedule";
@@ -298,26 +297,18 @@ function normalizeProject(project) {
   const finalOrderedTasks = finalTasks.map((task) => phaseTaskMap[task.id] || task);
   const developTask = phaseTaskMap[DEVELOP_TASK_ID] || PHASE_TEMPLATE_BY_ID[DEVELOP_TASK_ID];
   const developSubTimeline = normalizeDevelopSubTimeline(project.developSubTimeline, developTask.duration);
-  const hasProductSupplySheet = project.productSupplySheet && typeof project.productSupplySheet === "object" && !Array.isArray(project.productSupplySheet);
-  const productSupplySheet = normalizeProductSupplySheet(
-    hasProductSupplySheet
-      ? project.productSupplySheet
-      : {
-          manufacturer: project.manufacturer || "",
-          permitCompany: project.permitCompany || ""
-        }
-  );
+  const projectCore = { ...project };
+  delete projectCore.productSupplySheet;
+  delete projectCore.permitCompany;
+  delete projectCore.manufacturer;
 
   return {
-    ...project,
+    ...projectCore,
     pmName: (project.pmName || "").trim(),
     amName: (project.amName || "").trim(),
     manager: project.manager || [project.pmName, project.amName].filter(Boolean).join(" / ") || "미정",
     category: project.category || "건강기능식품",
     start: startDate,
-    manufacturer: productSupplySheet.manufacturer,
-    permitCompany: productSupplySheet.permitCompany,
-    productSupplySheet,
     tasks: finalOrderedTasks,
     developSubTimeline,
     communicationLog: Array.isArray(project.communicationLog) ? project.communicationLog : [],
@@ -2591,7 +2582,6 @@ function ProjectLifecycleLogTab({ logs, onDeleteLog, onToggleHiddenForManager, i
     if (type === "task_status_change") return "태스크 상태";
     if (type === "project_start_date_change") return "프로젝트 날짜";
     if (type === "basic_info_update") return "기본정보";
-    if (type === "product_supply_sheet_update") return "공급단가";
     if (type === "advisor_log_add") return "자문약사";
     if (type === "communication_log_add") return "업체소통";
     if (type === "decision_log_add") return "의사결정";
@@ -2606,7 +2596,6 @@ function ProjectLifecycleLogTab({ logs, onDeleteLog, onToggleHiddenForManager, i
     if (type === "task_start_date_change" || type === "project_start_date_change") return { fg: "#1d4ed8", bg: "#dbeafe" };
     if (type === "task_status_change") return { fg: "#0f766e", bg: "#ccfbf1" };
     if (type === "basic_info_update") return { fg: "#7c3aed", bg: "#f3e8ff" };
-    if (type === "product_supply_sheet_update") return { fg: "#047857", bg: "#d1fae5" };
     if (type === "advisor_log_add" || type === "communication_log_add" || type === "decision_log_add") return { fg: "#0f766e", bg: "#ccfbf1" };
     if (type === "stage_check_yes") return { fg: "#166534", bg: "#dcfce7" };
     if (type === "stage_check_issue") return { fg: "#b91c1c", bg: "#fee2e2" };
