@@ -459,6 +459,7 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     ingredients: normalizeSupplyIngredients(source),
     packagingUnit: String(source.packagingUnit || source.packageUnit || ""),
     packagingForm: String(source.packagingForm || source.packageForm || ""),
+    quantity: String(source.quantity || source.supplyQuantity || source.qty || ""),
     dosage: String(source.dosage || ""),
     efficacy: String(source.efficacy || ""),
     supplyUnitPrice: String(source.supplyUnitPrice || ""),
@@ -1340,6 +1341,13 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
     return `${vatPriceFormat.format(price * 1.1)}원`;
   };
 
+  const formatTotalPrice = (value, quantity, multiplier = 1) => {
+    const price = parseSupplyPriceNumber(value);
+    const count = parseSupplyPriceNumber(quantity);
+    if (price === null || count === null) return "";
+    return `${vatPriceFormat.format(price * multiplier * count)}원`;
+  };
+
   const replaceItems = (nextItems) => {
     onItemsChange(normalizeSupplyPriceItems(nextItems));
   };
@@ -1494,10 +1502,10 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
           return (
             <div key={item.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
               <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", minWidth: 1340, borderCollapse: "collapse" }}>
+                <table style={{ width: "100%", minWidth: 1520, borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={{ background: "#f8fafc" }}>
-                      {["카테고리", "제조사", "공급 성분 / 함량 / 포장", "공급단가", "VAT 포함", "VAT 포함 가격", "관리"].map((header) => (
+                      {["카테고리", "제조사", "공급 성분 / 함량 / 포장 / 수량", "공급단가", "VAT 포함", "VAT 포함 가격", "관리"].map((header) => (
                         <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#64748b", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
                           {header}
                         </th>
@@ -1524,7 +1532,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                           <div style={textCellStyle}>{item.manufacturer || "-"}</div>
                         )}
                       </td>
-                      <td style={{ padding: 8, width: 430 }}>
+                      <td style={{ padding: 8, width: 560 }}>
                         {isEditing ? (
                           <div style={{ display: "grid", gap: 6 }}>
                             {ingredients.map((ingredient, index) => (
@@ -1537,7 +1545,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                             <button onClick={() => addIngredient(item.id)} style={{ ...supplySubtleButton, width: 128 }}>
                               + 성분 추가
                             </button>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, paddingTop: 4, borderTop: "1px dashed #e2e8f0" }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, paddingTop: 4, borderTop: "1px dashed #e2e8f0" }}>
                               <input
                                 value={item.packagingUnit}
                                 onChange={(event) => updateItem(item.id, { packagingUnit: event.target.value })}
@@ -1550,6 +1558,12 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                                 placeholder="포장형태"
                                 style={compactInput}
                               />
+                              <input
+                                value={item.quantity}
+                                onChange={(event) => updateItem(item.id, { quantity: event.target.value })}
+                                placeholder="수량"
+                                style={compactInput}
+                              />
                             </div>
                           </div>
                         ) : (
@@ -1559,11 +1573,13 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                                 {ingredient.name || "-"}{ingredient.content ? ` / ${ingredient.content}` : ""}
                               </div>
                             )) : <div style={textCellStyle}>-</div>}
-                            {(item.packagingUnit || item.packagingForm) && (
+                            {(item.packagingUnit || item.packagingForm || item.quantity) && (
                               <div style={{ ...textCellStyle, color: "#64748b", paddingTop: 4, borderTop: "1px dashed #e2e8f0" }}>
                                 {item.packagingUnit ? `포장단위: ${item.packagingUnit}` : ""}
-                                {item.packagingUnit && item.packagingForm ? " · " : ""}
+                                {item.packagingUnit && (item.packagingForm || item.quantity) ? " · " : ""}
                                 {item.packagingForm ? `포장형태: ${item.packagingForm}` : ""}
+                                {item.packagingForm && item.quantity ? " · " : ""}
+                                {item.quantity ? `수량: ${item.quantity}` : ""}
                               </div>
                             )}
                           </div>
@@ -1571,9 +1587,24 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                       </td>
                       <td style={{ padding: 8, width: 130 }}>
                         {isEditing ? (
-                          <input value={item.supplyUnitPrice} onChange={(event) => updateItem(item.id, { supplyUnitPrice: event.target.value })} placeholder="예: 1,250원" style={compactInput} />
+                          <div style={{ display: "grid", gap: 6 }}>
+                            <input value={item.supplyUnitPrice} onChange={(event) => updateItem(item.id, { supplyUnitPrice: event.target.value })} placeholder="예: 1,250원" style={compactInput} />
+                            <input
+                              value={formatTotalPrice(item.supplyUnitPrice, item.quantity)}
+                              readOnly
+                              placeholder="총 금액"
+                              style={{ ...compactInput, background: "#f8fafc", color: formatTotalPrice(item.supplyUnitPrice, item.quantity) ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
+                            />
+                          </div>
                         ) : (
-                          <div style={textCellStyle}>{item.supplyUnitPrice || "-"}</div>
+                          <div style={{ display: "grid", gap: 4 }}>
+                            <div style={textCellStyle}>{item.supplyUnitPrice || "-"}</div>
+                            {formatTotalPrice(item.supplyUnitPrice, item.quantity) && (
+                              <div style={{ ...textCellStyle, fontWeight: 800, color: "#0f172a" }}>
+                                총 금액: {formatTotalPrice(item.supplyUnitPrice, item.quantity)}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </td>
                       <td style={{ padding: 8, width: 92 }}>
@@ -1592,15 +1623,30 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                       </td>
                       <td style={{ padding: 8, width: 140 }}>
                         {isEditing ? (
-                          <input
-                            value={item.vatIncluded ? formatVatIncludedPrice(item.supplyUnitPrice) : ""}
-                            readOnly
-                            placeholder="자동계산"
-                            style={{ ...compactInput, background: "#f8fafc", color: item.vatIncluded ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
-                          />
+                          <div style={{ display: "grid", gap: 6 }}>
+                            <input
+                              value={item.vatIncluded ? formatVatIncludedPrice(item.supplyUnitPrice) : ""}
+                              readOnly
+                              placeholder="자동계산"
+                              style={{ ...compactInput, background: "#f8fafc", color: item.vatIncluded ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
+                            />
+                            <input
+                              value={item.vatIncluded ? formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1) : ""}
+                              readOnly
+                              placeholder="총 금액"
+                              style={{ ...compactInput, background: "#f8fafc", color: item.vatIncluded && formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1) ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
+                            />
+                          </div>
                         ) : item.vatIncluded ? (
-                          <div style={{ ...textCellStyle, fontWeight: 800, color: "#0f172a" }}>
-                            {formatVatIncludedPrice(item.supplyUnitPrice) || "-"}
+                          <div style={{ display: "grid", gap: 4 }}>
+                            <div style={{ ...textCellStyle, fontWeight: 800, color: "#0f172a" }}>
+                              {formatVatIncludedPrice(item.supplyUnitPrice) || "-"}
+                            </div>
+                            {formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1) && (
+                              <div style={{ ...textCellStyle, fontWeight: 800, color: "#0f172a" }}>
+                                총 금액: {formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1)}
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div style={textCellStyle}>-</div>
