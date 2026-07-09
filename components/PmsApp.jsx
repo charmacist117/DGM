@@ -91,6 +91,7 @@ const subtleButton = {
 const supplyCompactInputStyle = { ...inputStyle, padding: "6px 8px", fontSize: 15 };
 const supplyCompactTextareaStyle = { ...supplyCompactInputStyle, resize: "vertical", minHeight: 64 };
 const supplyTextCellStyle = { fontSize: 15, color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.45 };
+const supplyMoneyTextStyle = { ...supplyTextCellStyle, fontWeight: 800, color: "#0f172a", whiteSpace: "nowrap", wordBreak: "keep-all" };
 const supplyPrimaryButtonStyle = { ...primaryButton, fontSize: 15 };
 const supplySubtleButtonStyle = { ...subtleButton, fontSize: 15 };
 const supplyPanelStyle = {
@@ -1579,7 +1580,16 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
           return (
             <div key={item.id} style={supplyCardStyle}>
               <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", minWidth: 1520, borderCollapse: "collapse" }}>
+                <table style={{ width: "100%", minWidth: 1520, borderCollapse: "collapse", tableLayout: "fixed" }}>
+                  <colgroup>
+                    <col style={{ width: 110 }} />
+                    <col style={{ width: 150 }} />
+                    <col style={{ width: 480 }} />
+                    <col style={{ width: 210 }} />
+                    <col style={{ width: 90 }} />
+                    <col style={{ width: 230 }} />
+                    <col style={{ width: 100 }} />
+                  </colgroup>
                   <thead>
                     <tr style={supplyHeaderRowStyle}>
                       {["카테고리", "제조사", "공급 성분 / 함량 / 포장 / 수량 / 배치", "공급단가", "VAT 포함", "VAT 포함 가격", "관리"].map((header) => (
@@ -1591,7 +1601,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                   </thead>
                   <tbody>
                     <tr style={{ ...supplyBodyRowStyle, verticalAlign: "top" }}>
-                      <td style={{ padding: 8, width: 130 }}>
+                      <td style={{ padding: 8 }}>
                         {isEditing ? (
                           <select value={item.category} onChange={(event) => updateItem(item.id, { category: event.target.value })} style={supplyCompactInputStyle}>
                             {SUPPLY_PRICE_CATEGORIES.map((category) => (
@@ -1602,14 +1612,14 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                           <div style={supplyTextCellStyle}>{SUPPLY_PRICE_CATEGORY_LABEL_BY_ID[item.category] || item.category || "-"}</div>
                         )}
                       </td>
-                      <td style={{ padding: 8, width: 150 }}>
+                      <td style={{ padding: 8 }}>
                         {isEditing ? (
                           <input value={item.manufacturer} onChange={(event) => updateItem(item.id, { manufacturer: event.target.value })} placeholder="제조사" style={supplyCompactInputStyle} />
                         ) : (
                           <div style={supplyTextCellStyle}>{item.manufacturer || "-"}</div>
                         )}
                       </td>
-                      <td style={{ padding: 8, width: 560 }}>
+                      <td style={{ padding: 8 }}>
                         {isEditing ? (
                           <div style={{ display: "grid", gap: 6 }}>
                             {ingredients.map((ingredient, index) => (
@@ -1673,7 +1683,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                           </div>
                         )}
                       </td>
-                      <td style={{ padding: 8, width: 130 }}>
+                      <td style={{ padding: 8 }}>
                         {isEditing ? (
                           <div style={{ display: "grid", gap: 6 }}>
                             <input value={item.supplyUnitPrice} onChange={(event) => updateItem(item.id, { supplyUnitPrice: event.target.value })} placeholder="예: 1,250원" style={supplyCompactInputStyle} />
@@ -1688,14 +1698,14 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                           <div style={{ display: "grid", gap: 4 }}>
                             <div style={supplyTextCellStyle}>{item.supplyUnitPrice || "-"}</div>
                             {totalPrice && (
-                              <div style={{ ...supplyTextCellStyle, fontWeight: 800, color: "#0f172a" }}>
+                              <div style={supplyMoneyTextStyle}>
                                 총 금액: {totalPrice}
                               </div>
                             )}
                           </div>
                         )}
                       </td>
-                      <td style={{ padding: 8, width: 92 }}>
+                      <td style={{ padding: 8 }}>
                         {isEditing ? (
                           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 15, color: "#334155", fontWeight: 700 }}>
                             <input
@@ -1709,7 +1719,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                           <div style={supplyTextCellStyle}>{item.vatIncluded ? "포함" : "-"}</div>
                         )}
                       </td>
-                      <td style={{ padding: 8, width: 140 }}>
+                      <td style={{ padding: 8 }}>
                         {isEditing ? (
                           <div style={{ display: "grid", gap: 6 }}>
                             <input
@@ -1727,11 +1737,11 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                           </div>
                         ) : item.vatIncluded ? (
                           <div style={{ display: "grid", gap: 4 }}>
-                            <div style={{ ...supplyTextCellStyle, fontWeight: 800, color: "#0f172a" }}>
+                            <div style={supplyMoneyTextStyle}>
                               {vatIncludedPrice || "-"}
                             </div>
                             {vatTotalPrice && (
-                              <div style={{ ...supplyTextCellStyle, fontWeight: 800, color: "#0f172a" }}>
+                              <div style={supplyMoneyTextStyle}>
                                 총 금액: {vatTotalPrice}
                               </div>
                             )}
@@ -1740,7 +1750,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                           <div style={supplyTextCellStyle}>-</div>
                         )}
                       </td>
-                      <td style={{ padding: 8, width: 112 }}>
+                      <td style={{ padding: 8 }}>
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                           {isEditing ? (
                             <>
