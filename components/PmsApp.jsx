@@ -408,11 +408,12 @@ function normalizeProject(project) {
       isEnabled: task?.isEnabled !== false
     }));
   const phaseTaskById = Object.fromEntries(normalizedPhaseTasks.map((task) => [task.id, task]));
-  const orderedPhaseTasks = sourceOrderIds
-    .filter((id) => PHASE_ID_SET.has(id) && phaseTaskById[id])
-    .map((id) => phaseTaskById[id]);
+  const extraTaskById = Object.fromEntries(extraTasks.map((task) => [task.id, task]));
+  const orderedTasks = sourceOrderIds
+    .map((id) => phaseTaskById[id] || extraTaskById[id])
+    .filter(Boolean);
   const missingPhaseTasks = normalizedPhaseTasks.filter((task) => !sourceOrderIds.includes(task.id));
-  const finalTasks = [...orderedPhaseTasks, ...missingPhaseTasks, ...extraTasks];
+  const finalTasks = [...orderedTasks, ...missingPhaseTasks];
 
   const hasMissingSchedule = normalizedPhaseTasks.some((task) => !task.scheduledStart || !task.scheduledEnd || !task.originalStart || !task.originalEnd);
   const startDate = project.start || TODAY;
@@ -1047,17 +1048,19 @@ function OverviewTab({ project }) {
 
 function TasksTab({
   project,
-  onTaskSave,
-  onTaskAdd,
-  onTaskReorder,
-  onTaskToggle,
-  onProjectStartChange,
-  onDevelopSubTimelineUpdate,
+  onTaskStatusChange,
+  onScheduleCommit,
   forcedEditTaskId,
   onForcedEditHandled
 }) {
+  const cloneTasks = (tasks = []) => tasks.map((task) => ({ ...task, pred: [...(task.pred || [])] }));
+  const [isEditing, setIsEditing] = useState(false);
   const [editTask, setEditTask] = useState(null);
-  const [projectStart, setProjectStart] = useState(project.start || TODAY);
+  const [draftTasks, setDraftTasks] = useState(() => cloneTasks(project.tasks));
+  const [draftProjectStart, setDraftProjectStart] = useState(project.start || TODAY);
+  const [draftDevelopTimeline, setDraftDevelopTimeline] = useState(() => (
+    normalizeDevelopSubTimeline(project.developSubTimeline, toPositiveInt(project.tasks.find((task) => task.id === DEVELOP_TASK_ID)?.duration, 1))
+  ));
   const [showAddTask, setShowAddTask] = useState(false);
   const [newTask, setNewTask] = useState({
     name: "",
@@ -1065,22 +1068,24 @@ function TasksTab({
     start: project.start || TODAY,
     end: toStr(addDays(project.start || TODAY, 7))
   });
-  const [draftTaskNames, setDraftTaskNames] = useState({});
-  const [draftTaskIcons, setDraftTaskIcons] = useState({});
-  const [draftStartDates, setDraftStartDates] = useState({});
-  const [draftEndDates, setDraftEndDates] = useState({});
-  const [draftSupplierNames, setDraftSupplierNames] = useState({});
   const [draggedTaskId, setDraggedTaskId] = useState(null);
   const [dragOverTaskId, setDragOverTaskId] = useState(null);
   const [dragOverPosition, setDragOverPosition] = useState(null);
-  const developTask = project.tasks.find((task) => task.id === DEVELOP_TASK_ID);
+  const tasks = isEditing ? draftTasks : project.tasks;
+  const developTask = tasks.find((task) => task.id === DEVELOP_TASK_ID);
   const developDuration = toPositiveInt(developTask?.duration, 1);
   const developTimeline = developTask
-    ? normalizeDevelopSubTimeline(project.developSubTimeline, developDuration)
+    ? normalizeDevelopSubTimeline(isEditing ? draftDevelopTimeline : project.developSubTimeline, developDuration)
     : [];
 
   useEffect(() => {
-    setProjectStart(project.start || TODAY);
+    if (isEditing) return;
+    setDraftTasks(cloneTasks(project.tasks));
+    setDraftProjectStart(project.start || TODAY);
+    setDraftDevelopTimeline(normalizeDevelopSubTimeline(
+      project.developSubTimeline,
+      toPositiveInt(project.tasks.find((task) => task.id === DEVELOP_TASK_ID)?.duration, 1)
+    ));
     setNewTask({
       name: "",
       cat: "기타",
@@ -1088,22 +1093,74 @@ function TasksTab({
       end: toStr(addDays(project.start || TODAY, 7))
     });
     setShowAddTask(false);
-  }, [project.id, project.start]);
-
-  useEffect(() => {
-    setDraftTaskNames(Object.fromEntries((project.tasks || []).map((task) => [task.id, task.name || ""])));
-    setDraftTaskIcons(Object.fromEntries((project.tasks || []).map((task) => [task.id, task.icon || ""])));
-    setDraftStartDates(Object.fromEntries((project.tasks || []).map((task) => [task.id, task.scheduledStart || TODAY])));
-    setDraftEndDates(Object.fromEntries((project.tasks || []).map((task) => [task.id, task.scheduledEnd || TODAY])));
-    setDraftSupplierNames(Object.fromEntries((project.tasks || []).map((task) => [task.id, task.vendorName || ""])));
-  }, [project.id, project.tasks]);
+  }, [isEditing, project.developSubTimeline, project.id, project.start, project.tasks]);
 
   useEffect(() => {
     if (!forcedEditTaskId) return;
     const target = (project.tasks || []).find((task) => task.id === forcedEditTaskId);
-    if (target) setEditTask(target);
+    if (target) {
+      if (!isEditing) {
+        setDraftTasks(cloneTasks(project.tasks));
+        setDraftProjectStart(project.start || TODAY);
+        setDraftDevelopTimeline(normalizeDevelopSubTimeline(project.developSubTimeline, toPositiveInt(project.tasks.find((task) => task.id === DEVELOP_TASK_ID)?.duration, 1)));
+        setIsEditing(true);
+      }
+      setEditTask(target);
+    }
     if (onForcedEditHandled) onForcedEditHandled();
-  }, [forcedEditTaskId, onForcedEditHandled, project.tasks]);
+  }, [forcedEditTaskId, isEditing, onForcedEditHandled, project.developSubTimeline, project.start, project.tasks]);
+
+  const beginEditing = () => {
+    setDraftTasks(cloneTasks(project.tasks));
+    setDraftProjectStart(project.start || TODAY);
+    setDraftDevelopTimeline(normalizeDevelopSubTimeline(project.developSubTimeline, toPositiveInt(project.tasks.find((task) => task.id === DEVELOP_TASK_ID)?.duration, 1)));
+    setNewTask({
+      name: "",
+      cat: "기타",
+      start: project.start || TODAY,
+      end: toStr(addDays(project.start || TODAY, 7))
+    });
+    setShowAddTask(false);
+    setIsEditing(true);
+  };
+
+  const updateDraftTask = (taskId, updater) => {
+    setDraftTasks((prev) => prev.map((task) => (
+      task.id === taskId ? updater(task) : task
+    )));
+  };
+
+  const updateDraftTaskDates = (taskId, field, value) => {
+    updateDraftTask(taskId, (task) => {
+      const next = { ...task, [field]: value };
+      return { ...next, duration: durationFromDates(next.scheduledStart, next.scheduledEnd, task.duration || 1) };
+    });
+  };
+
+  const applyTaskDetailPatch = (task, patch) => {
+    updateDraftTask(task.id, (currentTask) => {
+      const hasStartPatch = Boolean(patch.startDate);
+      const hasEndPatch = Boolean(patch.endDate);
+      const hasDurationPatch = typeof patch.duration === "number";
+      const nextStart = hasStartPatch ? toStr(patch.startDate) : currentTask.scheduledStart;
+      let nextEnd = hasEndPatch ? toStr(patch.endDate) : currentTask.scheduledEnd;
+      let nextDuration = hasDurationPatch ? toPositiveInt(patch.duration, currentTask.duration || 1) : currentTask.duration;
+
+      if (hasDurationPatch && !hasEndPatch) nextEnd = toStr(addDays(nextStart, nextDuration));
+      if ((patch.delayDays || 0) > 0) nextEnd = toStr(addDays(nextEnd, patch.delayDays));
+      nextDuration = durationFromDates(nextStart, nextEnd, nextDuration);
+
+      return {
+        ...currentTask,
+        icon: patch.icon ?? currentTask.icon,
+        progress: patch.progress ?? currentTask.progress,
+        notes: patch.notes ?? currentTask.notes,
+        duration: nextDuration,
+        scheduledStart: nextStart,
+        scheduledEnd: nextEnd
+      };
+    });
+  };
 
   const saveDevelopItem = (itemId, field, value) => {
     if (!developTask) return;
@@ -1111,13 +1168,13 @@ function TasksTab({
     const raw = developTimeline.map((item) => (
       item.id === itemId ? { ...item, [field]: Number.isFinite(numeric) ? numeric : item[field] } : item
     ));
-    onDevelopSubTimelineUpdate(normalizeDevelopSubTimeline(raw, developDuration));
+    setDraftDevelopTimeline(normalizeDevelopSubTimeline(raw, developDuration));
   };
   const toggleDevelopItem = (itemId) => {
     const raw = developTimeline.map((item) => (
       item.id === itemId ? { ...item, enabled: item.enabled === false ? true : false } : item
     ));
-    onDevelopSubTimelineUpdate(normalizeDevelopSubTimeline(raw, developDuration));
+    setDraftDevelopTimeline(normalizeDevelopSubTimeline(raw, developDuration));
   };
 
   const saveNewTask = () => {
@@ -1126,26 +1183,40 @@ function TasksTab({
       window.alert("태스크명을 입력해주세요.");
       return;
     }
-    const start = newTask.start || project.start || TODAY;
+    const start = newTask.start || draftProjectStart || TODAY;
     const end = newTask.end || toStr(addDays(start, 1));
-    onTaskAdd({
+    const cat = newTask.cat || "기타";
+    const taskId = `custom_${Date.now()}`;
+    setDraftTasks((prev) => [...prev, {
+      id: taskId,
       name,
-      cat: newTask.cat || "기타",
-      start,
-      end
-    });
+      cat,
+      icon: "📌",
+      color: CAT_COLORS[cat] || "#64748b",
+      duration: durationFromDates(start, end, 1),
+      pred: [],
+      scheduledStart: start,
+      scheduledEnd: end,
+      originalStart: start,
+      originalEnd: end,
+      progress: 0,
+      isEnabled: true,
+      vendorName: "",
+      taskStatus: "pending",
+      notes: ""
+    }]);
     setNewTask({
       name: "",
       cat: "기타",
-      start: project.start || TODAY,
-      end: toStr(addDays(project.start || TODAY, 7))
+      start: draftProjectStart || TODAY,
+      end: toStr(addDays(draftProjectStart || TODAY, 7))
     });
     setShowAddTask(false);
   };
 
   const moveTask = (fromId, toId, position = "before") => {
     if (!fromId || !toId || fromId === toId) return;
-    const ids = (project.tasks || []).map((task) => task.id);
+    const ids = draftTasks.map((task) => task.id);
     const fromIndex = ids.indexOf(fromId);
     const toIndex = ids.indexOf(toId);
     if (fromIndex < 0 || toIndex < 0) return;
@@ -1155,7 +1226,8 @@ function TasksTab({
     const insertIndex = position === "after" ? targetIndex + 1 : targetIndex;
     nextIds.splice(insertIndex, 0, fromId);
     if (nextIds.every((id, index) => id === ids[index])) return;
-    onTaskReorder(nextIds);
+    const taskById = Object.fromEntries(draftTasks.map((task) => [task.id, task]));
+    setDraftTasks(nextIds.map((id) => taskById[id]).filter(Boolean));
   };
 
   const clearTaskDrag = () => {
@@ -1163,35 +1235,107 @@ function TasksTab({
     setDragOverTaskId(null);
     setDragOverPosition(null);
   };
+
+  const getDraftChanges = () => {
+    const originalById = Object.fromEntries((project.tasks || []).map((task) => [task.id, task]));
+    const originalIds = (project.tasks || []).map((task) => task.id);
+    const changes = [];
+    let changeCount = 0;
+
+    draftTasks.forEach((task) => {
+      const original = originalById[task.id];
+      if (!original) {
+        changeCount += 1;
+        changes.push(`${task.name} 태스크 추가`);
+        return;
+      }
+
+      const parts = [];
+      if (task.name !== original.name) parts.push("태스크명");
+      if (task.icon !== original.icon) parts.push("이모지");
+      if (task.scheduledStart !== original.scheduledStart) parts.push("시작일");
+      if (task.scheduledEnd !== original.scheduledEnd) parts.push("완료일");
+      if (task.duration !== original.duration) parts.push("기간");
+      if ((task.vendorName || "") !== (original.vendorName || "")) parts.push("업체");
+      if ((task.progress || 0) !== (original.progress || 0)) parts.push("진행률");
+      if ((task.notes || "") !== (original.notes || "")) parts.push("메모");
+      if (task.isEnabled !== original.isEnabled) parts.push(task.isEnabled === false ? "비활성화" : "활성화");
+      if (parts.length > 0) {
+        changeCount += 1;
+        changes.push(`${task.name}: ${parts.join(", ")} 변경`);
+      }
+    });
+
+    const draftExistingIds = draftTasks.map((task) => task.id).filter((id) => originalById[id]);
+    if (draftExistingIds.join("|") !== originalIds.join("|")) {
+      changeCount += 1;
+      changes.push("태스크 행 순서 변경");
+    }
+    if (draftProjectStart !== project.start) {
+      changeCount += 1;
+      changes.push(`프로젝트 시작일 ${project.start} -> ${draftProjectStart}`);
+    }
+    const originalTimeline = normalizeDevelopSubTimeline(project.developSubTimeline, toPositiveInt(project.tasks.find((task) => task.id === DEVELOP_TASK_ID)?.duration, 1));
+    if (JSON.stringify(draftDevelopTimeline) !== JSON.stringify(originalTimeline)) {
+      changeCount += 1;
+      changes.push("제품 개발 하단 타임라인 변경");
+    }
+
+    return { changeCount, changes };
+  };
+
+  const completeEditing = () => {
+    const { changeCount, changes } = getDraftChanges();
+    if (changeCount > 0) {
+      onScheduleCommit({
+        tasks: cloneTasks(draftTasks),
+        start: draftProjectStart,
+        developSubTimeline: normalizeDevelopSubTimeline(draftDevelopTimeline, developDuration),
+        changeCount,
+        changes
+      });
+    }
+    setEditTask(null);
+    setShowAddTask(false);
+    setIsEditing(false);
+  };
+
+  const handleTaskStatusChange = (task, value) => {
+    onTaskStatusChange(task, value);
+    if (isEditing) updateDraftTask(task.id, (currentTask) => ({ ...currentTask, taskStatus: value }));
+  };
   const scheduleHistory = getScheduleVersionHistory(project);
 
   return (
     <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
       <div style={{ padding: "12px 14px", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
         <div>
-          <div style={{ fontWeight: 800 }}>태스크 일정/진행 수정</div>
+          <div style={{ fontWeight: 800 }}>태스크 일정/진행</div>
           <div style={{ fontSize: 11, color: "#64748b", marginTop: 3 }}>
             일정 버전 <strong style={{ color: "#0f172a" }}>{formatScheduleVersion(project.scheduleVersion)}</strong>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {isEditing && <>
+            <button
+              onClick={() => setShowAddTask((prev) => !prev)}
+              style={{ padding: "6px 9px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 700 }}
+            >
+              행 추가
+            </button>
+            <span style={{ fontSize: 12, color: "#64748b", fontWeight: 700 }}>프로젝트 시작일</span>
+            <input type="date" value={draftProjectStart} onChange={(e) => setDraftProjectStart(e.target.value)} style={{ ...inputStyle, width: 150, padding: "6px 8px", fontSize: 12 }} />
+          </>}
+          {!isEditing && <span style={{ fontSize: 12, color: "#64748b" }}>프로젝트 시작일 {fmt(project.start)}</span>}
           <button
-            onClick={() => setShowAddTask((prev) => !prev)}
-            style={{ padding: "6px 9px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 700 }}
+            onClick={isEditing ? completeEditing : beginEditing}
+            style={{ ...primaryButton, padding: "7px 12px", fontSize: 12 }}
           >
-            행 추가
-          </button>
-          <span style={{ fontSize: 12, color: "#64748b", fontWeight: 700 }}>프로젝트 시작일</span>
-          <input type="date" value={projectStart} onChange={(e) => setProjectStart(e.target.value)} style={{ ...inputStyle, width: 150, padding: "6px 8px", fontSize: 12 }} />
-          <button
-            onClick={() => onProjectStartChange(projectStart)}
-            style={{ padding: "6px 9px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 700 }}
-          >
-            적용
+            {isEditing ? "완료" : "수정"}
           </button>
         </div>
       </div>
-      {showAddTask && (
+      {isEditing && showAddTask && (
         <div style={{ padding: 14, borderBottom: "1px solid #e2e8f0", background: "#f8fafc" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1.5fr 140px 150px 150px auto auto", gap: 8, alignItems: "end" }}>
             <div>
@@ -1252,7 +1396,7 @@ function TasksTab({
           </tr>
         </thead>
         <tbody>
-          {project.tasks.flatMap((task) => {
+          {tasks.flatMap((task, taskIndex) => {
             const enabled = task.isEnabled !== false;
             const isDragging = draggedTaskId === task.id;
             const isDragTarget = dragOverTaskId === task.id && draggedTaskId !== task.id;
@@ -1262,6 +1406,7 @@ function TasksTab({
               <tr
                 key={task.id}
                 onDragOver={(event) => {
+                  if (!isEditing) return;
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
                   const bounds = event.currentTarget.getBoundingClientRect();
@@ -1270,12 +1415,14 @@ function TasksTab({
                   if (dragOverPosition !== position) setDragOverPosition(position);
                 }}
                 onDragLeave={() => {
+                  if (!isEditing) return;
                   if (dragOverTaskId === task.id) {
                     setDragOverTaskId(null);
                     setDragOverPosition(null);
                   }
                 }}
                 onDrop={(event) => {
+                  if (!isEditing) return;
                   event.preventDefault();
                   const bounds = event.currentTarget.getBoundingClientRect();
                   const position = event.clientY - bounds.top < bounds.height / 2 ? "before" : "after";
@@ -1291,135 +1438,114 @@ function TasksTab({
                 }}
               >
                 <td style={{ padding: "9px 12px", fontSize: 12, color: "#64748b" }}>
-                  <button
-                    type="button"
-                    draggable={enabled}
-                    onDragStart={(event) => {
-                      setDraggedTaskId(task.id);
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData("application/x-pms-task", task.id);
-                      event.dataTransfer.setData("text/plain", task.id);
-                    }}
-                    onDragEnd={clearTaskDrag}
-                    title="드래그해서 순서 변경"
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      width: 24,
-                      height: 24,
-                      borderRadius: 6,
-                      border: "1px solid #cbd5e1",
-                      background: "#f8fafc",
-                      cursor: enabled ? "grab" : "not-allowed",
-                      userSelect: "none",
-                      color: "#475569"
-                    }}
-                  >
-                    ↕
-                  </button>
+                  {isEditing ? (
+                    <button
+                      type="button"
+                      draggable={enabled}
+                      onDragStart={(event) => {
+                        setDraggedTaskId(task.id);
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("application/x-pms-task", task.id);
+                        event.dataTransfer.setData("text/plain", task.id);
+                      }}
+                      onDragEnd={clearTaskDrag}
+                      title="드래그해서 순서 변경"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: 24,
+                        height: 24,
+                        borderRadius: 6,
+                        border: "1px solid #cbd5e1",
+                        background: "#f8fafc",
+                        cursor: enabled ? "grab" : "not-allowed",
+                        userSelect: "none",
+                        color: "#475569"
+                      }}
+                    >
+                      ↕
+                    </button>
+                  ) : taskIndex + 1}
                 </td>
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>
-                  <button
-                    onClick={() => onTaskToggle(task, !enabled)}
-                    style={{
-                      width: 44,
-                      height: 24,
-                      borderRadius: 999,
-                      border: "1px solid " + (enabled ? "#10b981" : "#cbd5e1"),
-                      background: enabled ? "#dcfce7" : "#f1f5f9",
-                      cursor: "pointer",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: enabled ? "flex-end" : "flex-start",
-                      padding: 2
-                    }}
-                    title={enabled ? "활성화됨" : "비활성화됨"}
-                  >
-                    <span style={{ width: 18, height: 18, borderRadius: 999, background: enabled ? "#16a34a" : "#94a3b8", display: "block" }} />
-                  </button>
+                  {isEditing ? (
+                    <button
+                      onClick={() => updateDraftTask(task.id, (currentTask) => ({ ...currentTask, isEnabled: !enabled }))}
+                      style={{
+                        width: 44,
+                        height: 24,
+                        borderRadius: 999,
+                        border: "1px solid " + (enabled ? "#10b981" : "#cbd5e1"),
+                        background: enabled ? "#dcfce7" : "#f1f5f9",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: enabled ? "flex-end" : "flex-start",
+                        padding: 2
+                      }}
+                      title={enabled ? "활성화됨" : "비활성화됨"}
+                    >
+                      <span style={{ width: 18, height: 18, borderRadius: 999, background: enabled ? "#16a34a" : "#94a3b8", display: "block" }} />
+                    </button>
+                  ) : (
+                    <span style={{ color: enabled ? "#15803d" : "#94a3b8", fontWeight: 700 }}>{enabled ? "사용" : "미사용"}</span>
+                  )}
                 </td>
                 <td style={{ padding: "9px 12px", fontSize: 13, fontWeight: 700 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 170 }}>
-                    <input
-                      value={draftTaskIcons[task.id] ?? task.icon ?? ""}
-                      onChange={(event) => {
-                        const next = event.target.value;
-                        setDraftTaskIcons((prev) => ({ ...prev, [task.id]: next }));
-                      }}
-                      onBlur={(event) => {
-                        const next = event.target.value.trim();
-                        if (next && next !== task.icon) onTaskSave(task, { icon: next });
-                      }}
-                      maxLength={8}
-                      title="태스크 이모지 수정"
-                      aria-label={`${task.name} 이모지`}
-                      style={{ ...inputStyle, flex: "0 0 40px", width: 40, padding: "4px", textAlign: "center", fontSize: 17 }}
-                      disabled={!enabled}
-                    />
-                    <input
-                      value={draftTaskNames[task.id] ?? task.name}
-                      onChange={(event) => {
-                        const next = event.target.value;
-                        setDraftTaskNames((prev) => ({ ...prev, [task.id]: next }));
-                      }}
-                      onBlur={(event) => {
-                        const next = event.target.value.trim();
-                        if (next && next !== task.name) onTaskSave(task, { name: next });
-                      }}
-                      style={{ ...inputStyle, width: "100%", minWidth: 130, padding: "5px 8px", fontSize: 12, fontWeight: 700 }}
-                      disabled={!enabled}
-                    />
+                    {isEditing ? <>
+                      <input
+                        value={task.icon || ""}
+                        onChange={(event) => updateDraftTask(task.id, (currentTask) => ({ ...currentTask, icon: event.target.value }))}
+                        maxLength={8}
+                        title="태스크 이모지 수정"
+                        aria-label={`${task.name} 이모지`}
+                        style={{ ...inputStyle, flex: "0 0 40px", width: 40, padding: "4px", textAlign: "center", fontSize: 17 }}
+                        disabled={!enabled}
+                      />
+                      <input
+                        value={task.name}
+                        onChange={(event) => updateDraftTask(task.id, (currentTask) => ({ ...currentTask, name: event.target.value }))}
+                        style={{ ...inputStyle, width: "100%", minWidth: 130, padding: "5px 8px", fontSize: 12, fontWeight: 700 }}
+                        disabled={!enabled}
+                      />
+                    </> : <span>{task.icon} {task.name}</span>}
                   </div>
                 </td>
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>
-                  <input
-                    type="date"
-                    value={draftStartDates[task.id] || task.scheduledStart}
-                    onChange={(event) => {
-                      const next = event.target.value;
-                      setDraftStartDates((prev) => ({ ...prev, [task.id]: next }));
-                    }}
-                    onBlur={(event) => {
-                      const next = event.target.value;
-                      if (next && next !== task.scheduledStart) onTaskSave(task, { startDate: next });
-                    }}
-                    style={{ ...inputStyle, width: 140, padding: "5px 8px", fontSize: 12 }}
-                    disabled={!enabled}
-                  />
+                  {isEditing ? (
+                    <input
+                      type="date"
+                      value={task.scheduledStart}
+                      onChange={(event) => updateDraftTaskDates(task.id, "scheduledStart", event.target.value)}
+                      style={{ ...inputStyle, width: 140, padding: "5px 8px", fontSize: 12 }}
+                      disabled={!enabled}
+                    />
+                  ) : fmt(task.scheduledStart)}
                 </td>
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>
-                  <input
-                    type="date"
-                    value={draftEndDates[task.id] || task.scheduledEnd}
-                    onChange={(event) => {
-                      const next = event.target.value;
-                      setDraftEndDates((prev) => ({ ...prev, [task.id]: next }));
-                    }}
-                    onBlur={(event) => {
-                      const next = event.target.value;
-                      if (next && next !== task.scheduledEnd) onTaskSave(task, { endDate: next });
-                    }}
-                    style={{ ...inputStyle, width: 140, padding: "5px 8px", fontSize: 12 }}
-                    disabled={!enabled}
-                  />
+                  {isEditing ? (
+                    <input
+                      type="date"
+                      value={task.scheduledEnd}
+                      onChange={(event) => updateDraftTaskDates(task.id, "scheduledEnd", event.target.value)}
+                      style={{ ...inputStyle, width: 140, padding: "5px 8px", fontSize: 12 }}
+                      disabled={!enabled}
+                    />
+                  ) : fmt(task.scheduledEnd)}
                 </td>
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>
                   {task.id === "supplier" ? (
-                    <input
-                      value={draftSupplierNames[task.id] || ""}
-                      onChange={(event) => {
-                        const next = event.target.value;
-                        setDraftSupplierNames((prev) => ({ ...prev, [task.id]: next }));
-                      }}
-                      onBlur={(event) => {
-                        const next = event.target.value.trim();
-                        if (next !== (task.vendorName || "")) onTaskSave(task, { vendorName: next });
-                      }}
-                      placeholder="예정 업체명 입력"
-                      style={{ ...inputStyle, width: 180, padding: "5px 8px", fontSize: 12 }}
-                      disabled={!enabled}
-                    />
+                    isEditing ? (
+                      <input
+                        value={task.vendorName || ""}
+                        onChange={(event) => updateDraftTask(task.id, (currentTask) => ({ ...currentTask, vendorName: event.target.value }))}
+                        placeholder="예정 업체명 입력"
+                        style={{ ...inputStyle, width: 180, padding: "5px 8px", fontSize: 12 }}
+                        disabled={!enabled}
+                      />
+                    ) : <span style={{ color: task.vendorName ? "#334155" : "#94a3b8" }}>{task.vendorName || "-"}</span>
                   ) : (
                     <span style={{ color: "#94a3b8" }}>-</span>
                   )}
@@ -1427,7 +1553,7 @@ function TasksTab({
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>
                   <select
                     value={task.taskStatus || "pending"}
-                    onChange={(event) => onTaskSave(task, { taskStatus: event.target.value })}
+                    onChange={(event) => handleTaskStatusChange(task, event.target.value)}
                     style={{ ...inputStyle, width: 110, padding: "5px 8px", fontSize: 12 }}
                     disabled={!enabled}
                   >
@@ -1439,9 +1565,9 @@ function TasksTab({
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>{task.progress || 0}%</td>
                 <td style={{ padding: "9px 12px", fontSize: 12, color: "#64748b", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.notes || "-"}</td>
                 <td style={{ padding: "9px 12px" }}>
-                  <button onClick={() => setEditTask(task)} style={{ padding: "6px 9px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer", fontSize: 12 }} disabled={!enabled}>
+                  {isEditing && <button onClick={() => setEditTask(task)} style={{ padding: "6px 9px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer", fontSize: 12 }} disabled={!enabled}>
                     수정
-                  </button>
+                  </button>}
                 </td>
               </tr>
             ];
@@ -1465,7 +1591,7 @@ function TasksTab({
                             <div style={{ display: "grid", gridTemplateColumns: "170px 100px 100px 1fr", gap: 8, alignItems: "center", marginBottom: 6 }}>
                               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                 <div style={{ fontSize: 12, fontWeight: 700 }}>{item.name}</div>
-                                <button
+                                {isEditing ? <button
                                   onClick={() => toggleDevelopItem(item.id)}
                                   style={{
                                     width: 40,
@@ -1482,9 +1608,9 @@ function TasksTab({
                                   title={enabled ? `${item.name} ON` : `${item.name} OFF`}
                                 >
                                   <span style={{ width: 14, height: 14, borderRadius: 999, background: enabled ? "#16a34a" : "#94a3b8", display: "block" }} />
-                                </button>
+                                </button> : <span style={{ fontSize: 11, color: enabled ? "#15803d" : "#94a3b8" }}>{enabled ? "사용" : "미사용"}</span>}
                               </div>
-                              <input
+                              {isEditing ? <input
                                 type="number"
                                 min={0}
                                 value={item.startOffset}
@@ -1492,8 +1618,8 @@ function TasksTab({
                                 style={{ ...inputStyle, fontSize: 12, padding: "5px 8px" }}
                                 title="시작 오프셋(일)"
                                 disabled={!enabled}
-                              />
-                              <input
+                              /> : <div style={{ fontSize: 12, color: "#475569" }}>시작 +{item.startOffset}일</div>}
+                              {isEditing ? <input
                                 type="number"
                                 min={1}
                                 value={item.duration}
@@ -1501,7 +1627,7 @@ function TasksTab({
                                 style={{ ...inputStyle, fontSize: 12, padding: "5px 8px" }}
                                 title="기간(일)"
                                 disabled={!enabled}
-                              />
+                              /> : <div style={{ fontSize: 12, color: "#475569" }}>기간 {item.duration}일</div>}
                               <div style={{ fontSize: 11, color: "#64748b" }}>{fmt(itemStart)} ~ {fmt(itemEnd)}</div>
                             </div>
                             <div style={{ position: "relative", height: 8, background: "#e2e8f0", borderRadius: 999, overflow: "hidden" }}>
@@ -1553,7 +1679,7 @@ function TasksTab({
           task={editTask}
           onClose={() => setEditTask(null)}
           onSave={(patch) => {
-            onTaskSave(editTask, patch);
+            applyTaskDetailPatch(editTask, patch);
             setEditTask(null);
           }}
         />
@@ -3340,6 +3466,73 @@ export default function PmsApp() {
             {tab === "tasks" && (
               <TasksTab
                 project={selectedProject}
+                onTaskStatusChange={(task, taskStatus) => {
+                  if (!taskStatus || taskStatus === task.taskStatus) return;
+                  updateProject(selectedProject.id, (project) => ({
+                    ...project,
+                    tasks: project.tasks.map((currentTask) => (
+                      currentTask.id === task.id ? { ...currentTask, taskStatus } : currentTask
+                    )),
+                    changeLog: [
+                      ...(project.changeLog || []),
+                      {
+                        id: Date.now(),
+                        type: "task_status",
+                        taskId: task.id,
+                        taskName: task.name,
+                        date: TODAY,
+                        reason: `상태 변경: ${STATUS_LABEL[task.taskStatus] || task.taskStatus} -> ${STATUS_LABEL[taskStatus] || taskStatus}`
+                      }
+                    ]
+                  }));
+                  appendAdminLog({
+                    type: "task_status_change",
+                    projectId: selectedProject.id,
+                    projectName: selectedProject.name,
+                    reason: `${task.name} 상태 변경 (${STATUS_LABEL[task.taskStatus] || task.taskStatus} -> ${STATUS_LABEL[taskStatus] || taskStatus})`
+                  });
+                }}
+                onScheduleCommit={({ tasks, start, developSubTimeline, changeCount, changes }) => {
+                  const previousVersion = formatScheduleVersion(selectedProject.scheduleVersion);
+                  const nextVersion = nextScheduleVersion(previousVersion, changeCount);
+                  updateProject(selectedProject.id, (project) => {
+                    const currentStatusById = Object.fromEntries((project.tasks || []).map((task) => [task.id, task.taskStatus]));
+                    const committedTasks = tasks.map((task) => ({
+                      ...task,
+                      taskStatus: currentStatusById[task.id] || task.taskStatus
+                    }));
+                    const committedDevelopTask = committedTasks.find((task) => task.id === DEVELOP_TASK_ID);
+                    const reason = changes.join(" / ");
+                    const nextProject = {
+                      ...project,
+                      start: start || project.start,
+                      tasks: committedTasks,
+                      developSubTimeline: normalizeDevelopSubTimeline(developSubTimeline, committedDevelopTask?.duration || 1),
+                      changeLog: [
+                        ...(project.changeLog || []),
+                        {
+                          id: Date.now(),
+                          type: "schedule_batch",
+                          taskId: "_schedule_batch",
+                          taskName: "태스크 일정/진행",
+                          date: TODAY,
+                          reason
+                        }
+                      ]
+                    };
+                    return withScheduleVersionUpdate(project, nextProject, {
+                      changeCount,
+                      reason: "태스크 관리 일괄 변경",
+                      changes
+                    });
+                  });
+                  appendAdminLog({
+                    type: "schedule_version_change",
+                    projectId: selectedProject.id,
+                    projectName: selectedProject.name,
+                    reason: `${previousVersion} -> ${nextVersion} · ${changes.join(" / ")}`
+                  });
+                }}
                 onTaskSave={(task, patch) => {
                   const hasTaskNameChange = Boolean(patch.name && patch.name !== task.name);
                   const hasTaskIconChange = Boolean(patch.icon && patch.icon !== task.icon);
