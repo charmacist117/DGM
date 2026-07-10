@@ -111,6 +111,127 @@ const supplyBodyRowStyle = { background: "#ffffff" };
 const supplyDetailBodyRowStyle = { background: "#fbfdff" };
 const supplyPriceFormat = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 });
 
+const INITIAL_SCHEDULE_VERSION = "v1.00";
+
+function parseScheduleVersion(value) {
+  if (value && typeof value === "object") {
+    return {
+      major: Math.max(1, Number(value.major) || 1),
+      minor: Math.max(0, Math.min(99, Number(value.minor) || 0))
+    };
+  }
+  const match = String(value || INITIAL_SCHEDULE_VERSION).trim().match(/^v?(\d+)(?:\.(\d+))?$/i);
+  const major = Math.max(1, Number(match?.[1]) || 1);
+  const rawMinor = match?.[2] || "0";
+  const minor = Math.max(0, Math.min(99, Number(rawMinor.length === 1 ? `${rawMinor}0` : rawMinor) || 0));
+  return { major, minor };
+}
+
+function formatScheduleVersion(value) {
+  const { major, minor } = parseScheduleVersion(value);
+  return `v${major}.${String(minor).padStart(2, "0")}`;
+}
+
+function nextScheduleVersion(currentVersion, changeCount) {
+  const { major: currentMajor, minor: currentMinor } = parseScheduleVersion(currentVersion);
+  const count = Math.max(1, Number(changeCount) || 1);
+
+  if (count >= 6) return formatScheduleVersion({ major: currentMajor + 1, minor: 0 });
+
+  if (count >= 3) {
+    const nextTenth = Math.floor(currentMinor / 10) + 1;
+    if (nextTenth >= 10) return formatScheduleVersion({ major: currentMajor + 1, minor: 0 });
+    return formatScheduleVersion({ major: currentMajor, minor: nextTenth * 10 });
+  }
+
+  if (currentMinor >= 99) return formatScheduleVersion({ major: currentMajor + 1, minor: 0 });
+  return formatScheduleVersion({ major: currentMajor, minor: currentMinor + 1 });
+}
+
+function snapshotSchedule(tasks = []) {
+  return (tasks || []).map((task, index) => ({
+    order: index + 1,
+    id: task.id,
+    icon: task.icon || "",
+    name: task.name || "",
+    start: task.scheduledStart || "",
+    end: task.scheduledEnd || "",
+    duration: task.duration || 0,
+    isEnabled: task.isEnabled !== false
+  }));
+}
+
+function normalizeScheduleVersionHistory(value) {
+  return Array.isArray(value)
+    ? value.filter((entry) => entry && typeof entry === "object").map((entry) => ({
+      id: entry.id || `schedule_version_${Date.now()}_${Math.random()}`,
+      version: formatScheduleVersion(entry.version),
+      previousVersion: entry.previousVersion ? formatScheduleVersion(entry.previousVersion) : "",
+      changeCount: Math.max(0, Number(entry.changeCount) || 0),
+      reason: entry.reason || "일정 변경",
+      changes: Array.isArray(entry.changes) ? entry.changes.filter(Boolean) : [],
+      date: entry.date || TODAY,
+      createdAt: entry.createdAt || "",
+      schedule: snapshotSchedule(entry.schedule)
+    }))
+    : [];
+}
+
+function getScheduleVersionHistory(project) {
+  const history = normalizeScheduleVersionHistory(project?.scheduleVersionHistory);
+  if (history.length > 0) return history;
+  return [{
+    id: "initial_schedule_version",
+    version: INITIAL_SCHEDULE_VERSION,
+    previousVersion: "",
+    changeCount: 0,
+    reason: "최초 일정 기준",
+    changes: [],
+    date: project?.start || TODAY,
+    createdAt: "",
+    schedule: snapshotSchedule(project?.tasks)
+  }];
+}
+
+function withScheduleVersionUpdate(project, nextProject, { changeCount, reason, changes = [] }) {
+  const count = Math.max(1, Number(changeCount) || 1);
+  const previousVersion = formatScheduleVersion(project.scheduleVersion);
+  const nextVersion = nextScheduleVersion(previousVersion, count);
+  const currentHistory = normalizeScheduleVersionHistory(project.scheduleVersionHistory);
+  const baseHistory = currentHistory.length > 0
+    ? currentHistory
+    : [{
+      id: `schedule_version_initial_${project.id || Date.now()}`,
+      version: INITIAL_SCHEDULE_VERSION,
+      previousVersion: "",
+      changeCount: 0,
+      reason: "최초 일정 기준",
+      changes: [],
+      date: project.start || TODAY,
+      createdAt: "",
+      schedule: snapshotSchedule(project.tasks)
+    }];
+
+  return {
+    ...nextProject,
+    scheduleVersion: nextVersion,
+    scheduleVersionHistory: [
+      ...baseHistory,
+      {
+        id: `schedule_version_${Date.now()}_${Math.random()}`,
+        version: nextVersion,
+        previousVersion,
+        changeCount: count,
+        reason: reason || "일정 변경",
+        changes: changes.filter(Boolean),
+        date: TODAY,
+        createdAt: new Date().toISOString(),
+        schedule: snapshotSchedule(nextProject.tasks)
+      }
+    ]
+  };
+}
+
 function formatOwners(project) {
   const pm = (project?.pmName || "").trim();
   const am = (project?.amName || "").trim();
@@ -267,7 +388,7 @@ function normalizeProject(project) {
       id: template.id,
       name: existing?.name || template.name,
       cat: template.cat,
-      icon: template.icon,
+      icon: existing?.icon || template.icon,
       color: template.color,
       duration,
       pred: normalizePredList(existing?.pred || template.pred),
@@ -331,6 +452,8 @@ function normalizeProject(project) {
     advisorLog: Array.isArray(project.advisorLog) ? project.advisorLog : [],
     stageCheckLog: Array.isArray(project.stageCheckLog) ? project.stageCheckLog : [],
     changeLog: Array.isArray(project.changeLog) ? project.changeLog : [],
+    scheduleVersion: formatScheduleVersion(project.scheduleVersion),
+    scheduleVersionHistory: normalizeScheduleVersionHistory(project.scheduleVersionHistory),
     draftChecklist: normalizeDraftChecklist(project.draftChecklist)
   };
 }
@@ -683,6 +806,7 @@ function SyncBadge({ syncState }) {
 }
 
 function TaskEditModal({ task, onClose, onSave }) {
+  const [icon, setIcon] = useState(task.icon || "");
   const [progress, setProgress] = useState(task.progress || 0);
   const [notes, setNotes] = useState(task.notes || "");
   const [delayDays, setDelayDays] = useState(0);
@@ -700,7 +824,17 @@ function TaskEditModal({ task, onClose, onSave }) {
         <div style={{ fontSize: 12, color: "#475569", background: "#f8fafc", borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>
           일정: {fmt(task.scheduledStart)} ~ {fmt(task.scheduledEnd)} ({task.duration}일)
         </div>
-        <div style={{ display: "grid", gap: 12, marginBottom: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "112px 1fr", gap: 12, marginBottom: 12 }}>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 4 }}>이모지</label>
+            <input
+              value={icon}
+              onChange={(event) => setIcon(event.target.value)}
+              maxLength={8}
+              style={{ ...inputStyle, textAlign: "center", fontSize: 18 }}
+              aria-label="태스크 이모지"
+            />
+          </div>
           <div>
             <label style={{ fontSize: 12, fontWeight: 700 }}>진행률 ({progress}%)</label>
             <input type="range" min={0} max={100} value={progress} onChange={(e) => setProgress(Number(e.target.value))} style={{ width: "100%" }} />
@@ -742,6 +876,7 @@ function TaskEditModal({ task, onClose, onSave }) {
                 ? toStr(addDays(startDate || task.scheduledStart, nextDuration))
                 : endDate;
               onSave({
+                icon: icon.trim() || task.icon,
                 progress,
                 notes,
                 delayDays,
@@ -931,11 +1066,13 @@ function TasksTab({
     end: toStr(addDays(project.start || TODAY, 7))
   });
   const [draftTaskNames, setDraftTaskNames] = useState({});
+  const [draftTaskIcons, setDraftTaskIcons] = useState({});
   const [draftStartDates, setDraftStartDates] = useState({});
   const [draftEndDates, setDraftEndDates] = useState({});
   const [draftSupplierNames, setDraftSupplierNames] = useState({});
   const [draggedTaskId, setDraggedTaskId] = useState(null);
   const [dragOverTaskId, setDragOverTaskId] = useState(null);
+  const [dragOverPosition, setDragOverPosition] = useState(null);
   const developTask = project.tasks.find((task) => task.id === DEVELOP_TASK_ID);
   const developDuration = toPositiveInt(developTask?.duration, 1);
   const developTimeline = developTask
@@ -955,6 +1092,7 @@ function TasksTab({
 
   useEffect(() => {
     setDraftTaskNames(Object.fromEntries((project.tasks || []).map((task) => [task.id, task.name || ""])));
+    setDraftTaskIcons(Object.fromEntries((project.tasks || []).map((task) => [task.id, task.icon || ""])));
     setDraftStartDates(Object.fromEntries((project.tasks || []).map((task) => [task.id, task.scheduledStart || TODAY])));
     setDraftEndDates(Object.fromEntries((project.tasks || []).map((task) => [task.id, task.scheduledEnd || TODAY])));
     setDraftSupplierNames(Object.fromEntries((project.tasks || []).map((task) => [task.id, task.vendorName || ""])));
@@ -1005,22 +1143,37 @@ function TasksTab({
     setShowAddTask(false);
   };
 
-  const moveTask = (fromId, toId) => {
+  const moveTask = (fromId, toId, position = "before") => {
     if (!fromId || !toId || fromId === toId) return;
     const ids = (project.tasks || []).map((task) => task.id);
     const fromIndex = ids.indexOf(fromId);
     const toIndex = ids.indexOf(toId);
     if (fromIndex < 0 || toIndex < 0) return;
-    const nextIds = [...ids];
-    const [movedId] = nextIds.splice(fromIndex, 1);
-    nextIds.splice(toIndex, 0, movedId);
+    const nextIds = ids.filter((id) => id !== fromId);
+    const targetIndex = nextIds.indexOf(toId);
+    if (targetIndex < 0) return;
+    const insertIndex = position === "after" ? targetIndex + 1 : targetIndex;
+    nextIds.splice(insertIndex, 0, fromId);
+    if (nextIds.every((id, index) => id === ids[index])) return;
     onTaskReorder(nextIds);
   };
+
+  const clearTaskDrag = () => {
+    setDraggedTaskId(null);
+    setDragOverTaskId(null);
+    setDragOverPosition(null);
+  };
+  const scheduleHistory = getScheduleVersionHistory(project);
 
   return (
     <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
       <div style={{ padding: "12px 14px", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-        <div style={{ fontWeight: 800 }}>태스크 일정/진행 수정</div>
+        <div>
+          <div style={{ fontWeight: 800 }}>태스크 일정/진행 수정</div>
+          <div style={{ fontSize: 11, color: "#64748b", marginTop: 3 }}>
+            일정 버전 <strong style={{ color: "#0f172a" }}>{formatScheduleVersion(project.scheduleVersion)}</strong>
+          </div>
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
             onClick={() => setShowAddTask((prev) => !prev)}
@@ -1103,42 +1256,51 @@ function TasksTab({
             const enabled = task.isEnabled !== false;
             const isDragging = draggedTaskId === task.id;
             const isDragTarget = dragOverTaskId === task.id && draggedTaskId !== task.id;
+            const isDragBefore = isDragTarget && dragOverPosition === "before";
+            const isDragAfter = isDragTarget && dragOverPosition === "after";
             const rows = [
               <tr
                 key={task.id}
-                draggable
-                onDragStart={(event) => {
-                  setDraggedTaskId(task.id);
-                  event.dataTransfer.effectAllowed = "move";
-                  event.dataTransfer.setData("text/plain", task.id);
-                }}
                 onDragOver={(event) => {
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  const position = event.clientY - bounds.top < bounds.height / 2 ? "before" : "after";
                   if (dragOverTaskId !== task.id) setDragOverTaskId(task.id);
+                  if (dragOverPosition !== position) setDragOverPosition(position);
                 }}
                 onDragLeave={() => {
-                  if (dragOverTaskId === task.id) setDragOverTaskId(null);
+                  if (dragOverTaskId === task.id) {
+                    setDragOverTaskId(null);
+                    setDragOverPosition(null);
+                  }
                 }}
                 onDrop={(event) => {
                   event.preventDefault();
-                  const sourceId = event.dataTransfer.getData("text/plain") || draggedTaskId;
-                  moveTask(sourceId, task.id);
-                  setDraggedTaskId(null);
-                  setDragOverTaskId(null);
-                }}
-                onDragEnd={() => {
-                  setDraggedTaskId(null);
-                  setDragOverTaskId(null);
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  const position = event.clientY - bounds.top < bounds.height / 2 ? "before" : "after";
+                  const sourceId = event.dataTransfer.getData("application/x-pms-task") || event.dataTransfer.getData("text/plain") || draggedTaskId;
+                  moveTask(sourceId, task.id, position);
+                  clearTaskDrag();
                 }}
                 style={{
-                  borderBottom: "1px solid #f1f5f9",
+                  borderTop: isDragBefore ? "3px solid #2563eb" : "1px solid transparent",
+                  borderBottom: isDragAfter ? "3px solid #2563eb" : "1px solid #f1f5f9",
                   opacity: enabled ? (isDragging ? 0.45 : 1) : 0.55,
-                  background: isDragTarget ? "#ecfeff" : "#fff"
+                  background: isDragTarget ? "#eff6ff" : "#fff"
                 }}
               >
                 <td style={{ padding: "9px 12px", fontSize: 12, color: "#64748b" }}>
-                  <span
+                  <button
+                    type="button"
+                    draggable={enabled}
+                    onDragStart={(event) => {
+                      setDraggedTaskId(task.id);
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("application/x-pms-task", task.id);
+                      event.dataTransfer.setData("text/plain", task.id);
+                    }}
+                    onDragEnd={clearTaskDrag}
                     title="드래그해서 순서 변경"
                     style={{
                       display: "inline-flex",
@@ -1149,12 +1311,13 @@ function TasksTab({
                       borderRadius: 6,
                       border: "1px solid #cbd5e1",
                       background: "#f8fafc",
-                      cursor: "grab",
-                      userSelect: "none"
+                      cursor: enabled ? "grab" : "not-allowed",
+                      userSelect: "none",
+                      color: "#475569"
                     }}
                   >
                     ↕
-                  </span>
+                  </button>
                 </td>
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>
                   <button
@@ -1178,7 +1341,22 @@ function TasksTab({
                 </td>
                 <td style={{ padding: "9px 12px", fontSize: 13, fontWeight: 700 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 170 }}>
-                    <span>{task.icon}</span>
+                    <input
+                      value={draftTaskIcons[task.id] ?? task.icon ?? ""}
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        setDraftTaskIcons((prev) => ({ ...prev, [task.id]: next }));
+                      }}
+                      onBlur={(event) => {
+                        const next = event.target.value.trim();
+                        if (next && next !== task.icon) onTaskSave(task, { icon: next });
+                      }}
+                      maxLength={8}
+                      title="태스크 이모지 수정"
+                      aria-label={`${task.name} 이모지`}
+                      style={{ ...inputStyle, flex: "0 0 40px", width: 40, padding: "4px", textAlign: "center", fontSize: 17 }}
+                      disabled={!enabled}
+                    />
                     <input
                       value={draftTaskNames[task.id] ?? task.name}
                       onChange={(event) => {
@@ -1342,6 +1520,33 @@ function TasksTab({
           })}
         </tbody>
       </table>
+
+      <div style={{ borderTop: "1px solid #e2e8f0", background: "#f8fafc", padding: 14 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: "#0f172a", marginBottom: 8 }}>일정 버전 이력</div>
+        <div style={{ display: "grid", gap: 7 }}>
+          {[...scheduleHistory].reverse().map((entry, index) => (
+            <details key={entry.id} open={index === 0} style={{ border: "1px solid #dbe3ee", borderRadius: 8, background: "#fff", padding: "7px 10px" }}>
+              <summary style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#334155" }}>
+                <strong style={{ color: "#1d4ed8" }}>{entry.version}</strong>
+                <span>{entry.previousVersion ? `${entry.previousVersion} -> ${entry.version}` : "최초 일정"}</span>
+                <span style={{ color: "#64748b" }}>{entry.changeCount ? `변경 ${entry.changeCount}건` : "기준 일정"}</span>
+                <span style={{ color: "#64748b" }}>{fmt(entry.date)}</span>
+              </summary>
+              <div style={{ borderTop: "1px solid #eef2f7", marginTop: 7, paddingTop: 7, display: "grid", gap: 5 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>{entry.reason}</div>
+                {entry.changes.length > 0 && <div style={{ fontSize: 12, color: "#475569" }}>{entry.changes.join(" / ")}</div>}
+                <div style={{ display: "grid", gap: 3, marginTop: 2 }}>
+                  {entry.schedule.map((item) => (
+                    <div key={`${entry.id}_${item.id}`} style={{ fontSize: 11, color: item.isEnabled ? "#475569" : "#94a3b8" }}>
+                      {item.order}. {item.icon} {item.name} · {fmt(item.start)} ~ {fmt(item.end)} ({item.duration}일)
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </details>
+          ))}
+        </div>
+      </div>
 
       {editTask && (
         <TaskEditModal
@@ -2602,6 +2807,7 @@ function ProjectLifecycleLogTab({ logs, onDeleteLog, onToggleHiddenForManager, i
   const typeLabel = (type) => {
     if (type === "project_create") return "신설";
     if (type === "project_delete") return "삭제";
+    if (type === "schedule_version_change") return "일정 버전";
     if (type === "task_start_date_change") return "태스크 일정";
     if (type === "task_status_change") return "태스크 상태";
     if (type === "project_start_date_change") return "프로젝트 날짜";
@@ -2617,6 +2823,7 @@ function ProjectLifecycleLogTab({ logs, onDeleteLog, onToggleHiddenForManager, i
   const typeColor = (type) => {
     if (type === "project_create") return { fg: "#166534", bg: "#dcfce7" };
     if (type === "project_delete") return { fg: "#b91c1c", bg: "#fee2e2" };
+    if (type === "schedule_version_change") return { fg: "#1d4ed8", bg: "#dbeafe" };
     if (type === "task_start_date_change" || type === "project_start_date_change") return { fg: "#1d4ed8", bg: "#dbeafe" };
     if (type === "task_status_change") return { fg: "#0f766e", bg: "#ccfbf1" };
     if (type === "basic_info_update") return { fg: "#7c3aed", bg: "#f3e8ff" };
@@ -3135,11 +3342,25 @@ export default function PmsApp() {
                 project={selectedProject}
                 onTaskSave={(task, patch) => {
                   const hasTaskNameChange = Boolean(patch.name && patch.name !== task.name);
+                  const hasTaskIconChange = Boolean(patch.icon && patch.icon !== task.icon);
                   const hasTaskDateChange = Boolean(patch.startDate && patch.startDate !== task.scheduledStart);
                   const hasTaskEndDateChange = Boolean(patch.endDate && patch.endDate !== task.scheduledEnd);
                   const hasDelayChange = Boolean((patch.delayDays || 0) > 0);
                   const hasDurationChange = Boolean(typeof patch.duration === "number" && patch.duration !== task.duration);
                   const hasStatusChange = Boolean(patch.taskStatus && patch.taskStatus !== task.taskStatus);
+                  const scheduleChanges = [
+                    hasTaskNameChange ? `태스크명 변경: ${task.name} -> ${patch.name}` : "",
+                    hasTaskIconChange ? `이모지 변경: ${task.icon || "-"} -> ${patch.icon}` : "",
+                    hasTaskDateChange ? `시작일 조정: ${task.scheduledStart} -> ${patch.startDate}` : "",
+                    hasTaskEndDateChange ? `완료일 조정: ${task.scheduledEnd} -> ${patch.endDate}` : "",
+                    hasDurationChange ? `기간 변경: ${task.duration}일 -> ${patch.duration}일` : "",
+                    hasDelayChange ? `지연 적용: +${patch.delayDays}일` : ""
+                  ].filter(Boolean);
+                  const hasScheduleChange = scheduleChanges.length > 0;
+                  const previousVersion = formatScheduleVersion(selectedProject.scheduleVersion);
+                  const nextVersion = hasScheduleChange
+                    ? nextScheduleVersion(previousVersion, scheduleChanges.length)
+                    : previousVersion;
                   updateProject(selectedProject.id, (project) => {
                     const tasks = project.tasks.map((currentTask) => {
                       if (currentTask.id !== task.id) return currentTask;
@@ -3165,6 +3386,7 @@ export default function PmsApp() {
                       return {
                         ...currentTask,
                         name: patch.name ?? currentTask.name,
+                        icon: patch.icon ?? currentTask.icon,
                         progress: patch.progress ?? currentTask.progress,
                         taskStatus: (patch.delayDays || 0) > 0 ? "delayed" : (patch.taskStatus ?? currentTask.taskStatus),
                         notes: patch.notes ?? currentTask.notes,
@@ -3180,8 +3402,13 @@ export default function PmsApp() {
                       project.developSubTimeline,
                       developTask?.duration || 1
                     );
-
-                    return {
+                    const changeSummary = [
+                      ...scheduleChanges,
+                      hasStatusChange
+                        ? `상태 변경: ${STATUS_LABEL[task.taskStatus] || task.taskStatus} -> ${STATUS_LABEL[patch.taskStatus] || patch.taskStatus}`
+                        : ""
+                    ].filter(Boolean);
+                    const nextProject = {
                       ...project,
                       tasks,
                       developSubTimeline,
@@ -3190,41 +3417,36 @@ export default function PmsApp() {
                         {
                           id: Date.now(),
                           taskId: task.id,
-                          taskName: task.name,
+                          taskName: patch.name ?? task.name,
                           date: TODAY,
                           reason:
                             patch.notes ||
                             (typeof patch.vendorName === "string"
                               ? `공급업체 기록: ${(task.vendorName || "-")} -> ${(patch.vendorName || "-")}`
-                              : ([
-                                  patch.name && patch.name !== task.name ? `태스크명 변경: ${task.name} -> ${patch.name}` : "",
-                                  patch.startDate ? `시작일 조정: ${task.scheduledStart} -> ${patch.startDate}` : "",
-                                  patch.endDate ? `완료일 조정: ${task.scheduledEnd} -> ${patch.endDate}` : "",
-                                  patch.taskStatus && patch.taskStatus !== task.taskStatus
-                                    ? `상태 변경: ${STATUS_LABEL[task.taskStatus] || task.taskStatus} -> ${STATUS_LABEL[patch.taskStatus] || patch.taskStatus}`
-                                    : ""
-                                ].filter(Boolean).join(" / ") || "수정")),
+                              : (changeSummary.join(" / ") || "수정")),
                           delayDays: patch.delayDays || 0,
                           duration: typeof patch.duration === "number" ? patch.duration : task.duration
                         }
                       ]
                     };
+                    return hasScheduleChange
+                      ? withScheduleVersionUpdate(project, nextProject, {
+                        changeCount: scheduleChanges.length,
+                        reason: `${patch.name ?? task.name} 일정 변경`,
+                        changes: scheduleChanges
+                      })
+                      : nextProject;
                   });
-                  if (hasTaskNameChange || hasTaskDateChange || hasTaskEndDateChange || hasDelayChange || hasDurationChange || hasStatusChange) {
-                    const reasonParts = [];
-                    if (hasTaskNameChange) reasonParts.push(`태스크명 ${task.name} -> ${patch.name}`);
-                    if (hasTaskDateChange) reasonParts.push(`시작일 ${task.scheduledStart} -> ${patch.startDate}`);
-                    if (hasTaskEndDateChange) reasonParts.push(`완료일 ${task.scheduledEnd} -> ${patch.endDate}`);
-                    if (hasDelayChange) reasonParts.push(`지연 적용: +${patch.delayDays}일`);
-                    if (hasDurationChange) reasonParts.push(`기간: ${task.duration}일 -> ${patch.duration}일`);
+                  if (hasScheduleChange || hasStatusChange) {
+                    const reasonParts = [...scheduleChanges];
                     if (hasStatusChange) reasonParts.push(`상태: ${STATUS_LABEL[task.taskStatus] || task.taskStatus} -> ${STATUS_LABEL[patch.taskStatus] || patch.taskStatus}`);
                     appendAdminLog({
-                      type: hasStatusChange && !hasTaskDateChange && !hasTaskEndDateChange && !hasDelayChange && !hasDurationChange
-                        ? "task_status_change"
-                        : "task_start_date_change",
+                      type: hasScheduleChange ? "schedule_version_change" : "task_status_change",
                       projectId: selectedProject.id,
                       projectName: selectedProject.name,
-                      reason: `${task.name} 태스크 변경 (${reasonParts.join(" / ")})`
+                      reason: hasScheduleChange
+                        ? `${previousVersion} -> ${nextVersion} · ${task.name} (${reasonParts.join(" / ")})`
+                        : `${task.name} 태스크 변경 (${reasonParts.join(" / ")})`
                     });
                   }
                 }}
@@ -3250,26 +3472,35 @@ export default function PmsApp() {
                     taskStatus: "pending",
                     notes: ""
                   };
-                  updateProject(selectedProject.id, (project) => ({
-                    ...project,
-                    tasks: [...project.tasks, newTask],
-                    changeLog: [
-                      ...(project.changeLog || []),
-                      {
-                        id: Date.now(),
-                        type: "task_add",
-                        taskId,
-                        taskName: name,
-                        date: TODAY,
-                        reason: `태스크 행 추가 (${fmt(nextStart)} ~ ${fmt(nextEnd)})`
-                      }
-                    ]
-                  }));
+                  const previousVersion = formatScheduleVersion(selectedProject.scheduleVersion);
+                  const nextVersion = nextScheduleVersion(previousVersion, 1);
+                  updateProject(selectedProject.id, (project) => {
+                    const reason = `태스크 행 추가 (${fmt(nextStart)} ~ ${fmt(nextEnd)})`;
+                    return withScheduleVersionUpdate(project, {
+                      ...project,
+                      tasks: [...project.tasks, newTask],
+                      changeLog: [
+                        ...(project.changeLog || []),
+                        {
+                          id: Date.now(),
+                          type: "task_add",
+                          taskId,
+                          taskName: name,
+                          date: TODAY,
+                          reason
+                        }
+                      ]
+                    }, {
+                      changeCount: 1,
+                      reason: `${name} 일정 추가`,
+                      changes: [reason]
+                    });
+                  });
                   appendAdminLog({
-                    type: "task_add",
+                    type: "schedule_version_change",
                     projectId: selectedProject.id,
                     projectName: selectedProject.name,
-                    reason: `${name} 태스크 행 추가 (${nextStart} ~ ${nextEnd})`
+                    reason: `${previousVersion} -> ${nextVersion} · ${name} 태스크 행 추가 (${nextStart} ~ ${nextEnd})`
                   });
                 }}
                 onTaskReorder={(orderedIds) => {
@@ -3277,7 +3508,8 @@ export default function PmsApp() {
                     const byId = Object.fromEntries((project.tasks || []).map((task) => [task.id, task]));
                     const orderedTasks = orderedIds.map((id) => byId[id]).filter(Boolean);
                     const missingTasks = (project.tasks || []).filter((task) => !orderedIds.includes(task.id));
-                    return {
+                    const reason = "태스크 행 순서 변경";
+                    return withScheduleVersionUpdate(project, {
                       ...project,
                       tasks: [...orderedTasks, ...missingTasks],
                       changeLog: [
@@ -3288,16 +3520,22 @@ export default function PmsApp() {
                           taskId: "_task_reorder",
                           taskName: "태스크 순서",
                           date: TODAY,
-                          reason: "태스크 행 순서 변경"
+                          reason
                         }
                       ]
-                    };
+                    }, {
+                      changeCount: 1,
+                      reason,
+                      changes: [reason]
+                    });
                   });
+                  const previousVersion = formatScheduleVersion(selectedProject.scheduleVersion);
+                  const nextVersion = nextScheduleVersion(previousVersion, 1);
                   appendAdminLog({
-                    type: "task_reorder",
+                    type: "schedule_version_change",
                     projectId: selectedProject.id,
                     projectName: selectedProject.name,
-                    reason: "태스크 행 순서 변경"
+                    reason: `${previousVersion} -> ${nextVersion} · 태스크 행 순서 변경`
                   });
                 }}
                 onTaskToggle={(task, enabled) => {
@@ -3332,7 +3570,8 @@ export default function PmsApp() {
                   if (selectedProject.start === nextStart) return;
                   updateProject(selectedProject.id, (project) => {
                     if (project.start === nextStart) return project;
-                    return {
+                    const reason = `프로젝트 시작일 변경 ${project.start} -> ${nextStart}`;
+                    return withScheduleVersionUpdate(project, {
                       ...project,
                       start: nextStart,
                       changeLog: [
@@ -3343,16 +3582,22 @@ export default function PmsApp() {
                           taskId: "_project_start",
                           taskName: "프로젝트 시작일",
                           date: TODAY,
-                          reason: `시작일 변경 ${project.start} -> ${nextStart}`
+                          reason
                         }
                       ]
-                    };
+                    }, {
+                      changeCount: 1,
+                      reason: "프로젝트 시작일 변경",
+                      changes: [reason]
+                    });
                   });
+                  const previousVersion = formatScheduleVersion(selectedProject.scheduleVersion);
+                  const nextVersion = nextScheduleVersion(previousVersion, 1);
                   appendAdminLog({
-                    type: "project_start_date_change",
+                    type: "schedule_version_change",
                     projectId: selectedProject.id,
                     projectName: selectedProject.name,
-                    reason: `프로젝트 시작일 변경 ${selectedProject.start} -> ${nextStart}`
+                    reason: `${previousVersion} -> ${nextVersion} · 프로젝트 시작일 변경 ${selectedProject.start} -> ${nextStart}`
                   });
                 }}
                 onDevelopSubTimelineUpdate={(nextTimeline) => {
