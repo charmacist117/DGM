@@ -5,8 +5,11 @@ import { useRouter } from "next/navigation";
 import {
   CATEGORIES,
   DRAFT_CHECKLIST_FIELDS,
+  EXCLUSIVITY_OPTIONS,
+  REGULATORY_DIRECTION_OPTIONS,
   createEmptyDraftChecklist,
-  createProjectFromForm
+  createProjectFromForm,
+  isOtcEtcCategory
 } from "@/lib/pms/defaults";
 import { TODAY } from "@/lib/pms/date";
 
@@ -56,9 +59,12 @@ export default function NewProjectPage() {
     pmName: "",
     amName: "",
     category: CATEGORIES[0],
+    regulatoryDirection: "",
+    exclusivityType: "",
     start: TODAY,
     draftChecklist: createEmptyDraftChecklist()
   });
+  const showRegulatoryFields = isOtcEtcCategory(form.category);
 
   const updateChecklist = (key, value) => {
     setForm((prev) => ({
@@ -83,6 +89,14 @@ export default function NewProjectPage() {
       setError("PM 또는 AM 중 최소 1명을 입력해주세요.");
       return;
     }
+    if (showRegulatoryFields && !form.regulatoryDirection) {
+      setError("허가/생산 방향성을 선택해주세요.");
+      return;
+    }
+    if (showRegulatoryFields && !form.exclusivityType) {
+      setError("독점 구분을 선택해주세요.");
+      return;
+    }
 
     setSaving(true);
     setError("");
@@ -105,6 +119,8 @@ export default function NewProjectPage() {
         pmName,
         amName,
         category: form.category,
+        regulatoryDirection: form.regulatoryDirection,
+        exclusivityType: form.exclusivityType,
         start: form.start || TODAY,
         draftChecklist: form.draftChecklist
       });
@@ -159,13 +175,56 @@ export default function NewProjectPage() {
               </div>
               <div>
                 <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>카테고리 *</label>
-                <select value={form.category} onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))} style={fieldStyle}>
+                <select
+                  value={form.category}
+                  onChange={(e) => {
+                    const category = e.target.value;
+                    setForm((prev) => ({
+                      ...prev,
+                      category,
+                      regulatoryDirection: isOtcEtcCategory(category) ? prev.regulatoryDirection : "",
+                      exclusivityType: isOtcEtcCategory(category) ? prev.exclusivityType : ""
+                    }));
+                  }}
+                  style={fieldStyle}
+                >
                   {CATEGORIES.map((category) => (
                     <option key={category} value={category}>{category}</option>
                   ))}
                 </select>
               </div>
             </div>
+
+            {showRegulatoryFields && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12, marginTop: 12 }}>
+                <div>
+                  <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>허가/생산 방향성 *</label>
+                  <select
+                    value={form.regulatoryDirection}
+                    onChange={(e) => setForm((prev) => ({ ...prev, regulatoryDirection: e.target.value }))}
+                    style={fieldStyle}
+                  >
+                    <option value="">선택</option>
+                    {REGULATORY_DIRECTION_OPTIONS.map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>독점 구분 *</label>
+                  <select
+                    value={form.exclusivityType}
+                    onChange={(e) => setForm((prev) => ({ ...prev, exclusivityType: e.target.value }))}
+                    style={fieldStyle}
+                  >
+                    <option value="">선택</option>
+                    {EXCLUSIVITY_OPTIONS.map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginTop: 12 }}>
               <div>

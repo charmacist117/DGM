@@ -6,13 +6,18 @@ import ProjectSidebar from "@/components/ProjectSidebar";
 import {
   CATEGORIES,
   DRAFT_CHECKLIST_FIELDS,
+  EXCLUSIVITY_OPTIONS,
   PHASES,
   PHASE_CATS,
+  REGULATORY_DIRECTION_OPTIONS,
   STATUS_COLOR,
   STATUS_LABEL,
   getDefaultDevelopSubTimeline,
   getInitialProjects,
-  normalizeDraftChecklist
+  isOtcEtcCategory,
+  normalizeDraftChecklist,
+  normalizeExclusivityType,
+  normalizeRegulatoryDirection
 } from "@/lib/pms/defaults";
 import { TODAY, addDays, diff, fmt, toStr } from "@/lib/pms/date";
 import { calcSchedule } from "@/lib/pms/schedule";
@@ -439,13 +444,16 @@ function normalizeProject(project) {
   delete projectCore.productSupplySheet;
   delete projectCore.permitCompany;
   delete projectCore.manufacturer;
+  const projectCategory = project.category || "건강기능식품";
 
   return {
     ...projectCore,
     pmName: (project.pmName || "").trim(),
     amName: (project.amName || "").trim(),
     manager: project.manager || [project.pmName, project.amName].filter(Boolean).join(" / ") || "미정",
-    category: project.category || "건강기능식품",
+    category: projectCategory,
+    regulatoryDirection: isOtcEtcCategory(projectCategory) ? normalizeRegulatoryDirection(project.regulatoryDirection) : "",
+    exclusivityType: isOtcEtcCategory(projectCategory) ? normalizeExclusivityType(project.exclusivityType) : "",
     start: startDate,
     tasks: finalOrderedTasks,
     developSubTimeline,
@@ -2656,10 +2664,13 @@ function BasicInfoTab({ project, onSave }) {
     pmName: project.pmName || "",
     amName: project.amName || "",
     category: project.category || CATEGORIES[0],
+    regulatoryDirection: project.regulatoryDirection || "",
+    exclusivityType: project.exclusivityType || "",
     start: project.start || TODAY,
     draftChecklist: normalizeDraftChecklist(project.draftChecklist)
   });
   const categoryOptions = CATEGORIES.includes(form.category) ? CATEGORIES : [form.category, ...CATEGORIES];
+  const showRegulatoryFields = isOtcEtcCategory(form.category);
 
   useEffect(() => {
     setForm({
@@ -2668,10 +2679,12 @@ function BasicInfoTab({ project, onSave }) {
       pmName: project.pmName || "",
       amName: project.amName || "",
       category: project.category || CATEGORIES[0],
+      regulatoryDirection: project.regulatoryDirection || "",
+      exclusivityType: project.exclusivityType || "",
       start: project.start || TODAY,
       draftChecklist: normalizeDraftChecklist(project.draftChecklist)
     });
-  }, [project.id, project.name, project.desc, project.pmName, project.amName, project.category, project.start, project.draftChecklist]);
+  }, [project.id, project.name, project.desc, project.pmName, project.amName, project.category, project.regulatoryDirection, project.exclusivityType, project.start, project.draftChecklist]);
 
   const updateChecklist = (key, value) => {
     setForm((prev) => ({
@@ -2699,12 +2712,44 @@ function BasicInfoTab({ project, onSave }) {
           </div>
           <div>
             <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>카테고리</label>
-            <select value={form.category} onChange={(event) => setForm((prev) => ({ ...prev, category: event.target.value }))} style={inputStyle}>
+            <select
+              value={form.category}
+              onChange={(event) => {
+                const category = event.target.value;
+                setForm((prev) => ({
+                  ...prev,
+                  category,
+                  regulatoryDirection: isOtcEtcCategory(category) ? prev.regulatoryDirection : "",
+                  exclusivityType: isOtcEtcCategory(category) ? prev.exclusivityType : ""
+                }));
+              }}
+              style={inputStyle}
+            >
               {categoryOptions.map((item) => (
                 <option key={item} value={item}>{item}</option>
               ))}
             </select>
           </div>
+          {showRegulatoryFields && <>
+            <div>
+              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>허가/생산 방향성</label>
+              <select value={form.regulatoryDirection} onChange={(event) => setForm((prev) => ({ ...prev, regulatoryDirection: event.target.value }))} style={inputStyle}>
+                <option value="">선택</option>
+                {REGULATORY_DIRECTION_OPTIONS.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>독점 구분</label>
+              <select value={form.exclusivityType} onChange={(event) => setForm((prev) => ({ ...prev, exclusivityType: event.target.value }))} style={inputStyle}>
+                <option value="">선택</option>
+                {EXCLUSIVITY_OPTIONS.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </div>
+          </>}
           <div>
             <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>PM</label>
             <input value={form.pmName} onChange={(event) => setForm((prev) => ({ ...prev, pmName: event.target.value }))} style={inputStyle} />
@@ -2768,6 +2813,8 @@ function BasicInfoTab({ project, onSave }) {
                 pmName: nextPm,
                 amName: nextAm,
                 category: form.category,
+                regulatoryDirection: showRegulatoryFields ? form.regulatoryDirection : "",
+                exclusivityType: showRegulatoryFields ? form.exclusivityType : "",
                 start: form.start || TODAY,
                 draftChecklist: normalizeDraftChecklist(form.draftChecklist)
               });
@@ -3922,13 +3969,15 @@ export default function PmsApp() {
             {tab === "basic" && (
               <BasicInfoTab
                 project={selectedProject}
-                onSave={({ name, desc, pmName, amName, category, start, draftChecklist }) => {
+                onSave={({ name, desc, pmName, amName, category, regulatoryDirection, exclusivityType, start, draftChecklist }) => {
                   const historyParts = [];
                   if (selectedProject.name !== name) historyParts.push(`프로젝트명 ${selectedProject.name} -> ${name}`);
                   if ((selectedProject.desc || "") !== desc) historyParts.push("기안 요약 수정");
                   if ((selectedProject.pmName || "") !== pmName) historyParts.push(`PM: ${selectedProject.pmName || "-"} -> ${pmName || "-"}`);
                   if ((selectedProject.amName || "") !== amName) historyParts.push(`AM: ${selectedProject.amName || "-"} -> ${amName || "-"}`);
                   if (selectedProject.category !== category) historyParts.push(`카테고리: ${selectedProject.category} -> ${category}`);
+                  if ((selectedProject.regulatoryDirection || "") !== regulatoryDirection) historyParts.push(`허가/생산 방향성: ${selectedProject.regulatoryDirection || "-"} -> ${regulatoryDirection || "-"}`);
+                  if ((selectedProject.exclusivityType || "") !== exclusivityType) historyParts.push(`독점 구분: ${selectedProject.exclusivityType || "-"} -> ${exclusivityType || "-"}`);
                   if (selectedProject.start !== start) historyParts.push(`시작일 ${selectedProject.start} -> ${start}`);
                   historyParts.push(...summarizeDraftChecklistChanges(selectedProject.draftChecklist, draftChecklist));
                   if (historyParts.length === 0) return;
@@ -3940,6 +3989,8 @@ export default function PmsApp() {
                     if ((project.pmName || "") !== pmName) historyParts.push(`PM: ${project.pmName || "-"} -> ${pmName || "-"}`);
                     if ((project.amName || "") !== amName) historyParts.push(`AM: ${project.amName || "-"} -> ${amName || "-"}`);
                     if (project.category !== category) historyParts.push(`카테고리: ${project.category} -> ${category}`);
+                    if ((project.regulatoryDirection || "") !== regulatoryDirection) historyParts.push(`허가/생산 방향성: ${project.regulatoryDirection || "-"} -> ${regulatoryDirection || "-"}`);
+                    if ((project.exclusivityType || "") !== exclusivityType) historyParts.push(`독점 구분: ${project.exclusivityType || "-"} -> ${exclusivityType || "-"}`);
                     if (project.start !== start) historyParts.push(`시작일 ${project.start} -> ${start}`);
                     historyParts.push(...summarizeDraftChecklistChanges(project.draftChecklist, draftChecklist));
                     if (historyParts.length === 0) return project;
@@ -3953,6 +4004,8 @@ export default function PmsApp() {
                       amName,
                       manager,
                       category,
+                      regulatoryDirection: isOtcEtcCategory(category) ? normalizeRegulatoryDirection(regulatoryDirection) : "",
+                      exclusivityType: isOtcEtcCategory(category) ? normalizeExclusivityType(exclusivityType) : "",
                       start,
                       draftChecklist: normalizeDraftChecklist(draftChecklist),
                       changeLog: [
