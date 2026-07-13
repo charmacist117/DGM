@@ -90,6 +90,7 @@ const subtleButton = {
 
 const supplyCompactInputStyle = { ...inputStyle, padding: "6px 8px", fontSize: 15 };
 const supplyCompactTextareaStyle = { ...supplyCompactInputStyle, resize: "vertical", minHeight: 64 };
+const supplyFieldLabelStyle = { display: "block", marginBottom: 4, fontSize: 12, color: "#64748b", fontWeight: 700 };
 const supplyTextCellStyle = { fontSize: 15, color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.45 };
 const supplyMoneyTextStyle = { ...supplyTextCellStyle, fontWeight: 800, color: "#0f172a", whiteSpace: "nowrap", wordBreak: "keep-all" };
 const supplyPrimaryButtonStyle = { ...primaryButton, fontSize: 15 };
@@ -1693,6 +1694,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
   const [fromMonth, setFromMonth] = useState("");
   const [toMonth, setToMonth] = useState("");
   const [editingIds, setEditingIds] = useState(new Set());
+  const [editSnapshots, setEditSnapshots] = useState({});
   const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const safeItems = useMemo(() => normalizeSupplyPriceItems(items), [items]);
@@ -1739,6 +1741,21 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
     )));
   };
 
+  const cloneSupplyItem = (item) => normalizeSupplyPriceItem({
+    ...item,
+    ingredients: (item.ingredients || []).map((ingredient) => ({ ...ingredient })),
+    attachment: item.attachment ? { ...item.attachment } : null
+  });
+
+  const clearEditSnapshot = (itemId) => {
+    const key = String(itemId);
+    setEditSnapshots((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
   const addItem = () => {
     const nextItem = normalizeSupplyPriceItem({
       ...createSupplyPriceItem(),
@@ -1746,6 +1763,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
     });
     replaceItems([nextItem, ...safeItems]);
     setEditingIds((prev) => new Set([...prev, String(nextItem.id)]));
+    setEditSnapshots((prev) => ({ ...prev, [String(nextItem.id)]: null }));
   };
 
   const deleteItem = (itemId) => {
@@ -1755,6 +1773,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
       next.delete(String(itemId));
       return next;
     });
+    clearEditSnapshot(itemId);
   };
 
   const requestDelete = (itemId) => {
@@ -1785,6 +1804,32 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
     });
   };
 
+  const startEditing = (item) => {
+    setEditSnapshots((prev) => ({
+      ...prev,
+      [String(item.id)]: cloneSupplyItem(item)
+    }));
+    setEditing(item.id, true);
+  };
+
+  const cancelEditing = (itemId) => {
+    const key = String(itemId);
+    if (!Object.prototype.hasOwnProperty.call(editSnapshots, key)) {
+      setEditing(itemId, false);
+      return;
+    }
+    const snapshot = editSnapshots[key];
+    if (snapshot === null) {
+      deleteItem(itemId);
+      return;
+    }
+    replaceItems(safeItems.map((item) => (
+      String(item.id) === key ? cloneSupplyItem(snapshot) : item
+    )));
+    setEditing(itemId, false);
+    clearEditSnapshot(itemId);
+  };
+
   const saveItem = (itemId) => {
     const item = safeItems.find((candidate) => String(candidate.id) === String(itemId));
     if (!item) return;
@@ -1795,6 +1840,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
     }
     updateItem(itemId, {});
     setEditing(itemId, false);
+    clearEditSnapshot(itemId);
   };
 
   const updateIngredient = (itemId, index, patch) => {
@@ -1923,7 +1969,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                   </colgroup>
                   <thead>
                     <tr style={supplyHeaderRowStyle}>
-                      {["카테고리", "제조사", "공급 성분 / 함량 / 포장 / 수량 / 배치", "공급단가", "VAT 포함", "VAT 포함 가격", "관리"].map((header) => (
+                      {["카테고리", "제조사", "세부 공급내역", "공급단가", "VAT 포함", "VAT 포함 가격", "관리"].map((header) => (
                         <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#1e3a8a", borderBottom: "1px solid #bfdbfe", whiteSpace: "nowrap" }}>
                           {header}
                         </th>
@@ -1954,9 +2000,15 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                         {isEditing ? (
                           <div style={{ display: "grid", gap: 6 }}>
                             {ingredients.map((ingredient, index) => (
-                              <div key={`${item.id}_ingredient_${index}`} style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6, alignItems: "center" }}>
-                                <input value={ingredient.name} onChange={(event) => updateIngredient(item.id, index, { name: event.target.value })} placeholder="성분명" style={supplyCompactInputStyle} />
-                                <input value={ingredient.content} onChange={(event) => updateIngredient(item.id, index, { content: event.target.value })} placeholder="예: 500mg/정" style={supplyCompactInputStyle} />
+                              <div key={`${item.id}_ingredient_${index}`} style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6, alignItems: "end" }}>
+                                <div>
+                                  <label style={supplyFieldLabelStyle}>공급 성분</label>
+                                  <input value={ingredient.name} onChange={(event) => updateIngredient(item.id, index, { name: event.target.value })} placeholder="성분명" style={supplyCompactInputStyle} />
+                                </div>
+                                <div>
+                                  <label style={supplyFieldLabelStyle}>함량</label>
+                                  <input value={ingredient.content} onChange={(event) => updateIngredient(item.id, index, { content: event.target.value })} placeholder="예: 500mg/정" style={supplyCompactInputStyle} />
+                                </div>
                                 <button onClick={() => removeIngredient(item.id, index)} style={{ ...supplySubtleButtonStyle, padding: "5px 7px", fontSize: 14 }}>삭제</button>
                               </div>
                             ))}
@@ -1964,34 +2016,46 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                               + 성분 추가
                             </button>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, paddingTop: 4, borderTop: "1px dashed #e2e8f0" }}>
+                              <div>
+                                <label style={supplyFieldLabelStyle}>포장단위</label>
+                                <input
+                                  value={item.packagingUnit}
+                                  onChange={(event) => updateItem(item.id, { packagingUnit: event.target.value })}
+                                  placeholder="포장단위"
+                                  style={supplyCompactInputStyle}
+                                />
+                              </div>
+                              <div>
+                                <label style={supplyFieldLabelStyle}>포장형태</label>
+                                <input
+                                  value={item.packagingForm}
+                                  onChange={(event) => updateItem(item.id, { packagingForm: event.target.value })}
+                                  placeholder="포장형태"
+                                  style={supplyCompactInputStyle}
+                                />
+                              </div>
+                              <div>
+                                <label style={supplyFieldLabelStyle}>수량</label>
+                                <input
+                                  value={item.quantity}
+                                  onChange={(event) => updateItem(item.id, { quantity: event.target.value })}
+                                  placeholder="수량"
+                                  style={supplyCompactInputStyle}
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label style={supplyFieldLabelStyle}>최소 주문 배치 수량</label>
                               <input
-                                value={item.packagingUnit}
-                                onChange={(event) => updateItem(item.id, { packagingUnit: event.target.value })}
-                                placeholder="포장단위"
-                                style={supplyCompactInputStyle}
-                              />
-                              <input
-                                value={item.packagingForm}
-                                onChange={(event) => updateItem(item.id, { packagingForm: event.target.value })}
-                                placeholder="포장형태"
-                                style={supplyCompactInputStyle}
-                              />
-                              <input
-                                value={item.quantity}
-                                onChange={(event) => updateItem(item.id, { quantity: event.target.value })}
-                                placeholder="수량"
+                                type="number"
+                                min="0"
+                                inputMode="numeric"
+                                value={item.minimumOrderBatchQuantity}
+                                onChange={(event) => updateItem(item.id, { minimumOrderBatchQuantity: event.target.value })}
+                                placeholder="최소 주문 배치 수량"
                                 style={supplyCompactInputStyle}
                               />
                             </div>
-                            <input
-                              type="number"
-                              min="0"
-                              inputMode="numeric"
-                              value={item.minimumOrderBatchQuantity}
-                              onChange={(event) => updateItem(item.id, { minimumOrderBatchQuantity: event.target.value })}
-                              placeholder="최소 주문 배치 수량"
-                              style={supplyCompactInputStyle}
-                            />
                           </div>
                         ) : (
                           <div style={{ display: "grid", gap: 4 }}>
@@ -2088,12 +2152,15 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                               <button onClick={() => saveItem(item.id)} style={{ ...supplyPrimaryButtonStyle, padding: "6px 9px", fontSize: 15 }}>
                                 저장
                               </button>
+                              <button onClick={() => cancelEditing(item.id)} style={supplySubtleButtonStyle}>
+                                취소
+                              </button>
                               <button onClick={() => requestDelete(item.id)} style={{ ...supplySubtleButtonStyle, borderColor: "#fecaca", color: "#dc2626" }}>
                                 삭제
                               </button>
                             </>
                           ) : (
-                            <button onClick={() => setEditing(item.id, true)} style={supplySubtleButtonStyle}>
+                            <button onClick={() => startEditing(item)} style={supplySubtleButtonStyle}>
                               수정
                             </button>
                           )}
