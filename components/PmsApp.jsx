@@ -608,6 +608,14 @@ function formatTotalPrice(value, quantity, multiplier = 1) {
   return `${supplyPriceFormat.format(price * multiplier * count)}원`;
 }
 
+function formatPermitFeeIncludedTotalPrice(value, quantity, rate) {
+  const price = parseSupplyPriceNumber(value);
+  const count = parseSupplyPriceNumber(quantity);
+  const percentage = parseSupplyPriceNumber(rate);
+  if (price === null || count === null || percentage === null) return "";
+  return `${supplyPriceFormat.format(price * count * 1.1 * (1 + (percentage / 100)))}원`;
+}
+
 function normalizeSupplyCheckedValue(value) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value === 1;
@@ -615,11 +623,18 @@ function normalizeSupplyCheckedValue(value) {
   return false;
 }
 
+function isRawMaterialSupplyCategory(category) {
+  return ["건강기능식품", "일반식품"].includes(normalizeSupplyCategory(category));
+}
+
 function normalizeSupplyIngredient(value = {}) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return {
     name: String(source.name || source.ingredientName || ""),
-    content: String(source.content || source.ingredientContent || "")
+    content: String(source.content || source.ingredientContent || ""),
+    origin: String(source.origin || source.ingredientOrigin || ""),
+    brand: String(source.brand || source.ingredientBrand || ""),
+    kilogramPriceRange: String(source.kilogramPriceRange || source.kgPriceRange || source.pricePerKg || "")
   };
 }
 
@@ -657,6 +672,7 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     permitCompanyFee: normalizeSupplyCheckedValue(
       source.permitCompanyFee ?? source.licenseCompanyFee ?? source.approvalCompanyFee ?? source.authorizationCompanyFee
     ),
+    permitCompanyFeeRate: String(source.permitCompanyFeeRate || source.licenseCompanyFeeRate || source.approvalCompanyFeeRate || ""),
     quoteDate: String(source.quoteDate || ""),
     memo: String(source.memo || ""),
     attachment: normalizeSupplyAttachment(source.attachment),
@@ -1705,6 +1721,8 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
   const [editSnapshots, setEditSnapshots] = useState({});
   const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [isCsvExportDialogOpen, setIsCsvExportDialogOpen] = useState(false);
+  const [exportCategoryIds, setExportCategoryIds] = useState(SUPPLY_PRICE_CATEGORIES.map((category) => category.id));
   const safeItems = useMemo(() => normalizeSupplyPriceItems(items), [items]);
   const currentCategory = useMemo(() => (
     selectedCategory === "all" ? "all" : normalizeSupplyCategory(selectedCategory)
@@ -1736,6 +1754,93 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
       ))
     ));
   }, [monthFilteredItems, query]);
+
+  const exportSupplyPriceCsv = (exportItems, fileLabel) => {
+    if (exportItems.length === 0) {
+      window.alert("다운로드할 공급단가 항목이 없습니다.");
+      return;
+    }
+    const headers = [
+      "카테고리", "제조사", "공급 성분", "함량/규격", "원료 원산지", "브랜드/공급처", "kg당 가격대",
+      "포장단위", "포장형태", "수량", "최소 주문 배치 수량", "공급단가", "VAT 포함", "VAT 포함 단가",
+      "총 금액", "VAT 포함 총금액", "허가사 수수료", "허가사 수수료율(%)", "수수료 포함 총금액",
+      "견적일자", "용법용량", "효능효과", "첨부파일", "비고"
+    ];
+    const rows = exportItems.flatMap((item) => {
+      const ingredients = item.ingredients?.length ? item.ingredients : [normalizeSupplyIngredient()];
+      const totalPrice = formatTotalPrice(item.supplyUnitPrice, item.quantity);
+      const vatUnitPrice = item.vatIncluded ? formatVatIncludedPrice(item.supplyUnitPrice) : "";
+      const vatTotalPrice = item.vatIncluded ? formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1) : "";
+      const permitFeeTotal = item.permitCompanyFee
+        ? formatPermitFeeIncludedTotalPrice(item.supplyUnitPrice, item.quantity, item.permitCompanyFeeRate)
+        : "";
+      return ingredients.map((ingredient) => [
+        SUPPLY_PRICE_CATEGORY_LABEL_BY_ID[item.category] || item.category,
+        item.manufacturer,
+        ingredient.name,
+        ingredient.content,
+        ingredient.origin,
+        ingredient.brand,
+        ingredient.kilogramPriceRange,
+        item.packagingUnit,
+        item.packagingForm,
+        item.quantity,
+        item.minimumOrderBatchQuantity,
+        item.supplyUnitPrice,
+        item.vatIncluded ? "포함" : "",
+        vatUnitPrice,
+        totalPrice,
+        vatTotalPrice,
+        item.permitCompanyFee ? "해당" : "",
+        item.permitCompanyFeeRate,
+        permitFeeTotal,
+        item.quoteDate,
+        item.dosage,
+        item.efficacy,
+        item.attachment?.name || "",
+        item.memo
+      ]);
+    });
+    const escapeCsvValue = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+    const csvText = [headers, ...rows].map((row) => row.map(escapeCsvValue).join(",")).join("\r\n");
+    const downloadUrl = URL.createObjectURL(new Blob([`\uFEFF${csvText}`], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.download = `공급단가_${fileLabel}_${TODAY}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(downloadUrl);
+  };
+
+  const requestCsvExport = () => {
+    if (currentCategory !== "all") {
+      exportSupplyPriceCsv(filteredItems, currentCategoryLabel);
+      return;
+    }
+    setExportCategoryIds(SUPPLY_PRICE_CATEGORIES.map((category) => category.id));
+    setIsCsvExportDialogOpen(true);
+  };
+
+  const toggleExportCategory = (categoryId) => {
+    setExportCategoryIds((previous) => (
+      previous.includes(categoryId)
+        ? previous.filter((id) => id !== categoryId)
+        : [...previous, categoryId]
+    ));
+  };
+
+  const confirmCsvExport = () => {
+    if (exportCategoryIds.length === 0) {
+      window.alert("내려받을 카테고리를 하나 이상 선택해주세요.");
+      return;
+    }
+    exportSupplyPriceCsv(
+      safeItems.filter((item) => exportCategoryIds.includes(item.category)),
+      exportCategoryIds.length === SUPPLY_PRICE_CATEGORIES.length ? "전체" : "선택카테고리"
+    );
+    setIsCsvExportDialogOpen(false);
+  };
 
   const replaceItems = (nextItems) => {
     onItemsChange(normalizeSupplyPriceItems(nextItems));
@@ -1846,6 +1951,22 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
       window.alert("제조사, 성분명, 공급단가 중 하나 이상 입력해주세요.");
       return;
     }
+    if (isRawMaterialSupplyCategory(item.category)) {
+      const missingKilogramPrice = (item.ingredients || []).some((ingredient) => (
+        ingredient.name.trim() && !ingredient.kilogramPriceRange.trim()
+      ));
+      if (missingKilogramPrice) {
+        window.alert("건강기능식품 및 일반식품은 등록한 원료마다 kg당 가격대를 입력해주세요.");
+        return;
+      }
+    }
+    if (item.permitCompanyFee) {
+      const permitFeeRate = parseSupplyPriceNumber(item.permitCompanyFeeRate);
+      if (permitFeeRate === null || permitFeeRate < 0) {
+        window.alert("허가사 수수료를 체크한 경우 수수료율(%)을 숫자로 입력해주세요.");
+        return;
+      }
+    }
     updateItem(itemId, {});
     setEditing(itemId, false);
     clearEditSnapshot(itemId);
@@ -1912,7 +2033,12 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
               {currentCategoryLabel} 공급단가를 건별로 추가하고 성분명으로 검색합니다.
             </div>
           </div>
-          <SyncBadge syncState={syncState} />
+          <div style={{ display: "grid", justifyItems: "end", gap: 7 }}>
+            <SyncBadge syncState={syncState} />
+            <button onClick={requestCsvExport} style={{ ...supplySubtleButtonStyle, fontSize: 14 }}>
+              CSV 다운로드
+            </button>
+          </div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 360px) minmax(360px, 460px) auto 1fr", gap: 8, alignItems: "center" }}>
           <input
@@ -1959,9 +2085,13 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
         {filteredItems.map((item) => {
           const isEditing = editingIds.has(String(item.id));
           const ingredients = item.ingredients || [normalizeSupplyIngredient()];
+          const isRawMaterialCategory = isRawMaterialSupplyCategory(item.category);
           const totalPrice = formatTotalPrice(item.supplyUnitPrice, item.quantity);
           const vatIncludedPrice = item.vatIncluded ? formatVatIncludedPrice(item.supplyUnitPrice) : "";
           const vatTotalPrice = item.vatIncluded ? formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1) : "";
+          const permitFeeIncludedTotalPrice = item.permitCompanyFee
+            ? formatPermitFeeIncludedTotalPrice(item.supplyUnitPrice, item.quantity, item.permitCompanyFeeRate)
+            : "";
           return (
             <div key={item.id} style={supplyCardStyle}>
               <div style={{ overflowX: "auto" }}>
@@ -1977,7 +2107,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                   </colgroup>
                   <thead>
                     <tr style={supplyHeaderRowStyle}>
-                      {["카테고리", "제조사", "세부 공급내역", "공급단가", "VAT 포함", "VAT 포함 가격", "관리"].map((header) => (
+                      {["카테고리", "제조사", "세부 공급내역", isRawMaterialCategory ? "전체 견적단가" : "공급단가", "VAT 포함", "VAT 포함 가격", "관리"].map((header) => (
                         <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#1e3a8a", borderBottom: "1px solid #bfdbfe", whiteSpace: "nowrap" }}>
                           {header}
                         </th>
@@ -2008,15 +2138,27 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                         {isEditing ? (
                           <div style={{ display: "grid", gap: 6 }}>
                             {ingredients.map((ingredient, index) => (
-                              <div key={`${item.id}_ingredient_${index}`} style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6, alignItems: "end" }}>
+                              <div key={`${item.id}_ingredient_${index}`} style={{ display: "grid", gridTemplateColumns: isRawMaterialCategory ? "1fr 1fr 1fr 1fr 1fr auto" : "1fr 1fr auto", gap: 6, alignItems: "end" }}>
                                 <div>
                                   <label style={supplyFieldLabelStyle}>공급 성분</label>
                                   <input value={ingredient.name} onChange={(event) => updateIngredient(item.id, index, { name: event.target.value })} placeholder="성분명" style={supplyCompactInputStyle} />
                                 </div>
                                 <div>
-                                  <label style={supplyFieldLabelStyle}>함량</label>
-                                  <input value={ingredient.content} onChange={(event) => updateIngredient(item.id, index, { content: event.target.value })} placeholder="예: 500mg/정" style={supplyCompactInputStyle} />
+                                  <label style={supplyFieldLabelStyle}>{isRawMaterialCategory ? "규격 / 함량" : "함량"}</label>
+                                  <input value={ingredient.content} onChange={(event) => updateIngredient(item.id, index, { content: event.target.value })} placeholder={isRawMaterialCategory ? "예: 분말, 98%" : "예: 500mg/정"} style={supplyCompactInputStyle} />
                                 </div>
+                                {isRawMaterialCategory && <div>
+                                  <label style={supplyFieldLabelStyle}>원료 원산지</label>
+                                  <input value={ingredient.origin} onChange={(event) => updateIngredient(item.id, index, { origin: event.target.value })} placeholder="예: 인도" style={supplyCompactInputStyle} />
+                                </div>}
+                                {isRawMaterialCategory && <div>
+                                  <label style={supplyFieldLabelStyle}>브랜드 / 공급처</label>
+                                  <input value={ingredient.brand} onChange={(event) => updateIngredient(item.id, index, { brand: event.target.value })} placeholder="브랜드 또는 공급처" style={supplyCompactInputStyle} />
+                                </div>}
+                                {isRawMaterialCategory && <div>
+                                  <label style={supplyFieldLabelStyle}>kg당 가격대 *</label>
+                                  <input value={ingredient.kilogramPriceRange} onChange={(event) => updateIngredient(item.id, index, { kilogramPriceRange: event.target.value })} placeholder="예: 12,000 ~ 15,000원" style={supplyCompactInputStyle} />
+                                </div>}
                                 <button onClick={() => removeIngredient(item.id, index)} style={{ ...supplySubtleButtonStyle, padding: "5px 7px", fontSize: 14 }}>삭제</button>
                               </div>
                             ))}
@@ -2067,9 +2209,12 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                           </div>
                         ) : (
                           <div style={{ display: "grid", gap: 4 }}>
-                            {ingredients.some((ingredient) => ingredient.name || ingredient.content) ? ingredients.map((ingredient, index) => (
+                            {ingredients.some((ingredient) => ingredient.name || ingredient.content || ingredient.origin || ingredient.brand || ingredient.kilogramPriceRange) ? ingredients.map((ingredient, index) => (
                               <div key={`${item.id}_ingredient_view_${index}`} style={supplyTextCellStyle}>
                                 {ingredient.name || "-"}{ingredient.content ? ` / ${ingredient.content}` : ""}
+                                {isRawMaterialCategory && ingredient.origin ? ` · 원산지: ${ingredient.origin}` : ""}
+                                {isRawMaterialCategory && ingredient.brand ? ` · 브랜드/공급처: ${ingredient.brand}` : ""}
+                                {isRawMaterialCategory && ingredient.kilogramPriceRange ? ` · kg당: ${ingredient.kilogramPriceRange}` : ""}
                               </div>
                             )) : <div style={supplyTextCellStyle}>-</div>}
                             {(item.packagingUnit || item.packagingForm || item.quantity || item.minimumOrderBatchQuantity) && (
@@ -2089,20 +2234,26 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                       <td style={{ padding: 8 }}>
                         {isEditing ? (
                           <div style={{ display: "grid", gap: 6 }}>
-                            <input value={item.supplyUnitPrice} onChange={(event) => updateItem(item.id, { supplyUnitPrice: event.target.value })} placeholder="예: 1,250원" style={supplyCompactInputStyle} />
-                            <input
-                              value={totalPrice}
-                              readOnly
-                              placeholder="총 금액"
-                              style={{ ...supplyCompactInputStyle, background: "#f8fafc", color: totalPrice ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
-                            />
+                            <div>
+                              <label style={supplyFieldLabelStyle}>{isRawMaterialCategory ? "전체 견적단가" : "공급단가"}</label>
+                              <input value={item.supplyUnitPrice} onChange={(event) => updateItem(item.id, { supplyUnitPrice: event.target.value })} placeholder={isRawMaterialCategory ? "예: 전체 견적 단가" : "예: 1,250원"} style={supplyCompactInputStyle} />
+                            </div>
+                            <div>
+                              <label style={supplyFieldLabelStyle}>총 견적금액</label>
+                              <input
+                                value={totalPrice}
+                                readOnly
+                                placeholder="수량 입력 시 자동계산"
+                                style={{ ...supplyCompactInputStyle, background: "#f8fafc", color: totalPrice ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
+                              />
+                            </div>
                           </div>
                         ) : (
                           <div style={{ display: "grid", gap: 4 }}>
                             <div style={supplyTextCellStyle}>{item.supplyUnitPrice || "-"}</div>
                             {totalPrice && (
                               <div style={supplyMoneyTextStyle}>
-                                총 금액: {totalPrice}
+                                {isRawMaterialCategory ? "총 견적금액" : "총 금액"}: {totalPrice}
                               </div>
                             )}
                           </div>
@@ -2134,9 +2285,33 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                             <input
                               value={vatTotalPrice}
                               readOnly
-                              placeholder="총 금액"
+                              placeholder="총 견적금액"
                               style={{ ...supplyCompactInputStyle, background: "#f8fafc", color: vatTotalPrice ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
                             />
+                            <div>
+                              <label style={supplyFieldLabelStyle}>허가사 수수료율 (%)</label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                inputMode="decimal"
+                                value={item.permitCompanyFeeRate}
+                                disabled={!item.permitCompanyFee}
+                                onChange={(event) => updateItem(item.id, { permitCompanyFeeRate: event.target.value })}
+                                placeholder={item.permitCompanyFee ? "예: 10" : "허가사 수수료 체크 후 입력"}
+                                style={{ ...supplyCompactInputStyle, background: item.permitCompanyFee ? "#fff" : "#f1f5f9", color: item.permitCompanyFee ? "#0f172a" : "#94a3b8", cursor: item.permitCompanyFee ? "text" : "not-allowed" }}
+                              />
+                            </div>
+                            <div>
+                              <label style={supplyFieldLabelStyle}>수수료 포함 총금액</label>
+                              <input
+                                value={permitFeeIncludedTotalPrice}
+                                readOnly
+                                disabled={!item.permitCompanyFee}
+                                placeholder={item.permitCompanyFee ? "수수료율 입력 시 자동계산" : "허가사 수수료 체크 후 자동계산"}
+                                style={{ ...supplyCompactInputStyle, background: item.permitCompanyFee ? "#f8fafc" : "#f1f5f9", color: permitFeeIncludedTotalPrice ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
+                              />
+                            </div>
                           </div>
                         ) : item.vatIncluded ? (
                           <div style={{ display: "grid", gap: 4 }}>
@@ -2145,8 +2320,14 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                             </div>
                             {vatTotalPrice && (
                               <div style={supplyMoneyTextStyle}>
-                                총 금액: {vatTotalPrice}
+                                {isRawMaterialCategory ? "총 견적금액" : "총 금액"}: {vatTotalPrice}
                               </div>
+                            )}
+                            {item.permitCompanyFee && item.permitCompanyFeeRate && (
+                              <div style={supplyTextCellStyle}>허가사 수수료율: {item.permitCompanyFeeRate}%</div>
+                            )}
+                            {permitFeeIncludedTotalPrice && (
+                              <div style={supplyMoneyTextStyle}>수수료 포함 총금액: {permitFeeIncludedTotalPrice}</div>
                             )}
                           </div>
                         ) : (
@@ -2274,6 +2455,43 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
           </div>
         )}
       </div>
+
+      {isCsvExportDialogOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(15,23,42,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ width: 460, maxWidth: "94vw", background: "#fff", borderRadius: 10, border: "1px solid #bfdbfe", boxShadow: "0 20px 60px rgba(0,0,0,.22)", padding: 18 }}>
+            <div style={{ fontSize: 19, fontWeight: 900, color: "#0f172a", marginBottom: 8 }}>공급단가 CSV 다운로드</div>
+            <div style={{ fontSize: 15, color: "#475569", lineHeight: 1.5, marginBottom: 14 }}>
+              내려받을 카테고리를 선택하세요. 전체 카테고리도 그대로 받을 수 있습니다.
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 6, fontSize: 15, fontWeight: 800, color: "#1e3a8a", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={exportCategoryIds.length === SUPPLY_PRICE_CATEGORIES.length}
+                onChange={(event) => setExportCategoryIds(event.target.checked ? SUPPLY_PRICE_CATEGORIES.map((category) => category.id) : [])}
+              />
+              전체 카테고리
+            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}>
+              {SUPPLY_PRICE_CATEGORIES.map((category) => {
+                const count = safeItems.filter((item) => item.category === category.id).length;
+                return (
+                  <label key={category.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "9px 10px", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 15, color: "#334155", cursor: "pointer" }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                      <input type="checkbox" checked={exportCategoryIds.includes(category.id)} onChange={() => toggleExportCategory(category.id)} />
+                      {category.label}
+                    </span>
+                    <span style={{ fontSize: 13, color: "#64748b" }}>{count}건</span>
+                  </label>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button onClick={() => setIsCsvExportDialogOpen(false)} style={supplySubtleButtonStyle}>취소</button>
+              <button onClick={confirmCsvExport} style={supplyPrimaryButtonStyle}>CSV 다운로드</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {deleteTargetId !== null && (
         <div style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(15,23,42,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
