@@ -588,6 +588,22 @@ function getSupplyQuoteMonth(value) {
   return /^\d{4}-\d{2}/.test(raw) ? raw.slice(0, 7) : "";
 }
 
+function getRecentSupplyQuoteRange(months) {
+  const end = new Date();
+  const targetMonthIndex = end.getMonth() - months;
+  const targetYear = end.getFullYear() + Math.floor(targetMonthIndex / 12);
+  const targetMonth = ((targetMonthIndex % 12) + 12) % 12;
+  const lastTargetDay = new Date(targetYear, targetMonth + 1, 0).getDate();
+  const start = new Date(targetYear, targetMonth, Math.min(end.getDate(), lastTargetDay));
+  return { from: toStr(start), to: toStr(end) };
+}
+
+function isSupplyQuoteOlderThanMonths(value, months = 6) {
+  const quoteDate = String(value || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(quoteDate)) return false;
+  return quoteDate < getRecentSupplyQuoteRange(months).from;
+}
+
 function parseSupplyPriceNumber(value) {
   const cleaned = String(value || "").replace(/,/g, "").replace(/[^\d.-]/g, "");
   if (!cleaned || cleaned === "-" || cleaned === "." || cleaned === "-.") return null;
@@ -682,6 +698,7 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
       ? String(source.permitCompanyFeeRate || source.licenseCompanyFeeRate || source.approvalCompanyFeeRate || "")
       : "",
     quoteDate: String(source.quoteDate || ""),
+    shelfLife: String(source.shelfLife || source.expirationPeriod || source.expiryPeriod || ""),
     memo: String(source.memo || ""),
     attachment: normalizeSupplyAttachment(source.attachment),
     createdAt: String(source.createdAt || new Date().toISOString()),
@@ -1725,6 +1742,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
   const [search, setSearch] = useState("");
   const [fromMonth, setFromMonth] = useState("");
   const [toMonth, setToMonth] = useState("");
+  const [quickQuoteDateFilter, setQuickQuoteDateFilter] = useState("all");
   const [editingIds, setEditingIds] = useState(new Set());
   const [editSnapshots, setEditSnapshots] = useState({});
   const [deleteTargetId, setDeleteTargetId] = useState(null);
@@ -1742,26 +1760,59 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
   const currentCategoryLabel = currentCategory === "all"
     ? "전체"
     : (SUPPLY_PRICE_CATEGORY_LABEL_BY_ID[currentCategory] || currentCategory);
-  const monthRangeActive = Boolean(fromMonth || toMonth);
+  const quickQuoteDateRange = useMemo(() => {
+    const months = quickQuoteDateFilter === "3m" ? 3 : quickQuoteDateFilter === "6m" ? 6 : 0;
+    return months ? getRecentSupplyQuoteRange(months) : null;
+  }, [quickQuoteDateFilter]);
+  const monthRangeActive = Boolean(quickQuoteDateRange || fromMonth || toMonth);
   const monthFilteredItems = useMemo(() => {
     if (!monthRangeActive) return categoryFilteredItems;
     return categoryFilteredItems.filter((item) => {
+      if (editingIds.has(String(item.id))) return true;
+      if (quickQuoteDateRange) {
+        const quoteDate = String(item.quoteDate || "").slice(0, 10);
+        return Boolean(quoteDate && quoteDate >= quickQuoteDateRange.from && quoteDate <= quickQuoteDateRange.to);
+      }
       const quoteMonth = getSupplyQuoteMonth(item.quoteDate);
       if (!quoteMonth) return false;
       if (fromMonth && quoteMonth < fromMonth) return false;
       if (toMonth && quoteMonth > toMonth) return false;
       return true;
     });
-  }, [categoryFilteredItems, fromMonth, monthRangeActive, toMonth]);
+  }, [categoryFilteredItems, editingIds, fromMonth, monthRangeActive, quickQuoteDateRange, toMonth]);
   const query = useMemo(() => search.trim().toLowerCase(), [search]);
   const filteredItems = useMemo(() => {
-    if (!query) return monthFilteredItems;
-    return monthFilteredItems.filter((item) => (
-      (item.ingredients || []).some((ingredient) => (
+    const searchedItems = !query ? monthFilteredItems : monthFilteredItems.filter((item) => (
+      editingIds.has(String(item.id)) || (item.ingredients || []).some((ingredient) => (
         ingredient.name.toLowerCase().includes(query)
       ))
     ));
-  }, [monthFilteredItems, query]);
+    return [...searchedItems].sort((left, right) => {
+      const leftEditing = editingIds.has(String(left.id));
+      const rightEditing = editingIds.has(String(right.id));
+      if (leftEditing !== rightEditing) return leftEditing ? -1 : 1;
+      const leftQuoteDate = String(left.quoteDate || "").slice(0, 10);
+      const rightQuoteDate = String(right.quoteDate || "").slice(0, 10);
+      if (leftQuoteDate !== rightQuoteDate) {
+        if (!leftQuoteDate) return 1;
+        if (!rightQuoteDate) return -1;
+        return rightQuoteDate.localeCompare(leftQuoteDate);
+      }
+      return String(right.createdAt || "").localeCompare(String(left.createdAt || ""));
+    });
+  }, [editingIds, monthFilteredItems, query]);
+
+  const applyQuickQuoteDateFilter = (filter) => {
+    setQuickQuoteDateFilter(filter);
+    if (filter === "all") {
+      setFromMonth("");
+      setToMonth("");
+      return;
+    }
+    const range = getRecentSupplyQuoteRange(filter === "3m" ? 3 : 6);
+    setFromMonth(range.from.slice(0, 7));
+    setToMonth(range.to.slice(0, 7));
+  };
 
   const exportSupplyPriceCsv = (exportItems, fileLabel) => {
     if (exportItems.length === 0) {
@@ -1770,9 +1821,9 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
     }
     const headers = [
       "카테고리", "제조사", "공급 성분", "함량/규격", "원료 원산지", "브랜드/공급처", "kg당 가격대",
-      "포장단위", "포장형태", "수량", "최소 주문 배치 수량", "공급단가", "VAT 포함", "VAT 포함 단가",
+      "포장단위", "포장형태", "수량", "최소 주문 배치 수량", "배치 당 공급단가", "VAT 포함", "배치 당 VAT 포함 가격",
       "총 금액", "VAT 포함 총금액", "허가사 수수료", "허가사 수수료율(%)", "수수료 포함 총금액",
-      "견적일자", "용법용량", "효능효과", "첨부파일", "비고"
+      "견적일자", "사용기한", "용법용량", "효능효과", "첨부파일", "비고"
     ];
     const rows = exportItems.flatMap((item) => {
       const ingredients = item.ingredients?.length ? item.ingredients : [normalizeSupplyIngredient()];
@@ -1804,6 +1855,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
         supportsPermitCompanyFee ? item.permitCompanyFeeRate : "",
         permitFeeTotal,
         item.quoteDate,
+        item.shelfLife,
         item.dosage,
         item.efficacy,
         item.attachment?.name || "",
@@ -2049,39 +2101,56 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
             </button>
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 360px) minmax(360px, 460px) auto 1fr", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 360px) minmax(360px, 460px) auto 1fr", gap: 8, alignItems: "end" }}>
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="성분명 검색"
             style={{ ...inputStyle, fontSize: 15 }}
           />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6, alignItems: "center" }}>
-            <input
-              type="month"
-              value={fromMonth}
-              max={toMonth || undefined}
-              onChange={(event) => setFromMonth(event.target.value)}
-              title="시작월"
-              style={{ ...inputStyle, fontSize: 15 }}
-            />
-            <input
-              type="month"
-              value={toMonth}
-              min={fromMonth || undefined}
-              onChange={(event) => setToMonth(event.target.value)}
-              title="종료월"
-              style={{ ...inputStyle, fontSize: 15 }}
-            />
-            <button
-              onClick={() => {
-                setFromMonth("");
-                setToMonth("");
-              }}
-              style={{ ...supplySubtleButtonStyle, padding: "8px 10px", whiteSpace: "nowrap" }}
-            >
-              전체월
-            </button>
+          <div style={{ display: "grid", gap: 6 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 5 }}>
+              {[
+                ["3m", "최근 3개월"],
+                ["6m", "최근 6개월"],
+                ["all", "전체 견적"]
+              ].map(([filter, label]) => {
+                const active = quickQuoteDateFilter === filter;
+                return (
+                  <button
+                    key={filter}
+                    onClick={() => applyQuickQuoteDateFilter(filter)}
+                    style={{ ...supplySubtleButtonStyle, padding: "7px 8px", borderColor: active ? "#2563eb" : "#cbd5e1", background: active ? "#eff6ff" : "#fff", color: active ? "#1d4ed8" : "#475569", fontWeight: 800 }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, alignItems: "center" }}>
+              <input
+                type="month"
+                value={fromMonth}
+                max={toMonth || undefined}
+                onChange={(event) => {
+                  setFromMonth(event.target.value);
+                  setQuickQuoteDateFilter("custom");
+                }}
+                title="시작월"
+                style={{ ...inputStyle, fontSize: 15 }}
+              />
+              <input
+                type="month"
+                value={toMonth}
+                min={fromMonth || undefined}
+                onChange={(event) => {
+                  setToMonth(event.target.value);
+                  setQuickQuoteDateFilter("custom");
+                }}
+                title="종료월"
+                style={{ ...inputStyle, fontSize: 15 }}
+              />
+            </div>
           </div>
           <button onClick={addItem} style={supplyPrimaryButtonStyle}>+ 공급단가 건 추가</button>
           <div style={{ fontSize: 15, color: "#64748b", textAlign: "right" }}>
@@ -2117,7 +2186,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                   </colgroup>
                   <thead>
                     <tr style={supplyHeaderRowStyle}>
-                      {["카테고리", "제조사", "세부 공급내역", isRawMaterialCategory ? "전체 견적단가" : "공급단가", "VAT 포함", "VAT 포함 가격", "관리"].map((header) => (
+                      {["카테고리", "제조사", "세부 공급내역", isRawMaterialCategory ? "배치 당 전체 견적단가" : "배치 당 공급단가", "VAT 포함", "배치 당 VAT 포함 가격", "관리"].map((header) => (
                         <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#1e3a8a", borderBottom: "1px solid #bfdbfe", whiteSpace: "nowrap" }}>
                           {header}
                         </th>
@@ -2256,8 +2325,8 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                         {isEditing ? (
                           <div style={{ display: "grid", gap: 6 }}>
                             <div>
-                              <label style={supplyFieldLabelStyle}>{isRawMaterialCategory ? "전체 견적단가" : "공급단가"}</label>
-                              <input value={item.supplyUnitPrice} onChange={(event) => updateItem(item.id, { supplyUnitPrice: event.target.value })} placeholder={isRawMaterialCategory ? "예: 전체 견적 단가" : "예: 1,250원"} style={supplyCompactInputStyle} />
+                              <label style={supplyFieldLabelStyle}>{isRawMaterialCategory ? "배치 당 전체 견적단가" : "배치 당 공급단가"}</label>
+                              <input value={item.supplyUnitPrice} onChange={(event) => updateItem(item.id, { supplyUnitPrice: event.target.value })} placeholder={isRawMaterialCategory ? "예: 배치 당 전체 견적단가" : "예: 배치 당 1,250원"} style={supplyCompactInputStyle} />
                             </div>
                             <div>
                               <label style={supplyFieldLabelStyle}>총 견적금액</label>
@@ -2389,7 +2458,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                     <tr style={supplyDetailHeaderRowStyle}>
                       {[
                         ...(supportsPermitCompanyFee ? ["허가사 수수료"] : []),
-                        "견적일자", "용법용량", "효능효과", "첨부파일", "비고"
+                        "견적일자", "사용기한", "용법용량", "효능효과", "첨부파일", "비고"
                       ].map((header) => (
                         <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#3730a3", borderBottom: "1px solid #c7d2fe", whiteSpace: "nowrap" }}>
                           {header}
@@ -2417,7 +2486,30 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                         {isEditing ? (
                           <input type="date" value={item.quoteDate} onChange={(event) => updateItem(item.id, { quoteDate: event.target.value })} style={supplyCompactInputStyle} />
                         ) : (
-                          <div style={supplyTextCellStyle}>{item.quoteDate ? fmt(item.quoteDate) : "-"}</div>
+                          <div style={{ ...supplyTextCellStyle, display: "flex", alignItems: "center", gap: 7 }}>
+                            <span>{item.quoteDate ? fmt(item.quoteDate) : "-"}</span>
+                            {isSupplyQuoteOlderThanMonths(item.quoteDate, 6) && (
+                              <span
+                                title="현재 기준으로 견적 수령일로부터 6개월이 초과하였으니 견적 내용을 재확인해주세요."
+                                aria-label="6개월이 지난 견적 재확인 필요"
+                                style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, flex: "0 0 18px", borderRadius: "50%", background: "#fef2f2", border: "1px solid #fca5a5", color: "#dc2626", fontSize: 12, fontWeight: 900, cursor: "help" }}
+                              >
+                                !
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: 8, width: 180 }}>
+                        {isEditing ? (
+                          <input
+                            value={item.shelfLife}
+                            onChange={(event) => updateItem(item.id, { shelfLife: event.target.value })}
+                            placeholder="예: 제조일로부터 24개월"
+                            style={supplyCompactInputStyle}
+                          />
+                        ) : (
+                          <div style={supplyTextCellStyle}>{item.shelfLife || "-"}</div>
                         )}
                       </td>
                       <td style={{ padding: 8, width: 220 }}>
