@@ -20,6 +20,7 @@ import {
   normalizeRegulatoryDirection
 } from "@/lib/pms/defaults";
 import { TODAY, addDays, diff, fmt, toStr } from "@/lib/pms/date";
+import { parseFullBackup } from "@/lib/pms/fullBackup";
 import { calcSchedule } from "@/lib/pms/schedule";
 import { downloadFile, projectFromBackupCsv, projectToBackupCsv, projectsToCsvBackupZip } from "@/lib/pms/exporters";
 
@@ -2896,13 +2897,79 @@ function DecisionTab({ project, onSaveLog }) {
 
 function BackupTab({ projects, adminLogs, supplyPriceItems, selectedProject, onRestore, isAdmin }) {
   const fileInputRef = useRef(null);
+  const fullBackupInputRef = useRef(null);
+  const [transferState, setTransferState] = useState({ status: "idle", message: "" });
+  const [pendingRestore, setPendingRestore] = useState(null);
+  const [restoreConfirmation, setRestoreConfirmation] = useState("");
   const exportableAdminLogs = isAdmin
     ? adminLogs
     : (adminLogs || []).filter((log) => !log.hiddenForManager);
 
-  const exportAllJson = () => {
-    const content = JSON.stringify({ projects, adminLogs: exportableAdminLogs, supplyPriceItems }, null, 2);
-    downloadFile(`Charmacist_PB_backup_${toStr(new Date())}.json`, content, "application/json");
+  const downloadFullBackup = async () => {
+    setTransferState({ status: "working", message: "서버 저장소에서 전체 데이터를 준비하고 있습니다." });
+    try {
+      const response = await fetch("/api/backup/full", { cache: "no-store" });
+      const content = await response.text();
+      if (!response.ok) {
+        let payload = {};
+        try { payload = JSON.parse(content); } catch {}
+        throw new Error(payload.error || payload.message || `다운로드 실패 (${response.status})`);
+      }
+      const disposition = response.headers.get("content-disposition") || "";
+      const matchedName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+      downloadFile(matchedName || `PB_full_backup_${toStr(new Date())}.json`, content, "application/json;charset=utf-8");
+      setTransferState({ status: "success", message: "전체 데이터 파일 다운로드가 완료되었습니다." });
+    } catch (error) {
+      setTransferState({ status: "error", message: `다운로드 실패: ${String(error?.message || error)}` });
+    }
+  };
+
+  const selectFullBackup = async (file) => {
+    try {
+      setTransferState({ status: "working", message: "백업 파일을 검사하고 있습니다." });
+      const document = JSON.parse(await file.text());
+      const parsed = parseFullBackup(document, { allowLegacy: true });
+      setPendingRestore({
+        document,
+        data: parsed.data,
+        summary: parsed.summary,
+        legacy: parsed.legacy,
+        fileName: file.name,
+        fileSize: file.size
+      });
+      setRestoreConfirmation("");
+      setTransferState({ status: "idle", message: "" });
+    } catch (error) {
+      setPendingRestore(null);
+      setTransferState({ status: "error", message: `파일 검사 실패: ${String(error?.message || error)}` });
+    }
+  };
+
+  const restoreFullBackup = async () => {
+    if (!pendingRestore || restoreConfirmation !== "전체 데이터를 교체합니다") return;
+    setTransferState({ status: "working", message: "전체 데이터를 저장소에 복원하고 있습니다." });
+    try {
+      const response = await fetch("/api/backup/full", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ backup: pendingRestore.document })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || payload.message || `복원 실패 (${response.status})`);
+      }
+      onRestore({
+        projects: pendingRestore.data.projects,
+        adminLogs: pendingRestore.data.adminLogs,
+        supplyPriceItems: pendingRestore.data.supplyPriceItems,
+        selectedId: pendingRestore.data.projects[0]?.id || null
+      });
+      setPendingRestore(null);
+      setRestoreConfirmation("");
+      setTransferState({ status: "success", message: `전체 데이터 복원이 완료되었습니다. 프로젝트 ${payload.summary.projectCount}건, 공급단가 ${payload.summary.supplyPriceItemCount}건` });
+    } catch (error) {
+      setTransferState({ status: "error", message: `복원 실패: ${String(error?.message || error)}` });
+    }
   };
 
   const exportProjectCsv = () => {
@@ -2913,34 +2980,53 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, selectedProject, onR
 
   const exportCsvWorkbook = () => {
     const zip = projectsToCsvBackupZip(projects);
-    downloadFile(`Charmacist_PB_CSV_backup_${toStr(new Date())}.zip`, zip, "application/zip");
+    downloadFile(`PB_CSV_backup_${toStr(new Date())}.zip`, zip, "application/zip");
   };
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
-        <div style={{ fontWeight: 800, marginBottom: 8 }}>백업/복원</div>
+        <div style={{ fontWeight: 800, marginBottom: 8 }}>전체 데이터 이전</div>
         <div style={{ fontSize: 13, color: "#475569", marginBottom: 10 }}>
-          서버 DB가 기본 저장소이며, JSON/CSV 파일 백업은 데이터 이전/복구용입니다.
-        </div>
-        <div style={{ fontSize: 12, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
-          GitHub에 코드 파일을 업로드해도 의사결정/업체 소통 기록 같은 운영 데이터는 함께 업로드되지 않습니다.
-          상단 저장 상태가 "로컬 캐시에만 저장됨"으로 보이면 Vercel/PostgreSQL 환경변수를 확인하고, 배포 전 JSON 백업을 내려받아 보관하세요.
+          프로젝트, 이력, 공급단가, 첨부파일을 하나의 전체 백업 파일로 이전합니다.
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button onClick={exportAllJson} style={primaryButton}>전체 JSON 백업</button>
+          {isAdmin && <button onClick={downloadFullBackup} disabled={transferState.status === "working"} style={primaryButton}>전체 파일 데이터 다운로드</button>}
+          {isAdmin && <button onClick={() => fullBackupInputRef.current?.click()} disabled={transferState.status === "working"} style={subtleButton}>전체 파일 데이터 업로드</button>}
+        </div>
+        {transferState.message && (
+          <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, color: transferState.status === "error" ? "#dc2626" : (transferState.status === "success" ? "#047857" : "#475569") }}>
+            {transferState.message}
+          </div>
+        )}
+        {!isAdmin && <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>전체 데이터 이전은 ADMIN 권한에서만 가능합니다.</div>}
+        {isAdmin && <input
+          type="file"
+          accept=".json,application/json"
+          style={{ display: "none" }}
+          ref={fullBackupInputRef}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) selectFullBackup(file);
+            event.target.value = "";
+          }}
+        />}
+      </div>
+
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
+        <div style={{ fontWeight: 800, marginBottom: 8 }}>CSV 보조 백업</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button onClick={exportCsvWorkbook} style={subtleButton}>전체 프로젝트/체크리스트 CSV 묶음</button>
           <button onClick={exportProjectCsv} style={subtleButton}>현재 프로젝트 전체 CSV 백업</button>
-          {isAdmin && <button onClick={() => fileInputRef.current?.click()} style={subtleButton}>JSON/CSV 백업파일 불러오기</button>}
+          {isAdmin && <button onClick={() => fileInputRef.current?.click()} style={subtleButton}>현재 프로젝트 CSV 복원</button>}
         </div>
         <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>
-          CSV 묶음에는 전체 프로젝트 요약 CSV와 사전 체크리스트 CSV가 포함됩니다. 현재 프로젝트 전체 CSV 백업은 복원용 원장 데이터입니다.
+          CSV 묶음은 조회·가공용이며, 시스템 전체 이전에는 위의 전체 파일 데이터 기능을 사용합니다.
         </div>
-        {!isAdmin && <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>복원 기능은 admin 권한에서만 가능합니다.</div>}
       </div>
       {isAdmin && <input
         type="file"
-        accept=".json,.csv,application/json,text/csv"
+        accept=".csv,text/csv"
         style={{ display: "none" }}
         ref={fileInputRef}
         onChange={async (event) => {
@@ -2989,6 +3075,29 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, selectedProject, onR
           }
         }}
       />}
+      {pendingRestore && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(15, 23, 42, .56)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ width: "min(520px, 100%)", background: "#fff", border: "1px solid #cbd5e1", borderRadius: 8, padding: 18, boxShadow: "0 18px 50px rgba(15, 23, 42, .25)" }}>
+            <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>전체 데이터 교체 확인</div>
+            <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.6, marginBottom: 12 }}>
+              현재 저장된 모든 데이터가 선택한 파일의 내용으로 교체됩니다. 복원 전 현재 데이터 파일을 먼저 다운로드해 보관하세요.
+            </div>
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, display: "grid", gap: 4, fontSize: 12, marginBottom: 12 }}>
+              <div><strong>파일:</strong> {pendingRestore.fileName} ({(pendingRestore.fileSize / 1024 / 1024).toFixed(2)}MB)</div>
+              <div><strong>프로젝트:</strong> {pendingRestore.summary.projectCount}건 · <strong>이력:</strong> {pendingRestore.summary.adminLogCount}건</div>
+              <div><strong>공급단가:</strong> {pendingRestore.summary.supplyPriceItemCount}건 · <strong>첨부파일:</strong> {pendingRestore.summary.attachmentCount}개</div>
+            </div>
+            <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 800 }}>
+              계속하려면 아래 입력창에 ‘전체 데이터를 교체합니다’를 입력하세요.
+              <input value={restoreConfirmation} onChange={(event) => setRestoreConfirmation(event.target.value)} style={{ padding: "9px 10px", borderRadius: 8, border: "1px solid #cbd5e1", fontSize: 13 }} />
+            </label>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+              <button onClick={() => { setPendingRestore(null); setRestoreConfirmation(""); }} disabled={transferState.status === "working"} style={subtleButton}>취소</button>
+              <button onClick={restoreFullBackup} disabled={restoreConfirmation !== "전체 데이터를 교체합니다" || transferState.status === "working"} style={{ ...primaryButton, opacity: restoreConfirmation === "전체 데이터를 교체합니다" ? 1 : 0.45 }}>전체 데이터 복원</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3742,6 +3851,17 @@ export default function PmsApp() {
     }
   };
 
+  const applyRestoredData = ({ projects: nextProjects, adminLogs: nextAdminLogs, supplyPriceItems: nextSupplyPriceItems, selectedId: nextSelectedId }) => {
+    if (!isAdmin) return;
+    const normalizedProjects = normalizeProjects(nextProjects);
+    setProjects(normalizedProjects);
+    setAdminLogs(normalizeAdminLogs(nextAdminLogs));
+    setSupplyPriceItems(normalizeSupplyPriceItems(nextSupplyPriceItems || []));
+    if (nextSelectedId) setSelectedId(nextSelectedId);
+    else if (normalizedProjects.length > 0) setSelectedId(normalizedProjects[0].id);
+    else setSelectedId(null);
+  };
+
   return (
     <div style={{
       minHeight: "100vh",
@@ -3776,7 +3896,8 @@ export default function PmsApp() {
         }}>
           {[
             ["development", "제품개발"],
-            ["supply", "공급단가"]
+            ["supply", "공급단가"],
+            ["transfer", "데이터 이전"]
           ].map(([id, label]) => (
             <button
               key={id}
@@ -3820,6 +3941,27 @@ export default function PmsApp() {
             syncState={syncState}
             selectedCategory={supplyCategory}
           />
+        ) : moduleTab === "transfer" ? (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 900 }}>데이터 이전</div>
+                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>온라인과 오프라인 저장소 사이에서 전체 운영 데이터를 이동합니다.</div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+                <SyncBadge syncState={syncState} />
+                <div style={{ fontSize: 11, fontWeight: 800, color: "#0f172a", background: "#e2e8f0", borderRadius: 999, padding: "3px 9px" }}>{roleLabel}</div>
+              </div>
+            </div>
+            <BackupTab
+              projects={projects}
+              adminLogs={adminLogs}
+              supplyPriceItems={supplyPriceItems}
+              selectedProject={selectedProject}
+              isAdmin={isAdmin}
+              onRestore={applyRestoredData}
+            />
+          </>
         ) : isHome ? (
           <>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12 }}>
@@ -4410,17 +4552,7 @@ export default function PmsApp() {
                 supplyPriceItems={supplyPriceItems}
                 selectedProject={selectedProject}
                 isAdmin={isAdmin}
-                onRestore={({ projects: nextProjects, adminLogs: nextAdminLogs, supplyPriceItems: nextSupplyPriceItems, selectedId: nextSelectedId }) => {
-                  if (!isAdmin) return;
-                  setProjects(normalizeProjects(nextProjects));
-                  setAdminLogs(normalizeAdminLogs(nextAdminLogs));
-                  if (nextSupplyPriceItems) {
-                    setSupplyPriceItems(normalizeSupplyPriceItems(nextSupplyPriceItems));
-                  }
-                  if (nextSelectedId) setSelectedId(nextSelectedId);
-                  else if (nextProjects.length > 0) setSelectedId(nextProjects[0].id);
-                  else setSelectedId(null);
-                }}
+                onRestore={applyRestoredData}
               />
             )}
           </>

@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "참약사 PB 제품개발 시트",
-  description: "참약사 PB 제품개발 프로젝트 관리 시스템"
+  title: "PB 제품개발 시트",
+  description: "PB 제품개발 프로젝트 관리 시스템"
 };
 
 export default function RootLayout({ children }) {

@@ -26,6 +26,7 @@ export default function ProjectSidebar({
 }) {
   const [dragOverTarget, setDragOverTarget] = useState(null);
   const isSupplyMode = moduleTab === "supply";
+  const isTransferMode = moduleTab === "transfer";
   const totalSupplyCount = Object.values(supplyCategoryCounts || {}).reduce((sum, count) => sum + Number(count || 0), 0);
   const supplyCategoryOptions = [
     { id: "all", label: "전체", color: "#e2e8f0", count: totalSupplyCount },
@@ -57,9 +58,9 @@ export default function ProjectSidebar({
     }}>
       <div style={{ padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 900 }}>참약사 PB 제품개발 시트</div>
+          <div style={{ fontSize: 14, fontWeight: 900 }}>PB 제품개발 시트</div>
           <div style={{ fontSize: 11, color: "var(--app-nav-muted, #94a3b8)", fontWeight: 700 }}>
-            {isSupplyMode ? "공급단가 카테고리" : "제품개발 통합관리"}
+            {isSupplyMode ? "공급단가 카테고리" : (isTransferMode ? "전체 백업 및 복원" : "제품개발 통합관리")}
           </div>
         </div>
         <button
@@ -93,7 +94,7 @@ export default function ProjectSidebar({
         </button>
       </div>
 
-      {!isSupplyMode && isAdmin && (
+      {!isSupplyMode && !isTransferMode && isAdmin && (
         <button
           onClick={goToNewProjectPage}
           style={{ width: "100%", borderRadius: 8, padding: "9px 10px", border: "1px dashed rgba(148, 163, 184, .55)", background: "rgba(255, 255, 255, .04)", color: "#e2e8f0", cursor: "pointer", fontWeight: 800 }}
@@ -101,7 +102,7 @@ export default function ProjectSidebar({
           + 새 프로젝트
         </button>
       )}
-      {!isSupplyMode && isAdmin && (
+      {!isSupplyMode && !isTransferMode && isAdmin && (
         <button
           onClick={goToProjectLogsPage}
           style={{ width: "100%", borderRadius: 8, padding: "9px 10px", border: "1px solid rgba(148, 163, 184, .28)", background: "rgba(30, 41, 59, .65)", color: "#e2e8f0", cursor: "pointer", fontWeight: 800, fontSize: 12 }}
@@ -157,6 +158,11 @@ export default function ProjectSidebar({
               </button>
             );
           })}
+        </div>
+      ) : isTransferMode ? (
+        <div style={{ flex: 1, minHeight: 0, border: "1px solid rgba(148, 163, 184, .28)", borderRadius: 8, background: "rgba(30, 41, 59, .62)", padding: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 900, color: "#f8fafc", marginBottom: 6 }}>데이터 이전</div>
+          <div style={{ fontSize: 11, lineHeight: 1.6, color: "#94a3b8" }}>프로젝트, 이력, 공급단가와 첨부파일을 하나의 백업 파일로 관리합니다.</div>
         </div>
       ) : (
         <div style={{
@@ -253,7 +259,7 @@ export default function ProjectSidebar({
       )}
 
       <div style={{ padding: "8px 10px 2px", borderTop: "1px solid rgba(148, 163, 184, .24)", color: "var(--app-nav-muted, #94a3b8)", fontSize: 10, fontWeight: 700, letterSpacing: 0 }}>
-        made by JB, Charmacist
+        made by JB
       </div>
     </aside>
   );

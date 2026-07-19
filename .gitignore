@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# Desktop and release artifacts
+dist-desktop/
+dist/
+*.exe
+*.blockmap
+
+# Local data, caches, and test artifacts
+work/
+coverage/
+*.log
+*.tmp
+pms-data*.json
+desktop-config.json
+
+# Local environment and deployment state
+.env
+.env.*
+!.env.example
+.vercel/
+
+# Operating system files
+.DS_Store
+Thumbs.db
