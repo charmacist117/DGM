@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ProjectSidebar from "@/components/ProjectSidebar";
+import DesktopProjectPathControl from "@/components/DesktopProjectPathControl";
 import {
   CATEGORIES,
   DRAFT_CHECKLIST_FIELDS,
@@ -942,6 +943,7 @@ function TaskEditModal({ task, onClose, onSave }) {
             저장
           </button>
         </div>
+        <DesktopProjectPathControl />
       </div>
     </div>
   );
