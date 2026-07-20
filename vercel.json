@@ -1,8 +1,0 @@
-{
-  "crons": [
-    {
-      "path": "/api/policies",
-      "schedule": "0 15 * * *"
-    }
-  ]
-}
