@@ -943,7 +943,6 @@ function TaskEditModal({ task, onClose, onSave }) {
             저장
           </button>
         </div>
-        <DesktopProjectPathControl />
       </div>
     </div>
   );
@@ -3910,6 +3909,7 @@ export default function PmsApp() {
             </button>
           ))}
         </div>
+        <DesktopProjectPathControl />
       </div>
 
       <div style={{ display: "flex", minHeight: "calc(100vh - var(--app-topbar-height))" }}>
