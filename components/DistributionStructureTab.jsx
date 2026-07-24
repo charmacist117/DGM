@@ -161,12 +161,13 @@ export default function DistributionStructureTab({
   const isEditing = selectedItem && String(editingItemId) === String(selectedItem.id);
   const distribution = getDistribution(selectedItem);
   const baseAmounts = getBaseAmounts(selectedItem);
-  const permitFeeRateUnknown = selectedItem?.category === "OTC"
-    && selectedItem?.permitCompanyFee
-    && selectedItem?.permitCompanyFeeRateUnknown;
-  const permitFeeApplied = permitFeeRateUnknown || (selectedItem?.category === "OTC"
-    && selectedItem?.permitCompanyFee
-    && parseNumber(selectedItem?.permitCompanyFeeRate) !== null);
+  const hasPermitCompanyFee = selectedItem?.category === "OTC" && selectedItem?.permitCompanyFee;
+  const permitFeeRate = parseNumber(selectedItem?.permitCompanyFeeRate);
+  const permitFeeRateUnknown = hasPermitCompanyFee && selectedItem?.permitCompanyFeeRateUnknown;
+  const permitFeeStatus = !hasPermitCompanyFee
+    ? "불포함"
+    : (permitFeeRateUnknown || permitFeeRate === null ? "알 수 없음" : formatPercent(permitFeeRate));
+  const permitFeeApplied = hasPermitCompanyFee && (permitFeeRateUnknown || permitFeeRate !== null);
   const chamyaksaMarginRate = parseNumber(distribution.chamyaksaMarginRate);
   const marginRateIsValid = chamyaksaMarginRate !== null && chamyaksaMarginRate >= 0;
   const chamyaksaSellingPrice = marginRateIsValid && baseAmounts.finalUnitCost !== null
@@ -332,9 +333,9 @@ export default function DistributionStructureTab({
                     ["배치 당 VAT 포함 가격", formatWon(baseAmounts.vatUnitPrice), `VAT 포함 총금액: ${formatWon(baseAmounts.vatTotal)}`],
                     [
                       "허가사 수수료",
-                      selectedItem.category === "OTC" && selectedItem.permitCompanyFee ? "포함" : "-",
-                      selectedItem.category === "OTC" && selectedItem.permitCompanyFee
-                        ? `허가사: ${selectedItem.permitCompany || "미입력"}${permitFeeRateUnknown ? " · 공급단가에 포함 · 수수료율 알 수 없음" : ""}`
+                      permitFeeStatus,
+                      hasPermitCompanyFee
+                        ? `허가사: ${selectedItem.permitCompany || "미입력"}${permitFeeRateUnknown ? " · 공급단가에 포함" : ""}`
                         : ""
                     ],
                     ["최종 유통 원가", formatWon(baseAmounts.finalTotal), `${permitFeeApplied ? (permitFeeRateUnknown ? "VAT 반영 · 허가사 수수료는 공급단가에 포함" : "VAT 및 허가사 수수료 반영") : "VAT 반영"} · 개당: ${formatWon(baseAmounts.finalUnitCost)}`]
@@ -376,18 +377,7 @@ export default function DistributionStructureTab({
                   <div className="calculated-cell">
                     <span>참약사 판매가 (VAT 포함)</span>
                     <strong>{formatWon(chamyaksaSellingPrice)}</strong>
-                    <small style={{
-                      width: "max-content",
-                      padding: "3px 7px",
-                      borderRadius: 5,
-                      background: permitFeeApplied ? "#ecfdf5" : "#f1f5f9",
-                      color: permitFeeApplied ? "#047857" : "#64748b",
-                      fontWeight: 800
-                    }}>
-                      약국 사입 금액 · {permitFeeApplied
-                        ? (permitFeeRateUnknown ? "허가사 수수료 반영 · 공급단가에 포함 (수수료율 알 수 없음)" : "허가사 수수료 반영")
-                        : "허가사 수수료 미반영"}
-                    </small>
+                    <small style={{ color: "#64748b", fontWeight: 700 }}>약국 사입 금액</small>
                   </div>
                   <div>
                     <label style={labelStyle}>약국 판매가 (VAT 포함)</label>
