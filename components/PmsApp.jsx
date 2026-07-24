@@ -733,8 +733,6 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     minimumOrderBatchQuantity: String(
       source.minimumOrderBatchQuantity || source.minOrderBatchQuantity || source.minimumBatchQuantity || source.moq || ""
     ),
-    dosage: String(source.dosage || ""),
-    efficacy: String(source.efficacy || ""),
     supplyUnitPrice: String(source.supplyUnitPrice || ""),
     vatIncluded: normalizeSupplyCheckedValue(source.vatIncluded ?? source.includeVat ?? source.hasVat),
     permitCompanyFee: supportsPermitCompanyFee && normalizeSupplyCheckedValue(
@@ -749,6 +747,9 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     quoteDate: String(source.quoteDate || ""),
     shelfLife: String(source.shelfLife || source.expirationPeriod || source.expiryPeriod || ""),
     memo: String(source.memo || ""),
+    quoteAdoptionExpected: normalizeSupplyCheckedValue(
+      source.quoteAdoptionExpected ?? source.expectedAdoption ?? source.quoteExpectedToAdopt
+    ),
     attachment: normalizeSupplyAttachment(source.attachment),
     distributionStructure: normalizeDistributionStructure(source.distributionStructure),
     createdAt: String(source.createdAt || new Date().toISOString()),
@@ -779,8 +780,6 @@ function isSupplyPriceItemEmpty(item = {}) {
     item.packagingForm,
     item.quantity,
     item.minimumOrderBatchQuantity,
-    item.dosage,
-    item.efficacy,
     item.supplyUnitPrice,
     item.permitCompanyFeeRate,
     item.quoteDate,
@@ -788,7 +787,11 @@ function isSupplyPriceItemEmpty(item = {}) {
     item.memo,
     item.attachment?.name
   ].some((value) => String(value || "").trim());
-  return !ingredientHasValue && !fieldHasValue && !item.vatIncluded && !item.permitCompanyFee;
+  return !ingredientHasValue
+    && !fieldHasValue
+    && !item.vatIncluded
+    && !item.permitCompanyFee
+    && !item.quoteAdoptionExpected;
 }
 
 function createSupplyPriceItem() {
@@ -1817,7 +1820,7 @@ function TasksTab({
   );
 }
 
-function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "all", onOpenDistribution }) {
+function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "all", onOpenDistribution, isAdmin = false }) {
   const [search, setSearch] = useState("");
   const [fromMonth, setFromMonth] = useState("");
   const [toMonth, setToMonth] = useState("");
@@ -1905,7 +1908,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
       "카테고리", "제조사", "허가사", "공급 성분", "함량/규격", "원료 원산지", "브랜드/공급처", "kg당 가격대",
       "포장단위", "포장형태", "수량", "최소 주문 배치 수량", "배치 당 공급단가", "VAT 포함", "배치 당 VAT 포함 가격",
       "총 금액", "VAT 포함 총금액", "허가사 수수료", "허가사 수수료율(%) / 상태", "수수료 포함 총금액",
-      "견적일자", "사용기한", "용법용량", "효능효과", "첨부파일", "비고"
+      "견적일자", "사용기한", "첨부파일", "비고", "견적 채택 예상"
     ];
     const rows = exportItems.flatMap((item) => {
       const ingredients = item.ingredients?.length ? item.ingredients : [normalizeSupplyIngredient()];
@@ -1942,10 +1945,9 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
         permitFeeTotal,
         item.quoteDate,
         item.shelfLife,
-        item.dosage,
-        item.efficacy,
         item.attachment?.name || "",
-        item.memo
+        item.memo,
+        item.quoteAdoptionExpected ? "채택 예상" : "채택 재고"
       ]);
     });
     const escapeCsvValue = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
@@ -2044,6 +2046,10 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
   };
 
   const requestDelete = (itemId) => {
+    if (!isAdmin) {
+      window.alert("공급단가 항목은 ADMIN만 삭제할 수 있습니다.");
+      return;
+    }
     setDeleteTargetId(itemId);
     setDeleteConfirmText("");
   };
@@ -2054,6 +2060,11 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
   };
 
   const confirmDelete = () => {
+    if (!isAdmin) {
+      closeDeleteConfirm();
+      window.alert("공급단가 항목은 ADMIN만 삭제할 수 있습니다.");
+      return;
+    }
     if (deleteConfirmText.trim() !== "삭제합니다") {
       window.alert("'삭제합니다'를 정확히 입력해야 삭제할 수 있습니다.");
       return;
@@ -2586,9 +2597,11 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                               <button onClick={() => cancelEditing(item.id)} style={supplySubtleButtonStyle}>
                                 취소
                               </button>
-                              <button onClick={() => requestDelete(item.id)} style={{ ...supplySubtleButtonStyle, borderColor: "#fecaca", color: "#dc2626" }}>
-                                삭제
-                              </button>
+                              {isAdmin && (
+                                <button onClick={() => requestDelete(item.id)} style={{ ...supplySubtleButtonStyle, borderColor: "#fecaca", color: "#dc2626" }}>
+                                  삭제
+                                </button>
+                              )}
                             </>
                            ) : (
                              <button onClick={() => startEditing(item)} style={supplySubtleButtonStyle}>
@@ -2608,7 +2621,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                     <tr style={{ ...supplyDetailHeaderRowStyle, height: 38 }}>
                       {[
                         ...(supportsPermitCompanyFee ? ["허가사 수수료"] : []),
-                        "견적일자", "사용기한", "용법용량", "효능효과", "첨부파일", "비고"
+                        "견적일자", "사용기한", "첨부파일", "비고", "견적 채택 예상"
                       ].map((header) => (
                         <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#3730a3", borderBottom: "1px solid #c7d2fe", whiteSpace: "nowrap" }}>
                           {header}
@@ -2688,21 +2701,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                           <div style={supplyTextCellStyle}>{item.shelfLife || "-"}</div>
                         )}
                       </td>
-                      <td style={{ padding: 8, width: 220 }}>
-                        {isEditing ? (
-                          <textarea value={item.dosage} onChange={(event) => updateItem(item.id, { dosage: event.target.value })} placeholder="용법용량" style={supplyCompactTextareaStyle} />
-                        ) : (
-                          <div style={supplyTextCellStyle}>{item.dosage || "-"}</div>
-                        )}
-                      </td>
-                      <td style={{ padding: 8, width: 220 }}>
-                        {isEditing ? (
-                          <textarea value={item.efficacy} onChange={(event) => updateItem(item.id, { efficacy: event.target.value })} placeholder="효능효과" style={supplyCompactTextareaStyle} />
-                        ) : (
-                          <div style={supplyTextCellStyle}>{item.efficacy || "-"}</div>
-                        )}
-                      </td>
-                      <td style={{ padding: 8, width: 240 }}>
+                      <td style={{ padding: 8, width: 300 }}>
                         {isEditing && (
                           <input
                             type="file"
@@ -2729,11 +2728,37 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                           <div style={{ fontSize: 14, color: "#94a3b8" }}>첨부파일 없음</div>
                         )}
                       </td>
-                      <td style={{ padding: 8, width: 190 }}>
+                      <td style={{ padding: 8, width: 300 }}>
                         {isEditing ? (
                           <textarea value={item.memo} onChange={(event) => updateItem(item.id, { memo: event.target.value })} placeholder="비고" style={supplyCompactTextareaStyle} />
                         ) : (
                           <div style={supplyTextCellStyle}>{item.memo || "-"}</div>
+                        )}
+                      </td>
+                      <td style={{ padding: 8, width: 180 }}>
+                        {isEditing ? (
+                          <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 14, color: item.quoteAdoptionExpected ? "#047857" : "#b45309", fontWeight: 800, cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={Boolean(item.quoteAdoptionExpected)}
+                              onChange={(event) => updateItem(item.id, { quoteAdoptionExpected: event.target.checked })}
+                            />
+                            {item.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
+                          </label>
+                        ) : (
+                          <span style={{
+                            display: "inline-flex",
+                            padding: "4px 8px",
+                            borderRadius: 5,
+                            border: `1px solid ${item.quoteAdoptionExpected ? "#a7f3d0" : "#fde68a"}`,
+                            background: item.quoteAdoptionExpected ? "#ecfdf5" : "#fffbeb",
+                            color: item.quoteAdoptionExpected ? "#047857" : "#b45309",
+                            fontSize: 12,
+                            fontWeight: 900,
+                            whiteSpace: "nowrap"
+                          }}>
+                            {item.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -2787,7 +2812,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
         </div>
       )}
 
-      {deleteTargetId !== null && (
+      {isAdmin && deleteTargetId !== null && (
         <div style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(15,23,42,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div style={{ width: 420, maxWidth: "94vw", background: "#fff", borderRadius: 10, border: "1px solid #fecaca", boxShadow: "0 20px 60px rgba(0,0,0,.22)", padding: 18 }}>
             <div style={{ fontSize: 19, fontWeight: 900, color: "#991b1b", marginBottom: 8 }}>공급단가 항목 삭제</div>
@@ -4138,6 +4163,7 @@ export default function PmsApp() {
             syncState={syncState}
             selectedCategory={supplyCategory}
             onOpenDistribution={openDistributionStructure}
+            isAdmin={isAdmin}
           />
         ) : moduleTab === "distribution" ? (
           <DistributionStructureTab

@@ -298,8 +298,13 @@ export default function DistributionStructureTab({
                   <div style={{ marginTop: 4, color: "#64748b", fontSize: 12 }}>
                     {item.manufacturer || "제조사 미입력"} · {item.quoteDate || "견적일 미입력"}
                   </div>
-                  <div style={{ marginTop: 5, color: structure.updatedAt ? "#047857" : "#94a3b8", fontSize: 11, fontWeight: 700 }}>
-                    {structure.updatedAt ? "유통 구조 설정됨" : "유통 구조 미설정"}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 7, marginTop: 5, fontSize: 11, fontWeight: 700 }}>
+                    <span style={{ color: structure.updatedAt ? "#047857" : "#94a3b8" }}>
+                      {structure.updatedAt ? "유통 구조 설정됨" : "유통 구조 미설정"}
+                    </span>
+                    <span style={{ color: item.quoteAdoptionExpected ? "#047857" : "#b45309" }}>
+                      {item.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
+                    </span>
                   </div>
                 </button>
               );
@@ -321,11 +326,25 @@ export default function DistributionStructureTab({
             <div style={{ display: "grid", gap: 14 }}>
               <div className="decision-grid">
               <section style={panelStyle}>
-                <div style={{ padding: "13px 15px", borderBottom: "1px solid #cbd5e1", background: "#e8f1fb" }}>
-                  <div style={{ color: "#0f172a", fontSize: 17, fontWeight: 900 }}>{getItemLabel(selectedItem)}</div>
-                  <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>
-                    {selectedItem.manufacturer || "제조사 미입력"} · {categoryLabelById[selectedItem.category] || selectedItem.category}
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, padding: "13px 15px", borderBottom: "1px solid #cbd5e1", background: "#e8f1fb" }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ color: "#0f172a", fontSize: 17, fontWeight: 900 }}>{getItemLabel(selectedItem)}</div>
+                    <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>
+                      {selectedItem.manufacturer || "제조사 미입력"} · {categoryLabelById[selectedItem.category] || selectedItem.category}
+                    </div>
                   </div>
+                  <span style={{
+                    flex: "0 0 auto",
+                    padding: "4px 8px",
+                    borderRadius: 5,
+                    border: `1px solid ${selectedItem.quoteAdoptionExpected ? "#a7f3d0" : "#fde68a"}`,
+                    background: selectedItem.quoteAdoptionExpected ? "#ecfdf5" : "#fffbeb",
+                    color: selectedItem.quoteAdoptionExpected ? "#047857" : "#b45309",
+                    fontSize: 12,
+                    fontWeight: 900
+                  }}>
+                    {selectedItem.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
+                  </span>
                 </div>
                 <div className="base-grid">
                   {[
