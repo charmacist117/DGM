@@ -65,8 +65,16 @@ function formatPercent(value) {
 }
 
 function getItemLabel(item) {
-  const ingredientNames = (item.ingredients || []).map((ingredient) => ingredient.name).filter(Boolean).join(", ");
-  return ingredientNames || item.manufacturer || "성분 미입력";
+  const ingredientLabels = (item.ingredients || [])
+    .map((ingredient) => {
+      const name = String(ingredient.name || "").trim();
+      const content = String(ingredient.content || "").trim();
+      if (!name) return "";
+      return content ? `${name} / ${content}` : name;
+    })
+    .filter(Boolean)
+    .join(", ");
+  return ingredientLabels || item.manufacturer || "성분 미입력";
 }
 
 function getDistribution(item) {

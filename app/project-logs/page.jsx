@@ -7,6 +7,7 @@ const cardStyle = { background: "#fff", border: "1px solid #e2e8f0", borderRadiu
 
 function normalizeLogs(logs) {
   return (logs || []).filter(Boolean).map((log) => ({
+    ...log,
     id: log.id || Date.now() + Math.floor(Math.random() * 1000),
     type: log.type || "project_event",
     projectId: log.projectId ?? null,
@@ -60,6 +61,7 @@ export default function ProjectLogsPage() {
 
   const visibleLogs = useMemo(
     () => [...logs]
+      .filter((log) => log.type !== "dashboard_change_notice")
       .filter((log) => (isAdmin ? true : !log.hiddenForManager))
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)),
     [logs, isAdmin]

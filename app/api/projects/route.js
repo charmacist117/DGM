@@ -40,14 +40,29 @@ export async function PUT(request) {
 
     let adminLogs = Array.isArray(body.adminLogs) ? body.adminLogs : null;
     let supplyPriceItems = Array.isArray(body.supplyPriceItems) ? body.supplyPriceItems : null;
-    if (adminLogs === null || supplyPriceItems === null) {
-      const current = await loadProjects();
+    let current = null;
+    if (adminLogs === null || supplyPriceItems === null || session.role !== "admin") {
+      current = await loadProjects();
       if (adminLogs === null) {
         adminLogs = Array.isArray(current.adminLogs) ? current.adminLogs : [];
       }
       if (supplyPriceItems === null) {
         supplyPriceItems = Array.isArray(current.supplyPriceItems) ? current.supplyPriceItems : [];
       }
+    }
+
+    if (session.role !== "admin") {
+      const protectedNotices = (current.adminLogs || []).filter((log) => log?.type === "dashboard_change_notice");
+      adminLogs = [
+        ...(adminLogs || []).filter((log) => log?.type !== "dashboard_change_notice"),
+        ...protectedNotices
+      ];
+
+      const submittedSupplyIds = new Set((supplyPriceItems || []).map((item) => String(item?.id ?? "")));
+      const protectedDeletedItems = (current.supplyPriceItems || []).filter((item) => (
+        !submittedSupplyIds.has(String(item?.id ?? ""))
+      ));
+      supplyPriceItems = [...(supplyPriceItems || []), ...protectedDeletedItems];
     }
 
     const result = await saveProjects(body.projects, adminLogs, supplyPriceItems);

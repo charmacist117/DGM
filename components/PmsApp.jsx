@@ -33,6 +33,8 @@ const LEGACY_SAMPLE_TASK_ID = "sample";
 const LEGACY_QUALITY_TASK_ID = "quality";
 const ROLE_ADMIN = "admin";
 const ROLE_GUEST = "guest";
+const DASHBOARD_CHANGE_NOTICE_TYPE = "dashboard_change_notice";
+const DASHBOARD_CHANGELOG_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_1";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -478,16 +480,33 @@ function normalizeProjects(projects) {
 function normalizeAdminLogs(logs) {
   return (logs || [])
     .filter((log) => log && typeof log === "object")
-    .map((log) => ({
-      id: log.id || Date.now() + Math.floor(Math.random() * 1000),
-      type: log.type || "project_event",
-      projectId: log.projectId ?? null,
-      projectName: log.projectName || "-",
-      reason: log.reason || "",
-      actor: log.actor || "관리자",
-      createdAt: log.createdAt || new Date().toISOString(),
-      hiddenForManager: Boolean(log.hiddenForManager)
-    }));
+    .map((log) => {
+      const normalized = {
+        id: log.id || Date.now() + Math.floor(Math.random() * 1000),
+        type: log.type || "project_event",
+        projectId: log.projectId ?? null,
+        projectName: log.projectName || "-",
+        reason: log.reason || "",
+        actor: log.actor || "관리자",
+        createdAt: log.createdAt || new Date().toISOString(),
+        hiddenForManager: Boolean(log.hiddenForManager)
+      };
+      if (normalized.type !== DASHBOARD_CHANGE_NOTICE_TYPE) return normalized;
+
+      const changes = Array.isArray(log.changes)
+        ? log.changes.map((change) => String(change || "").trim()).filter(Boolean)
+        : String(log.reason || "").split(/\r?\n/).map((change) => change.trim()).filter(Boolean);
+      return {
+        ...normalized,
+        projectId: null,
+        projectName: "제품개발 대시보드",
+        revision: String(log.revision || "").trim(),
+        changeDate: String(log.changeDate || log.createdAt || "").slice(0, 10),
+        changes,
+        reason: changes.join("\n"),
+        updatedAt: String(log.updatedAt || "")
+      };
+    });
 }
 
 function upsertById(items = [], nextItem) {
@@ -3589,7 +3608,174 @@ function AdvisorTab({ project, onSaveLog }) {
   );
 }
 
-function HomeDashboardTab({ projects, onOpenProject, onReminderYes, onReminderNo }) {
+function dashboardRevisionOrder(value) {
+  const parsed = Number(String(value || "").replace(/[^\d.]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatDashboardRevision(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "회차 미입력";
+  return /회차$/i.test(raw) || /^v/i.test(raw) ? raw : `${raw}회차`;
+}
+
+function parseDashboardChanges(value) {
+  return String(value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
+
+function DashboardChangeLogSection({ entries, isAdmin, onAdd, onUpdate, onDelete }) {
+  const sortedEntries = useMemo(() => [...(entries || [])].sort((left, right) => {
+    const revisionDiff = dashboardRevisionOrder(right.revision) - dashboardRevisionOrder(left.revision);
+    if (revisionDiff !== 0) return revisionDiff;
+    return String(right.changeDate || right.createdAt || "").localeCompare(String(left.changeDate || left.createdAt || ""));
+  }), [entries]);
+  const nextRevision = useMemo(() => (
+    sortedEntries.reduce((highest, entry) => Math.max(highest, Math.floor(dashboardRevisionOrder(entry.revision))), 0) + 1
+  ), [sortedEntries]);
+  const [isCreating, setIsCreating] = useState(false);
+  const [createDraft, setCreateDraft] = useState({ changeDate: TODAY, revision: "", changes: "" });
+  const [editingId, setEditingId] = useState(null);
+  const [editDraft, setEditDraft] = useState({ changeDate: "", revision: "", changes: "" });
+
+  const openCreate = () => {
+    setCreateDraft({ changeDate: TODAY, revision: String(nextRevision), changes: "" });
+    setIsCreating(true);
+  };
+
+  const submitCreate = () => {
+    const changes = parseDashboardChanges(createDraft.changes);
+    if (!createDraft.changeDate || !createDraft.revision.trim() || changes.length === 0) {
+      window.alert("변경일자, 수정회차, 변경사항을 모두 입력해주세요.");
+      return;
+    }
+    onAdd?.({ ...createDraft, changes });
+    setIsCreating(false);
+    setCreateDraft({ changeDate: TODAY, revision: "", changes: "" });
+  };
+
+  const startEdit = (entry) => {
+    setEditingId(entry.id);
+    setEditDraft({
+      changeDate: entry.changeDate || String(entry.createdAt || "").slice(0, 10),
+      revision: String(entry.revision || ""),
+      changes: (entry.changes || []).join("\n")
+    });
+  };
+
+  const submitEdit = (entryId) => {
+    const changes = parseDashboardChanges(editDraft.changes);
+    if (!editDraft.changeDate || !editDraft.revision.trim() || changes.length === 0) {
+      window.alert("변경일자, 수정회차, 변경사항을 모두 입력해주세요.");
+      return;
+    }
+    onUpdate?.(entryId, { ...editDraft, changes });
+    setEditingId(null);
+  };
+
+  const formFields = (draft, setDraft) => (
+    <div style={{ display: "grid", gridTemplateColumns: "160px 170px minmax(0, 1fr)", gap: 10, alignItems: "start" }}>
+      <div>
+        <label style={{ display: "block", marginBottom: 5, color: "#475569", fontSize: 12, fontWeight: 800 }}>변경일자</label>
+        <input type="date" value={draft.changeDate} onChange={(event) => setDraft((previous) => ({ ...previous, changeDate: event.target.value }))} style={inputStyle} />
+      </div>
+      <div>
+        <label style={{ display: "block", marginBottom: 5, color: "#475569", fontSize: 12, fontWeight: 800 }}>수정회차</label>
+        <input value={draft.revision} onChange={(event) => setDraft((previous) => ({ ...previous, revision: event.target.value }))} placeholder="예: 12 또는 v1.2" style={inputStyle} />
+      </div>
+      <div>
+        <label style={{ display: "block", marginBottom: 5, color: "#475569", fontSize: 12, fontWeight: 800 }}>변경사항</label>
+        <textarea
+          value={draft.changes}
+          onChange={(event) => setDraft((previous) => ({ ...previous, changes: event.target.value }))}
+          placeholder={"변경사항을 한 줄에 하나씩 입력하세요.\n예: 공급단가 삭제 권한을 ADMIN으로 제한"}
+          rows={4}
+          style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
+        />
+      </div>
+    </div>
+  );
+
+  return (
+    <section style={{ background: "#fff", border: "1px solid #cbd5e1", borderRadius: 8, overflow: "hidden" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 15px", background: "#f8fafc", borderBottom: "1px solid #dbe3ee" }}>
+        <div>
+          <div style={{ color: "#0f172a", fontSize: 16, fontWeight: 900 }}>제품개발 대시보드 변경사항</div>
+          <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>일자와 수정회차별 업데이트 내용을 확인합니다.</div>
+        </div>
+        {isAdmin && !isCreating && (
+          <button onClick={openCreate} style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#0f172a", cursor: "pointer", fontSize: 12, fontWeight: 800 }}>
+            + 변경사항 기록
+          </button>
+        )}
+      </div>
+
+      {isAdmin && isCreating && (
+        <div style={{ padding: 14, background: "#f8fafc", borderBottom: "1px solid #dbe3ee" }}>
+          {formFields(createDraft, setCreateDraft)}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 7, marginTop: 10 }}>
+            <button onClick={() => setIsCreating(false)} style={subtleButton}>취소</button>
+            <button onClick={submitCreate} style={primaryButton}>기록 저장</button>
+          </div>
+        </div>
+      )}
+
+      <div>
+        {sortedEntries.map((entry) => {
+          const editing = String(editingId) === String(entry.id);
+          return (
+            <div key={entry.id} style={{ padding: "13px 15px", borderBottom: "1px solid #e2e8f0" }}>
+              {editing ? (
+                <>
+                  {formFields(editDraft, setEditDraft)}
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 7, marginTop: 10 }}>
+                    <button onClick={() => setEditingId(null)} style={subtleButton}>취소</button>
+                    <button onClick={() => submitEdit(entry.id)} style={primaryButton}>수정 완료</button>
+                  </div>
+                </>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "120px 110px minmax(0, 1fr) auto", gap: 14, alignItems: "start" }}>
+                  <div style={{ color: "#0f172a", fontSize: 13, fontWeight: 900 }}>{formatDashboardRevision(entry.revision)}</div>
+                  <div style={{ color: "#64748b", fontSize: 12 }}>{entry.changeDate ? fmt(entry.changeDate) : "-"}</div>
+                  <ul style={{ margin: 0, paddingLeft: 18, color: "#334155", fontSize: 13, lineHeight: 1.65 }}>
+                    {(entry.changes || []).map((change, index) => <li key={`${entry.id}_${index}`}>{change}</li>)}
+                  </ul>
+                  {isAdmin && (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => startEdit(entry)} style={subtleButton}>수정</button>
+                      <button
+                        onClick={() => {
+                          if (window.confirm("이 변경사항 기록을 삭제하시겠습니까?")) onDelete?.(entry.id);
+                        }}
+                        style={{ ...subtleButton, borderColor: "#fecaca", color: "#dc2626" }}
+                      >
+                        삭제
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {sortedEntries.length === 0 && (
+          <div style={{ padding: 18, color: "#94a3b8", fontSize: 12, textAlign: "center" }}>아직 등록된 대시보드 변경사항이 없습니다.</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function HomeDashboardTab({
+  projects,
+  dashboardChangeLogs,
+  isAdmin,
+  onOpenProject,
+  onReminderYes,
+  onReminderNo,
+  onAddDashboardChange,
+  onUpdateDashboardChange,
+  onDeleteDashboardChange
+}) {
   const items = (projects || []).map((project) => {
     const currentTask = getCurrentStageTask(project);
     const reminder = buildStageReminderMessage(currentTask);
@@ -3680,6 +3866,13 @@ function HomeDashboardTab({ projects, onOpenProject, onReminderYes, onReminderNo
           </div>
         )}
       </div>
+      <DashboardChangeLogSection
+        entries={dashboardChangeLogs}
+        isAdmin={isAdmin}
+        onAdd={onAddDashboardChange}
+        onUpdate={onUpdateDashboardChange}
+        onDelete={onDeleteDashboardChange}
+      />
     </div>
   );
 }
@@ -3845,6 +4038,9 @@ export default function PmsApp() {
     if (isAdmin) return scopedLogs;
     return scopedLogs.filter((log) => !log.hiddenForManager);
   }, [adminLogs, selectedProject, isAdmin]);
+  const dashboardChangeLogs = useMemo(() => (
+    (adminLogs || []).filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+  ), [adminLogs]);
 
   const appendAdminLog = (entry) => {
     setAdminLogs((prev) => normalizeAdminLogs([
@@ -3856,6 +4052,72 @@ export default function PmsApp() {
         ...entry
       }
     ]));
+  };
+
+  useEffect(() => {
+    if (syncState.status === "loading" || dashboardChangeLogs.length > 0 || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_CHANGELOG_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_CHANGELOG_SEED_KEY, "1");
+    setAdminLogs((previous) => normalizeAdminLogs([
+      ...(previous || []),
+      {
+        id: `dashboard_change_${Date.now()}`,
+        type: DASHBOARD_CHANGE_NOTICE_TYPE,
+        projectName: "제품개발 대시보드",
+        revision: "1",
+        changeDate: TODAY,
+        changes: [
+          "공급단가 견적의 채택 예상·채택 재고 표시와 ADMIN 전용 삭제 권한을 적용했습니다.",
+          "유통 구조 설정의 허가사 수수료 표기와 경쟁제품 비교 항목을 개선했습니다.",
+          "온라인 및 PC용 화면에 동일한 변경사항을 반영했습니다."
+        ],
+        actor: "시스템",
+        createdAt: new Date().toISOString()
+      }
+    ]));
+  }, [dashboardChangeLogs.length, setAdminLogs, syncState.status]);
+
+  const addDashboardChange = ({ changeDate, revision, changes }) => {
+    if (!isAdmin) {
+      window.alert("변경사항 기록은 ADMIN만 추가할 수 있습니다.");
+      return;
+    }
+    setAdminLogs((previous) => normalizeAdminLogs([
+      ...(previous || []),
+      {
+        id: `dashboard_change_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        type: DASHBOARD_CHANGE_NOTICE_TYPE,
+        projectName: "제품개발 대시보드",
+        changeDate,
+        revision,
+        changes,
+        reason: changes.join("\n"),
+        actor: "ADMIN",
+        createdAt: new Date().toISOString()
+      }
+    ]));
+  };
+
+  const updateDashboardChange = (entryId, { changeDate, revision, changes }) => {
+    if (!isAdmin) {
+      window.alert("변경사항 기록은 ADMIN만 수정할 수 있습니다.");
+      return;
+    }
+    setAdminLogs((previous) => normalizeAdminLogs((previous || []).map((log) => (
+      String(log.id) === String(entryId) && log.type === DASHBOARD_CHANGE_NOTICE_TYPE
+        ? { ...log, changeDate, revision, changes, reason: changes.join("\n"), updatedAt: new Date().toISOString() }
+        : log
+    ))));
+  };
+
+  const deleteDashboardChange = (entryId) => {
+    if (!isAdmin) {
+      window.alert("변경사항 기록은 ADMIN만 삭제할 수 있습니다.");
+      return;
+    }
+    setAdminLogs((previous) => normalizeAdminLogs((previous || []).filter((log) => (
+      !(String(log.id) === String(entryId) && log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+    ))));
   };
 
   const updateProject = (projectId, updater) => {
@@ -4218,9 +4480,14 @@ export default function PmsApp() {
             </div>
             <HomeDashboardTab
               projects={projects}
+              dashboardChangeLogs={dashboardChangeLogs}
+              isAdmin={isAdmin}
               onOpenProject={openProject}
               onReminderYes={handleReminderYes}
               onReminderNo={handleReminderNo}
+              onAddDashboardChange={addDashboardChange}
+              onUpdateDashboardChange={updateDashboardChange}
+              onDeleteDashboardChange={deleteDashboardChange}
             />
           </>
         ) : (
