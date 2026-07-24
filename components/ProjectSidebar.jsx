@@ -83,18 +83,19 @@ export default function ProjectSidebar({
             }
           }}
           style={{
-            width: 34,
-            height: 34,
-            borderRadius: 8,
-            border: isStandaloneHomeMode ? "1px solid #e2e8f0" : "1px solid var(--app-nav-border, rgba(148, 163, 184, .32))",
-            background: isStandaloneHomeMode ? "#fff" : "rgba(255, 255, 255, .06)",
-            color: isStandaloneHomeMode ? "#0f172a" : "#e2e8f0",
+            width: 30,
+            height: 30,
+            borderRadius: 7,
+            border: isStandaloneHomeMode ? "1px solid #7dd3fc" : "1px solid rgba(56, 189, 248, .55)",
+            background: isStandaloneHomeMode ? "#e0f2fe" : "rgba(14, 165, 233, .18)",
+            color: isStandaloneHomeMode ? "#075985" : "#bae6fd",
             cursor: "pointer",
-            fontSize: 16,
+            fontSize: 14,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            flexShrink: 0
+            flexShrink: 0,
+            boxShadow: isStandaloneHomeMode ? "0 5px 14px rgba(14, 165, 233, .22)" : "none"
           }}
           title="홈"
         >

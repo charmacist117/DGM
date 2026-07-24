@@ -50,6 +50,7 @@ const DASHBOARD_PRICING_TABS_SEED_KEY = "pharmadev_dashboard_changelog_seed_2026
 const DASHBOARD_MODULE_BACKUP_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_3";
 const DASHBOARD_PROJECT_BACKUP_REMOVAL_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_4";
 const DASHBOARD_HOME_SPLIT_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_5";
+const DASHBOARD_HOME_BUTTON_STYLE_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_6";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -81,6 +82,17 @@ const moduleTabButtonStyle = (active) => ({
   fontSize: 15,
   fontWeight: 900,
   boxShadow: active ? "0 8px 22px rgba(15, 23, 42, .16)" : "none"
+});
+
+const homeModuleTabButtonStyle = (active) => ({
+  ...moduleTabButtonStyle(active),
+  minWidth: 112,
+  height: 42,
+  padding: "0 18px",
+  border: "1px solid " + (active ? "#7dd3fc" : "rgba(56, 189, 248, .55)"),
+  background: active ? "#e0f2fe" : "rgba(14, 165, 233, .18)",
+  color: active ? "#075985" : "#bae6fd",
+  boxShadow: active ? "0 7px 18px rgba(14, 165, 233, .2)" : "none"
 });
 
 const inputStyle = {
@@ -4350,6 +4362,36 @@ export default function PmsApp() {
     });
   }, [setAdminLogs, syncState.status]);
 
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_HOME_BUTTON_STYLE_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_HOME_BUTTON_STYLE_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260724_home_button_style")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260724_home_button_style",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "상단 홈 탭과 왼쪽 홈 버튼의 크기를 줄였습니다.",
+            "홈 진입 버튼을 하늘색 계열로 구분해 검정 내비게이션에서 쉽게 찾을 수 있도록 개선했습니다.",
+            "유통 구조 설정의 공급단가 목록에 포장단위와 포장형태를 표시하도록 개선했습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
   const addDashboardChange = ({ changeDateTime, revision, changes }) => {
     if (!isAdmin) {
       window.alert("변경사항 기록은 ADMIN만 추가할 수 있습니다.");
@@ -4690,7 +4732,9 @@ export default function PmsApp() {
                 }
                 if (typeof window !== "undefined") window.scrollTo({ top: 0, left: 0 });
               }}
-              style={moduleTabButtonStyle(moduleTab === id)}
+              style={id === "home"
+                ? homeModuleTabButtonStyle(moduleTab === id)
+                : moduleTabButtonStyle(moduleTab === id)}
             >
               {label}
             </button>

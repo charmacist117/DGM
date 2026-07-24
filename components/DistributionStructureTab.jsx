@@ -372,6 +372,10 @@ export default function DistributionStructureTab({
                   <div style={{ marginTop: 4, color: "#64748b", fontSize: 12 }}>
                     {item.manufacturer || "제조사 미입력"} · {item.quoteDate || "견적일 미입력"}
                   </div>
+                  <div style={{ marginTop: 3, color: "#475569", fontSize: 11, fontWeight: 700 }}>
+                    포장단위: {item.packagingUnit || "미입력"}
+                    {item.packagingForm ? ` · 포장형태: ${item.packagingForm}` : ""}
+                  </div>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 7, marginTop: 5, fontSize: 11, fontWeight: 700 }}>
                     <span style={{ color: structure.updatedAt ? "#047857" : "#94a3b8" }}>
                       {structure.updatedAt ? "유통 구조 설정됨" : "유통 구조 미설정"}
