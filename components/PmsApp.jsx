@@ -48,6 +48,7 @@ const DASHBOARD_CHANGE_NOTICE_TYPE = "dashboard_change_notice";
 const DASHBOARD_CHANGELOG_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_1";
 const DASHBOARD_PRICING_TABS_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_2";
 const DASHBOARD_MODULE_BACKUP_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_3";
+const DASHBOARD_PROJECT_BACKUP_REMOVAL_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_4";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -3017,7 +3018,7 @@ function CommunicationTab({ project, onSaveLog }) {
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
           <div style={{ fontWeight: 800 }}>소통 히스토리 ({logs.length}건)</div>
-          <div style={{ fontSize: 12, color: "#64748b" }}>CSV는 백업/복원 탭에서 일괄 내보내기</div>
+          <div style={{ fontSize: 12, color: "#64748b" }}>CSV는 최상단 데이터 이전 탭에서 일괄 내보내기</div>
         </div>
 
         <div style={{ display: "grid", gap: 10 }}>
@@ -3162,7 +3163,7 @@ function DecisionTab({ project, onSaveLog }) {
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
           <div style={{ fontWeight: 800 }}>의사결정 아카이브 ({logs.length}건)</div>
-          <div style={{ fontSize: 12, color: "#64748b" }}>CSV는 백업/복원 탭에서 일괄 내보내기</div>
+          <div style={{ fontSize: 12, color: "#64748b" }}>CSV는 최상단 데이터 이전 탭에서 일괄 내보내기</div>
         </div>
         <div style={{ display: "grid", gap: 10 }}>
           {[...logs].reverse().map((item) => (
@@ -3727,7 +3728,7 @@ function AdvisorTab({ project, onSaveLog }) {
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
           <div style={{ fontSize: 15, fontWeight: 800 }}>자문약사 기록 ({logs.length}건)</div>
-          <div style={{ fontSize: 12, color: "#64748b" }}>CSV는 백업/복원 탭에서 일괄 내보내기</div>
+          <div style={{ fontSize: 12, color: "#64748b" }}>CSV는 최상단 데이터 이전 탭에서 일괄 내보내기</div>
         </div>
         <div style={{ display: "grid", gap: 8 }}>
           {[...logs].reverse().map((log) => (
@@ -4279,6 +4280,34 @@ export default function PmsApp() {
     });
   }, [setAdminLogs, syncState.status]);
 
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_PROJECT_BACKUP_REMOVAL_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_PROJECT_BACKUP_REMOVAL_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260724_project_backup_removal")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260724_project_backup_removal",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changes: [
+            "개별 프로젝트의 백업/복원 미니탭을 제거했습니다.",
+            "제품개발 전체 백업·복원과 통합 CSV 기능을 최상단 데이터 이전 탭으로 일원화했습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
   const addDashboardChange = ({ changeDate, revision, changes }) => {
     if (!isAdmin) {
       window.alert("변경사항 기록은 ADMIN만 추가할 수 있습니다.");
@@ -4758,8 +4787,7 @@ export default function PmsApp() {
                 ["communication", "업체 소통 기록"],
                 ["decision", "의사결정 기록"],
                 ["basic", "기본정보 수정"],
-                ["project_logs", "이력 로그"],
-                ["backup", "백업/복원"]
+                ["project_logs", "이력 로그"]
               ].map(([id, label]) => (
                 <button key={id} onClick={() => setTab(id)} style={tabButtonStyle(tab === id)}>
                   {label}
@@ -5259,15 +5287,6 @@ export default function PmsApp() {
               />
             )}
 
-            {tab === "backup" && (
-              <BackupTab
-                projects={projects}
-                adminLogs={adminLogs}
-                supplyPriceItems={supplyPriceItems}
-                isAdmin={isAdmin}
-                onRestore={applyRestoredData}
-              />
-            )}
           </>
         ) : (
           <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 24, textAlign: "center" }}>
