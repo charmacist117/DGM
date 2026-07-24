@@ -77,13 +77,46 @@ function getItemLabel(item) {
   return ingredientLabels || item.manufacturer || "성분 미입력";
 }
 
+function normalizePricingScenario(value = {}, fallbackId = "pricing_default", fallbackLabel = "기본") {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    id: source.id ?? fallbackId,
+    label: String(source.label || fallbackLabel),
+    minimumQuantity: String(source.minimumQuantity ?? source.minQuantity ?? ""),
+    chamyaksaMarginRate: String(source.chamyaksaMarginRate ?? ""),
+    pharmacySellingPrice: String(source.pharmacySellingPrice ?? "")
+  };
+}
+
+function createPricingScenario(index = 0) {
+  return normalizePricingScenario({
+    id: `pricing_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    label: index === 0 ? "기본" : `가격대 ${index + 1}`,
+    minimumQuantity: index === 0 ? "" : String(index * 100)
+  });
+}
+
 function getDistribution(item) {
   const source = item?.distributionStructure && typeof item.distributionStructure === "object"
     ? item.distributionStructure
     : {};
+  const pricingScenarios = (Array.isArray(source.pricingScenarios) ? source.pricingScenarios : [])
+    .filter((scenario) => scenario && typeof scenario === "object")
+    .map((scenario, index) => normalizePricingScenario(
+      scenario,
+      `pricing_${index + 1}`,
+      index === 0 ? "기본" : `가격대 ${index + 1}`
+    ));
+  if (pricingScenarios.length === 0) {
+    pricingScenarios.push(normalizePricingScenario({
+      id: "pricing_default",
+      label: "기본",
+      chamyaksaMarginRate: source.chamyaksaMarginRate,
+      pharmacySellingPrice: source.pharmacySellingPrice
+    }));
+  }
   return {
-    chamyaksaMarginRate: String(source.chamyaksaMarginRate ?? ""),
-    pharmacySellingPrice: String(source.pharmacySellingPrice ?? ""),
+    pricingScenarios,
     competitors: Array.isArray(source.competitors) ? source.competitors : [],
     updatedAt: String(source.updatedAt || "")
   };
@@ -151,6 +184,7 @@ export default function DistributionStructureTab({
 }) {
   const [search, setSearch] = useState("");
   const [editingItemId, setEditingItemId] = useState(null);
+  const [activePricingScenarioId, setActivePricingScenarioId] = useState(null);
   const query = search.trim().toLowerCase();
   const visibleItems = useMemo(() => {
     const categoryItems = selectedCategory === "all"
@@ -170,6 +204,9 @@ export default function DistributionStructureTab({
   const selectedItem = visibleItems.find((item) => String(item.id) === String(selectedItemId)) || visibleItems[0] || null;
   const isEditing = selectedItem && String(editingItemId) === String(selectedItem.id);
   const distribution = getDistribution(selectedItem);
+  const activePricingScenario = distribution.pricingScenarios.find((scenario) => (
+    String(scenario.id) === String(activePricingScenarioId)
+  )) || distribution.pricingScenarios[0];
   const baseAmounts = getBaseAmounts(selectedItem);
   const hasPermitCompanyFee = selectedItem?.category === "OTC" && selectedItem?.permitCompanyFee;
   const permitFeeRate = parseNumber(selectedItem?.permitCompanyFeeRate);
@@ -178,7 +215,7 @@ export default function DistributionStructureTab({
     ? "불포함"
     : (permitFeeRateUnknown || permitFeeRate === null ? "알 수 없음" : formatPercent(permitFeeRate));
   const permitFeeApplied = hasPermitCompanyFee && (permitFeeRateUnknown || permitFeeRate !== null);
-  const chamyaksaMarginRate = parseNumber(distribution.chamyaksaMarginRate);
+  const chamyaksaMarginRate = parseNumber(activePricingScenario?.chamyaksaMarginRate);
   const marginRateIsValid = chamyaksaMarginRate !== null && chamyaksaMarginRate >= 0;
   const chamyaksaSellingPrice = marginRateIsValid && baseAmounts.finalUnitCost !== null
     ? baseAmounts.finalUnitCost * (1 + (chamyaksaMarginRate / 100))
@@ -186,7 +223,7 @@ export default function DistributionStructureTab({
   const chamyaksaMarginAmount = chamyaksaSellingPrice === null || baseAmounts.finalUnitCost === null
     ? null
     : chamyaksaSellingPrice - baseAmounts.finalUnitCost;
-  const pharmacySellingPrice = parseNumber(distribution.pharmacySellingPrice);
+  const pharmacySellingPrice = parseNumber(activePricingScenario?.pharmacySellingPrice);
   const pharmacyMarginAmount = pharmacySellingPrice === null || chamyaksaSellingPrice === null
     ? null
     : pharmacySellingPrice - chamyaksaSellingPrice;
@@ -204,6 +241,34 @@ export default function DistributionStructureTab({
         updatedAt: new Date().toISOString()
       }
     });
+  };
+
+  const updatePricingScenario = (patch) => {
+    if (!activePricingScenario) return;
+    updateDistribution({
+      pricingScenarios: distribution.pricingScenarios.map((scenario) => (
+        String(scenario.id) === String(activePricingScenario.id) ? { ...scenario, ...patch } : scenario
+      ))
+    });
+  };
+
+  const addPricingScenario = () => {
+    const nextScenario = createPricingScenario(distribution.pricingScenarios.length);
+    updateDistribution({ pricingScenarios: [...distribution.pricingScenarios, nextScenario] });
+    setActivePricingScenarioId(nextScenario.id);
+  };
+
+  const removeActivePricingScenario = () => {
+    if (!activePricingScenario || distribution.pricingScenarios.length <= 1) {
+      window.alert("가격대 탭은 최소 1개가 필요합니다.");
+      return;
+    }
+    if (!window.confirm(`"${activePricingScenario.label || "가격대"}" 탭을 삭제하시겠습니까?`)) return;
+    const nextScenarios = distribution.pricingScenarios.filter((scenario) => (
+      String(scenario.id) !== String(activePricingScenario.id)
+    ));
+    updateDistribution({ pricingScenarios: nextScenarios });
+    setActivePricingScenarioId(nextScenarios[0]?.id || null);
   };
 
   const updateCompetitor = (competitorId, patch) => {
@@ -380,22 +445,76 @@ export default function DistributionStructureTab({
 
               <section style={panelStyle}>
                 <div style={{ padding: "12px 15px", borderBottom: "1px solid #cbd5e1" }}>
-                  <div style={{ color: "#0f172a", fontSize: 16, fontWeight: 900 }}>판매가 및 마진 설정</div>
-                  <div style={{ marginTop: 4, color: "#475569", fontSize: 12, lineHeight: 1.5 }}>
-                    모든 금액은 VAT 포함 기준입니다. 허가사 수수료가 포함된 건은 {permitFeeRateUnknown ? "수수료가 이미 포함된 공급단가" : "수수료까지 반영한 최종 유통 원가"} {formatWon(baseAmounts.finalUnitCost)}에 입력한 비율을 가산합니다.
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ color: "#0f172a", fontSize: 16, fontWeight: 900 }}>판매가 및 마진 설정</div>
+                    <button type="button" onClick={addPricingScenario} style={{ ...secondaryButtonStyle, minHeight: 32, padding: "5px 9px", fontSize: 12 }}>
+                      + 가격대 탭 추가
+                    </button>
                   </div>
+                  <div style={{ marginTop: 4, color: "#475569", fontSize: 12, lineHeight: 1.5 }}>
+                    모든 금액은 VAT 포함 기준입니다.
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 12px", borderBottom: "1px solid #dbe3ee", background: "#f8fafc", overflowX: "auto" }}>
+                  {distribution.pricingScenarios.map((scenario, index) => {
+                    const active = String(scenario.id) === String(activePricingScenario?.id);
+                    return (
+                      <button
+                        key={scenario.id}
+                        type="button"
+                        onClick={() => setActivePricingScenarioId(scenario.id)}
+                        title={scenario.minimumQuantity ? `${scenario.minimumQuantity}개 이상 적용` : "기본 가격대"}
+                        style={{
+                          minHeight: 32,
+                          padding: "5px 10px",
+                          border: `1px solid ${active ? "#2563eb" : "#cbd5e1"}`,
+                          borderRadius: 6,
+                          background: active ? "#eff6ff" : "#fff",
+                          color: active ? "#1d4ed8" : "#475569",
+                          cursor: "pointer",
+                          fontSize: 12,
+                          fontWeight: 800,
+                          whiteSpace: "nowrap"
+                        }}
+                      >
+                        {scenario.label || `가격대 ${index + 1}`}
+                        {scenario.minimumQuantity ? ` · ${scenario.minimumQuantity}개 이상` : ""}
+                      </button>
+                    );
+                  })}
                 </div>
                 <div className="margin-grid">
                   <div>
+                    <label style={labelStyle}>가격대 탭 이름</label>
+                    <input
+                      value={activePricingScenario?.label || ""}
+                      onChange={(event) => updatePricingScenario({ label: event.target.value })}
+                      placeholder="예: 기본, 대량구매"
+                      style={inputStyle}
+                    />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>적용 물량 (개 이상)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={activePricingScenario?.minimumQuantity || ""}
+                      onChange={(event) => updatePricingScenario({ minimumQuantity: event.target.value })}
+                      placeholder="기본 가격대는 비워두기"
+                      style={inputStyle}
+                    />
+                  </div>
+                  <div>
                     <label style={labelStyle}>참약사 마진 가산율 (%)</label>
                     <input
-                      value={distribution.chamyaksaMarginRate}
-                      onChange={(event) => updateDistribution({ chamyaksaMarginRate: event.target.value })}
+                      value={activePricingScenario?.chamyaksaMarginRate || ""}
+                      onChange={(event) => updatePricingScenario({ chamyaksaMarginRate: event.target.value })}
                       inputMode="decimal"
                       placeholder="예: 20"
                       style={inputStyle}
                     />
-                    {distribution.chamyaksaMarginRate && !marginRateIsValid && (
+                    {activePricingScenario?.chamyaksaMarginRate && !marginRateIsValid && (
                       <div style={{ marginTop: 5, color: "#dc2626", fontSize: 11 }}>0 이상의 숫자를 입력해주세요.</div>
                     )}
                   </div>
@@ -411,8 +530,8 @@ export default function DistributionStructureTab({
                   <div>
                     <label style={labelStyle}>약국 판매가 (VAT 포함)</label>
                     <input
-                      value={distribution.pharmacySellingPrice}
-                      onChange={(event) => updateDistribution({ pharmacySellingPrice: event.target.value })}
+                      value={activePricingScenario?.pharmacySellingPrice || ""}
+                      onChange={(event) => updatePricingScenario({ pharmacySellingPrice: event.target.value })}
                       inputMode="numeric"
                       placeholder="예: 15,000"
                       style={inputStyle}
@@ -429,6 +548,22 @@ export default function DistributionStructureTab({
                     <strong style={{ color: pharmacyMarginAmount !== null && pharmacyMarginAmount < 0 ? "#dc2626" : "#0f172a" }}>
                       {formatWon(pharmacyMarginAmount)}
                     </strong>
+                  </div>
+                  <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end" }}>
+                    <button
+                      type="button"
+                      onClick={removeActivePricingScenario}
+                      disabled={distribution.pricingScenarios.length <= 1}
+                      style={{
+                        ...secondaryButtonStyle,
+                        color: distribution.pricingScenarios.length <= 1 ? "#94a3b8" : "#dc2626",
+                        borderColor: distribution.pricingScenarios.length <= 1 ? "#e2e8f0" : "#fecaca",
+                        cursor: distribution.pricingScenarios.length <= 1 ? "not-allowed" : "pointer",
+                        opacity: distribution.pricingScenarios.length <= 1 ? 0.65 : 1
+                      }}
+                    >
+                      현재 가격대 탭 삭제
+                    </button>
                   </div>
                 </div>
               </section>

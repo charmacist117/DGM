@@ -35,6 +35,7 @@ const ROLE_ADMIN = "admin";
 const ROLE_GUEST = "guest";
 const DASHBOARD_CHANGE_NOTICE_TYPE = "dashboard_change_notice";
 const DASHBOARD_CHANGELOG_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_1";
+const DASHBOARD_PRICING_TABS_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_2";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -721,11 +722,37 @@ function normalizeDistributionCompetitor(value = {}, fallbackId = "competitor_1"
   };
 }
 
-function normalizeDistributionStructure(value = {}) {
+function normalizeDistributionPricingScenario(value = {}, fallbackId = "pricing_default", fallbackLabel = "기본") {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return {
+    id: source.id ?? fallbackId,
+    label: String(source.label || fallbackLabel),
+    minimumQuantity: String(source.minimumQuantity ?? source.minQuantity ?? ""),
     chamyaksaMarginRate: String(source.chamyaksaMarginRate ?? ""),
-    pharmacySellingPrice: String(source.pharmacySellingPrice ?? ""),
+    pharmacySellingPrice: String(source.pharmacySellingPrice ?? "")
+  };
+}
+
+function normalizeDistributionStructure(value = {}) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const pricingScenarios = (Array.isArray(source.pricingScenarios) ? source.pricingScenarios : [])
+    .filter((scenario) => scenario && typeof scenario === "object")
+    .map((scenario, index) => normalizeDistributionPricingScenario(
+      scenario,
+      `pricing_${index + 1}`,
+      index === 0 ? "기본" : `가격대 ${index + 1}`
+    ));
+  if (pricingScenarios.length === 0) {
+    pricingScenarios.push(normalizeDistributionPricingScenario({
+      id: "pricing_default",
+      label: "기본",
+      minimumQuantity: "",
+      chamyaksaMarginRate: source.chamyaksaMarginRate,
+      pharmacySellingPrice: source.pharmacySellingPrice
+    }));
+  }
+  return {
+    pricingScenarios,
     competitors: (Array.isArray(source.competitors) ? source.competitors : [])
       .filter((competitor) => competitor && typeof competitor === "object")
       .map((competitor, index) => normalizeDistributionCompetitor(competitor, `competitor_${index + 1}`)),
@@ -2028,6 +2055,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
     attachment: item.attachment ? { ...item.attachment } : null,
     distributionStructure: {
       ...item.distributionStructure,
+      pricingScenarios: (item.distributionStructure?.pricingScenarios || []).map((scenario) => ({ ...scenario })),
       competitors: (item.distributionStructure?.competitors || []).map((competitor) => ({
         ...competitor,
         priceTiers: (competitor.priceTiers || []).map((tier) => ({ ...tier }))
@@ -4076,6 +4104,35 @@ export default function PmsApp() {
       }
     ]));
   }, [dashboardChangeLogs.length, setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_PRICING_TABS_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_PRICING_TABS_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260724_pricing_tabs")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260724_pricing_tabs",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changes: [
+            "유통 구조 설정에 물량 구간별 판매가·마진 가격대 탭을 추가했습니다.",
+            "가격대별 적용 최소 물량, 참약사 마진율, 약국 판매가를 독립적으로 저장하도록 개선했습니다.",
+            "유통 구조 공급단가 건 목록에 성분 함량을 함께 표시했습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
 
   const addDashboardChange = ({ changeDate, revision, changes }) => {
     if (!isAdmin) {
