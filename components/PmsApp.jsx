@@ -49,6 +49,7 @@ const DASHBOARD_CHANGELOG_SEED_KEY = "pharmadev_dashboard_changelog_seed_2026072
 const DASHBOARD_PRICING_TABS_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_2";
 const DASHBOARD_MODULE_BACKUP_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_3";
 const DASHBOARD_PROJECT_BACKUP_REMOVAL_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_4";
+const DASHBOARD_HOME_SPLIT_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_5";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -3767,40 +3768,57 @@ function parseDashboardChanges(value) {
   return String(value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 }
 
+function toDashboardDateTimeInput(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  const localDate = new Date(safeDate.getTime() - safeDate.getTimezoneOffset() * 60 * 1000);
+  return localDate.toISOString().slice(0, 16);
+}
+
+function formatDashboardChangeDateTime(entry) {
+  const value = entry?.changeDateTime || entry?.createdAt || entry?.changeDate;
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) return "-";
+  const twoDigits = (number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}.${twoDigits(date.getMonth() + 1)}.${twoDigits(date.getDate())} ${twoDigits(date.getHours())}:${twoDigits(date.getMinutes())}`;
+}
+
 function DashboardChangeLogSection({ entries, isAdmin, onAdd, onUpdate, onDelete }) {
   const sortedEntries = useMemo(() => [...(entries || [])].sort((left, right) => {
     const revisionDiff = dashboardRevisionOrder(right.revision) - dashboardRevisionOrder(left.revision);
     if (revisionDiff !== 0) return revisionDiff;
-    return String(right.changeDate || right.createdAt || "").localeCompare(String(left.changeDate || left.createdAt || ""));
+    return String(right.changeDateTime || right.createdAt || right.changeDate || "")
+      .localeCompare(String(left.changeDateTime || left.createdAt || left.changeDate || ""));
   }), [entries]);
   const nextRevision = useMemo(() => (
     sortedEntries.reduce((highest, entry) => Math.max(highest, Math.floor(dashboardRevisionOrder(entry.revision))), 0) + 1
   ), [sortedEntries]);
   const [isCreating, setIsCreating] = useState(false);
-  const [createDraft, setCreateDraft] = useState({ changeDate: TODAY, revision: "", changes: "" });
+  const [createDraft, setCreateDraft] = useState({ changeDateTime: toDashboardDateTimeInput(), revision: "", changes: "" });
   const [editingId, setEditingId] = useState(null);
-  const [editDraft, setEditDraft] = useState({ changeDate: "", revision: "", changes: "" });
+  const [editDraft, setEditDraft] = useState({ changeDateTime: "", revision: "", changes: "" });
 
   const openCreate = () => {
-    setCreateDraft({ changeDate: TODAY, revision: String(nextRevision), changes: "" });
+    setCreateDraft({ changeDateTime: toDashboardDateTimeInput(), revision: String(nextRevision), changes: "" });
     setIsCreating(true);
   };
 
   const submitCreate = () => {
     const changes = parseDashboardChanges(createDraft.changes);
-    if (!createDraft.changeDate || !createDraft.revision.trim() || changes.length === 0) {
-      window.alert("변경일자, 수정회차, 변경사항을 모두 입력해주세요.");
+    if (!createDraft.changeDateTime || !createDraft.revision.trim() || changes.length === 0) {
+      window.alert("변경일시, 수정회차, 변경사항을 모두 입력해주세요.");
       return;
     }
     onAdd?.({ ...createDraft, changes });
     setIsCreating(false);
-    setCreateDraft({ changeDate: TODAY, revision: "", changes: "" });
+    setCreateDraft({ changeDateTime: toDashboardDateTimeInput(), revision: "", changes: "" });
   };
 
   const startEdit = (entry) => {
     setEditingId(entry.id);
     setEditDraft({
-      changeDate: entry.changeDate || String(entry.createdAt || "").slice(0, 10),
+      changeDateTime: entry.changeDateTime
+        || toDashboardDateTimeInput(entry.createdAt || entry.changeDate || new Date()),
       revision: String(entry.revision || ""),
       changes: (entry.changes || []).join("\n")
     });
@@ -3808,8 +3826,8 @@ function DashboardChangeLogSection({ entries, isAdmin, onAdd, onUpdate, onDelete
 
   const submitEdit = (entryId) => {
     const changes = parseDashboardChanges(editDraft.changes);
-    if (!editDraft.changeDate || !editDraft.revision.trim() || changes.length === 0) {
-      window.alert("변경일자, 수정회차, 변경사항을 모두 입력해주세요.");
+    if (!editDraft.changeDateTime || !editDraft.revision.trim() || changes.length === 0) {
+      window.alert("변경일시, 수정회차, 변경사항을 모두 입력해주세요.");
       return;
     }
     onUpdate?.(entryId, { ...editDraft, changes });
@@ -3817,10 +3835,15 @@ function DashboardChangeLogSection({ entries, isAdmin, onAdd, onUpdate, onDelete
   };
 
   const formFields = (draft, setDraft) => (
-    <div style={{ display: "grid", gridTemplateColumns: "160px 170px minmax(0, 1fr)", gap: 10, alignItems: "start" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "200px 170px minmax(0, 1fr)", gap: 10, alignItems: "start" }}>
       <div>
-        <label style={{ display: "block", marginBottom: 5, color: "#475569", fontSize: 12, fontWeight: 800 }}>변경일자</label>
-        <input type="date" value={draft.changeDate} onChange={(event) => setDraft((previous) => ({ ...previous, changeDate: event.target.value }))} style={inputStyle} />
+        <label style={{ display: "block", marginBottom: 5, color: "#475569", fontSize: 12, fontWeight: 800 }}>변경일시</label>
+        <input
+          type="datetime-local"
+          value={draft.changeDateTime}
+          onChange={(event) => setDraft((previous) => ({ ...previous, changeDateTime: event.target.value }))}
+          style={inputStyle}
+        />
       </div>
       <div>
         <label style={{ display: "block", marginBottom: 5, color: "#475569", fontSize: 12, fontWeight: 800 }}>수정회차</label>
@@ -3844,7 +3867,7 @@ function DashboardChangeLogSection({ entries, isAdmin, onAdd, onUpdate, onDelete
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 15px", background: "#f8fafc", borderBottom: "1px solid #dbe3ee" }}>
         <div>
           <div style={{ color: "#0f172a", fontSize: 16, fontWeight: 900 }}>제품개발 대시보드 변경사항</div>
-          <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>일자와 수정회차별 업데이트 내용을 확인합니다.</div>
+          <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>일시와 수정회차별 업데이트 내용을 확인합니다.</div>
         </div>
         {isAdmin && !isCreating && (
           <button onClick={openCreate} style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#0f172a", cursor: "pointer", fontSize: 12, fontWeight: 800 }}>
@@ -3877,9 +3900,9 @@ function DashboardChangeLogSection({ entries, isAdmin, onAdd, onUpdate, onDelete
                   </div>
                 </>
               ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "120px 110px minmax(0, 1fr) auto", gap: 14, alignItems: "start" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "120px 150px minmax(0, 1fr) auto", gap: 14, alignItems: "start" }}>
                   <div style={{ color: "#0f172a", fontSize: 13, fontWeight: 900 }}>{formatDashboardRevision(entry.revision)}</div>
-                  <div style={{ color: "#64748b", fontSize: 12 }}>{entry.changeDate ? fmt(entry.changeDate) : "-"}</div>
+                  <div style={{ color: "#64748b", fontSize: 12, whiteSpace: "nowrap" }}>{formatDashboardChangeDateTime(entry)}</div>
                   <ul style={{ margin: 0, paddingLeft: 18, color: "#334155", fontSize: 13, lineHeight: 1.65 }}>
                     {(entry.changes || []).map((change, index) => <li key={`${entry.id}_${index}`}>{change}</li>)}
                   </ul>
@@ -3909,16 +3932,11 @@ function DashboardChangeLogSection({ entries, isAdmin, onAdd, onUpdate, onDelete
   );
 }
 
-function HomeDashboardTab({
+function ProductDevelopmentDashboardTab({
   projects,
-  dashboardChangeLogs,
-  isAdmin,
   onOpenProject,
   onReminderYes,
-  onReminderNo,
-  onAddDashboardChange,
-  onUpdateDashboardChange,
-  onDeleteDashboardChange
+  onReminderNo
 }) {
   const items = (projects || []).map((project) => {
     const currentTask = getCurrentStageTask(project);
@@ -3933,7 +3951,7 @@ function HomeDashboardTab({
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
-        <div style={{ fontSize: 16, fontWeight: 900, color: "#0f172a", marginBottom: 4 }}>홈 대시보드</div>
+        <div style={{ fontSize: 16, fontWeight: 900, color: "#0f172a", marginBottom: 4 }}>제품개발 대시보드</div>
         <div style={{ fontSize: 12, color: "#64748b" }}>
           현재 단계 리마인드를 확인하고, 문제가 있으면 바로 지연 적용 팝업으로 이동할 수 있습니다.
         </div>
@@ -4010,13 +4028,6 @@ function HomeDashboardTab({
           </div>
         )}
       </div>
-      <DashboardChangeLogSection
-        entries={dashboardChangeLogs}
-        isAdmin={isAdmin}
-        onAdd={onAddDashboardChange}
-        onUpdate={onUpdateDashboardChange}
-        onDelete={onDeleteDashboardChange}
-      />
     </div>
   );
 }
@@ -4308,7 +4319,38 @@ export default function PmsApp() {
     });
   }, [setAdminLogs, syncState.status]);
 
-  const addDashboardChange = ({ changeDate, revision, changes }) => {
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_HOME_SPLIT_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_HOME_SPLIT_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260724_home_split")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260724_home_split",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "최상단에 독립적인 홈 탭을 추가하고 제품개발 대시보드 변경사항을 홈으로 이동했습니다.",
+            "제품개발 탭은 프로젝트 진행 현황과 단계 리마인드만 표시하도록 정리했습니다.",
+            "왼쪽 홈 버튼이 새 홈 탭으로 이동하도록 변경했습니다.",
+            "변경사항 기록에 년·월·일과 시·분을 함께 표시하도록 개선했습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  const addDashboardChange = ({ changeDateTime, revision, changes }) => {
     if (!isAdmin) {
       window.alert("변경사항 기록은 ADMIN만 추가할 수 있습니다.");
       return;
@@ -4319,7 +4361,8 @@ export default function PmsApp() {
         id: `dashboard_change_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         type: DASHBOARD_CHANGE_NOTICE_TYPE,
         projectName: "제품개발 대시보드",
-        changeDate,
+        changeDate: String(changeDateTime || "").slice(0, 10),
+        changeDateTime,
         revision,
         changes,
         reason: changes.join("\n"),
@@ -4329,14 +4372,22 @@ export default function PmsApp() {
     ]));
   };
 
-  const updateDashboardChange = (entryId, { changeDate, revision, changes }) => {
+  const updateDashboardChange = (entryId, { changeDateTime, revision, changes }) => {
     if (!isAdmin) {
       window.alert("변경사항 기록은 ADMIN만 수정할 수 있습니다.");
       return;
     }
     setAdminLogs((previous) => normalizeAdminLogs((previous || []).map((log) => (
       String(log.id) === String(entryId) && log.type === DASHBOARD_CHANGE_NOTICE_TYPE
-        ? { ...log, changeDate, revision, changes, reason: changes.join("\n"), updatedAt: new Date().toISOString() }
+        ? {
+            ...log,
+            changeDate: String(changeDateTime || "").slice(0, 10),
+            changeDateTime,
+            revision,
+            changes,
+            reason: changes.join("\n"),
+            updatedAt: new Date().toISOString()
+          }
         : log
     ))));
   };
@@ -4612,9 +4663,13 @@ export default function PmsApp() {
           padding: 6,
           borderRadius: 14,
           background: "rgba(255, 255, 255, .06)",
-          border: "1px solid rgba(148, 163, 184, .24)"
+          border: "1px solid rgba(148, 163, 184, .24)",
+          flex: "1 1 auto",
+          minWidth: 0,
+          overflowX: "auto"
         }}>
           {[
+            ["home", "홈"],
             ["development", "제품개발"],
             ["supply", "공급단가"],
             ["distribution", "유통 구조 설정"],
@@ -4624,6 +4679,15 @@ export default function PmsApp() {
               key={id}
               onClick={() => {
                 setModuleTab(id);
+                if (id === "home" || id === "development") {
+                  setIsHome(true);
+                  setTab("overview");
+                  if (typeof window !== "undefined") {
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete("project");
+                    window.history.replaceState({}, "", url.toString());
+                  }
+                }
                 if (typeof window !== "undefined") window.scrollTo({ top: 0, left: 0 });
               }}
               style={moduleTabButtonStyle(moduleTab === id)}
@@ -4659,7 +4723,33 @@ export default function PmsApp() {
       />
 
       <main style={{ flex: 1, padding: 16, minWidth: 0, overflowX: "hidden" }}>
-        {moduleTab === "supply" ? (
+        {moduleTab === "home" ? (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 900 }}>홈</div>
+                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>제품개발 시스템의 업데이트 및 변경사항을 확인합니다.</div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+                <SyncBadge syncState={syncState} />
+                <div style={{ fontSize: 11, fontWeight: 800, color: "#0f172a", background: "#e2e8f0", borderRadius: 999, padding: "3px 9px" }}>{roleLabel}</div>
+                <button
+                  onClick={handleLogout}
+                  style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", color: "#334155", cursor: "pointer", fontSize: 12, fontWeight: 700 }}
+                >
+                  로그아웃
+                </button>
+              </div>
+            </div>
+            <DashboardChangeLogSection
+              entries={dashboardChangeLogs}
+              isAdmin={isAdmin}
+              onAdd={addDashboardChange}
+              onUpdate={updateDashboardChange}
+              onDelete={deleteDashboardChange}
+            />
+          </>
+        ) : moduleTab === "supply" ? (
           <SupplyPriceTab
             items={supplyPriceItems}
             onItemsChange={setSupplyPriceItems}
@@ -4704,8 +4794,8 @@ export default function PmsApp() {
           <>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12 }}>
               <div>
-                <div style={{ fontSize: 22, fontWeight: 900 }}>홈 대시보드</div>
-                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>모든 프로젝트의 현재 진행 상태를 한눈에 확인합니다.</div>
+                <div style={{ fontSize: 22, fontWeight: 900 }}>제품개발 대시보드</div>
+                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>모든 제품개발 프로젝트의 현재 진행 상태를 한눈에 확인합니다.</div>
               </div>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
                 <SyncBadge syncState={syncState} />
@@ -4720,16 +4810,11 @@ export default function PmsApp() {
                 </button>
               </div>
             </div>
-            <HomeDashboardTab
+            <ProductDevelopmentDashboardTab
               projects={projects}
-              dashboardChangeLogs={dashboardChangeLogs}
-              isAdmin={isAdmin}
               onOpenProject={openProject}
               onReminderYes={handleReminderYes}
               onReminderNo={handleReminderNo}
-              onAddDashboardChange={addDashboardChange}
-              onUpdateDashboardChange={updateDashboardChange}
-              onDeleteDashboardChange={deleteDashboardChange}
             />
           </>
         ) : (

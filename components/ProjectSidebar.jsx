@@ -28,6 +28,7 @@ export default function ProjectSidebar({
   const isDistributionMode = moduleTab === "distribution";
   const isSupplyMode = moduleTab === "supply" || isDistributionMode;
   const isTransferMode = moduleTab === "transfer";
+  const isStandaloneHomeMode = moduleTab === "home";
   const totalSupplyCount = Object.values(supplyCategoryCounts || {}).reduce((sum, count) => sum + Number(count || 0), 0);
   const supplyCategoryOptions = [
     { id: "all", label: "전체", color: "#e2e8f0", count: totalSupplyCount },
@@ -61,12 +62,18 @@ export default function ProjectSidebar({
         <div>
           <div style={{ fontSize: 14, fontWeight: 900 }}>PB 제품개발 시트</div>
           <div style={{ fontSize: 11, color: "var(--app-nav-muted, #94a3b8)", fontWeight: 700 }}>
-            {isDistributionMode ? "유통 구조 공급단가 목록" : (isSupplyMode ? "공급단가 카테고리" : (isTransferMode ? "전체 백업 및 복원" : "제품개발 통합관리"))}
+            {isDistributionMode
+              ? "유통 구조 공급단가 목록"
+              : (isSupplyMode
+                  ? "공급단가 카테고리"
+                  : (isTransferMode
+                      ? "전체 백업 및 복원"
+                      : (isStandaloneHomeMode ? "시스템 업데이트 안내" : "제품개발 통합관리")))}
           </div>
         </div>
         <button
           onClick={() => {
-            setModuleTab?.("development");
+            setModuleTab?.("home");
             setIsHome(true);
             setTab("overview");
             if (typeof window !== "undefined") {
@@ -79,9 +86,9 @@ export default function ProjectSidebar({
             width: 34,
             height: 34,
             borderRadius: 8,
-            border: !isSupplyMode && isHome ? "1px solid #e2e8f0" : "1px solid var(--app-nav-border, rgba(148, 163, 184, .32))",
-            background: !isSupplyMode && isHome ? "#fff" : "rgba(255, 255, 255, .06)",
-            color: !isSupplyMode && isHome ? "#0f172a" : "#e2e8f0",
+            border: isStandaloneHomeMode ? "1px solid #e2e8f0" : "1px solid var(--app-nav-border, rgba(148, 163, 184, .32))",
+            background: isStandaloneHomeMode ? "#fff" : "rgba(255, 255, 255, .06)",
+            color: isStandaloneHomeMode ? "#0f172a" : "#e2e8f0",
             cursor: "pointer",
             fontSize: 16,
             display: "flex",
@@ -89,13 +96,13 @@ export default function ProjectSidebar({
             justifyContent: "center",
             flexShrink: 0
           }}
-          title="홈 대시보드"
+          title="홈"
         >
           🏠
         </button>
       </div>
 
-      {!isSupplyMode && !isTransferMode && isAdmin && (
+      {!isSupplyMode && !isTransferMode && !isStandaloneHomeMode && isAdmin && (
         <button
           onClick={goToNewProjectPage}
           style={{ width: "100%", borderRadius: 8, padding: "9px 10px", border: "1px dashed rgba(148, 163, 184, .55)", background: "rgba(255, 255, 255, .04)", color: "#e2e8f0", cursor: "pointer", fontWeight: 800 }}
@@ -103,7 +110,7 @@ export default function ProjectSidebar({
           + 새 프로젝트
         </button>
       )}
-      {!isSupplyMode && !isTransferMode && isAdmin && (
+      {!isSupplyMode && !isTransferMode && !isStandaloneHomeMode && isAdmin && (
         <button
           onClick={goToProjectLogsPage}
           style={{ width: "100%", borderRadius: 8, padding: "9px 10px", border: "1px solid rgba(148, 163, 184, .28)", background: "rgba(30, 41, 59, .65)", color: "#e2e8f0", cursor: "pointer", fontWeight: 800, fontSize: 12 }}
@@ -164,6 +171,11 @@ export default function ProjectSidebar({
         <div style={{ flex: 1, minHeight: 0, border: "1px solid rgba(148, 163, 184, .28)", borderRadius: 8, background: "rgba(30, 41, 59, .62)", padding: 12 }}>
           <div style={{ fontSize: 12, fontWeight: 900, color: "#f8fafc", marginBottom: 6 }}>데이터 이전</div>
           <div style={{ fontSize: 11, lineHeight: 1.6, color: "#94a3b8" }}>프로젝트, 이력, 공급단가와 첨부파일을 하나의 백업 파일로 관리합니다.</div>
+        </div>
+      ) : isStandaloneHomeMode ? (
+        <div style={{ flex: 1, minHeight: 0, border: "1px solid rgba(148, 163, 184, .28)", borderRadius: 8, background: "rgba(30, 41, 59, .62)", padding: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 900, color: "#f8fafc", marginBottom: 6 }}>홈</div>
+          <div style={{ fontSize: 11, lineHeight: 1.6, color: "#94a3b8" }}>제품개발 시스템의 업데이트 및 변경사항을 확인합니다.</div>
         </div>
       ) : (
         <div style={{
