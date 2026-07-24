@@ -23,8 +23,19 @@ import {
 } from "@/lib/pms/defaults";
 import { TODAY, addDays, diff, fmt, toStr } from "@/lib/pms/date";
 import { parseFullBackup } from "@/lib/pms/fullBackup";
+import {
+  MODULE_BACKUP_TYPES,
+  createModuleBackup,
+  parseModuleBackup,
+  supplyItemIdentityKey
+} from "@/lib/pms/moduleBackup";
+import {
+  developmentModuleToCsv,
+  distributionModuleToCsv,
+  supplyModuleToCsv
+} from "@/lib/pms/moduleCsv";
 import { calcSchedule } from "@/lib/pms/schedule";
-import { downloadFile, projectFromBackupCsv, projectToBackupCsv, projectsToCsvBackupZip } from "@/lib/pms/exporters";
+import { downloadFile } from "@/lib/pms/exporters";
 
 const LOCAL_CACHE_KEY = "pharmadev_pms_cache_v2";
 const DEVELOP_TASK_ID = "develop";
@@ -36,6 +47,7 @@ const ROLE_GUEST = "guest";
 const DASHBOARD_CHANGE_NOTICE_TYPE = "dashboard_change_notice";
 const DASHBOARD_CHANGELOG_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_1";
 const DASHBOARD_PRICING_TABS_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_2";
+const DASHBOARD_MODULE_BACKUP_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_3";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -1866,7 +1878,15 @@ function TasksTab({
   );
 }
 
-function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "all", onOpenDistribution, isAdmin = false }) {
+function SupplyPriceTab({
+  items,
+  onItemsChange,
+  syncState,
+  selectedCategory = "all",
+  focusedItemId = null,
+  onOpenDistribution,
+  isAdmin = false
+}) {
   const [search, setSearch] = useState("");
   const [fromMonth, setFromMonth] = useState("");
   const [toMonth, setToMonth] = useState("");
@@ -1932,6 +1952,24 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
       return String(right.createdAt || "").localeCompare(String(left.createdAt || ""));
     });
   }, [editingIds, monthFilteredItems, query]);
+
+  useEffect(() => {
+    if (!focusedItemId) return;
+    setSearch("");
+    setQuickQuoteDateFilter("all");
+    setFromMonth("");
+    setToMonth("");
+  }, [focusedItemId]);
+
+  useEffect(() => {
+    if (!focusedItemId || typeof document === "undefined") return undefined;
+    const timer = window.setTimeout(() => {
+      document
+        .getElementById(`supply-price-item-${focusedItemId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [filteredItems, focusedItemId]);
 
   const applyQuickQuoteDateFilter = (filter) => {
     setQuickQuoteDateFilter(filter);
@@ -2321,7 +2359,16 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                 : formatPermitFeeIncludedTotalPrice(item.supplyUnitPrice, item.quantity, item.permitCompanyFeeRate))
             : "";
           return (
-            <div key={item.id} style={supplyCardStyle}>
+            <div
+              key={item.id}
+              id={`supply-price-item-${item.id}`}
+              style={{
+                ...supplyCardStyle,
+                boxShadow: String(item.id) === String(focusedItemId)
+                  ? "0 0 0 3px rgba(37, 99, 235, .32), 0 12px 28px rgba(15, 23, 42, .12)"
+                  : supplyCardStyle.boxShadow
+              }}
+            >
               <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", minWidth: 1520, borderCollapse: "collapse", tableLayout: "fixed" }}>
                   <colgroup>
@@ -3142,15 +3189,12 @@ function DecisionTab({ project, onSaveLog }) {
   );
 }
 
-function BackupTab({ projects, adminLogs, supplyPriceItems, selectedProject, onRestore, isAdmin }) {
-  const fileInputRef = useRef(null);
+function BackupTab({ projects, adminLogs, supplyPriceItems, onRestore, isAdmin }) {
   const fullBackupInputRef = useRef(null);
+  const moduleBackupInputRefs = useRef({});
   const [transferState, setTransferState] = useState({ status: "idle", message: "" });
   const [pendingRestore, setPendingRestore] = useState(null);
   const [restoreConfirmation, setRestoreConfirmation] = useState("");
-  const exportableAdminLogs = isAdmin
-    ? adminLogs
-    : (adminLogs || []).filter((log) => !log.hiddenForManager);
 
   const downloadFullBackup = async () => {
     setTransferState({ status: "working", message: "서버 저장소에서 전체 데이터를 준비하고 있습니다." });
@@ -3219,15 +3263,92 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, selectedProject, onR
     }
   };
 
-  const exportProjectCsv = () => {
-    if (!selectedProject) return window.alert("선택된 프로젝트가 없습니다.");
-    const csv = projectToBackupCsv(selectedProject, exportableAdminLogs);
-    downloadFile(`${selectedProject.name}_project_backup.csv`, csv, "text/csv;charset=utf-8;");
+  const moduleFileStamp = () => new Date().toISOString().replace(/[:.]/g, "-");
+
+  const downloadModuleBackup = (moduleType) => {
+    if (!isAdmin) return;
+    const backup = createModuleBackup(moduleType, { projects, adminLogs, supplyPriceItems }, { source: "data-transfer-tab" });
+    downloadFile(
+      `PB_${MODULE_BACKUP_TYPES[moduleType]}_${moduleFileStamp()}.json`,
+      JSON.stringify(backup, null, 2),
+      "application/json;charset=utf-8"
+    );
+    setTransferState({ status: "success", message: `${MODULE_BACKUP_TYPES[moduleType]} 전용 데이터 파일 다운로드가 완료되었습니다.` });
   };
 
-  const exportCsvWorkbook = () => {
-    const zip = projectsToCsvBackupZip(projects);
-    downloadFile(`PB_CSV_backup_${toStr(new Date())}.zip`, zip, "application/zip");
+  const downloadModuleCsv = (moduleType) => {
+    const categoryLabelById = Object.fromEntries(SUPPLY_PRICE_CATEGORIES.map((category) => [category.id, category.label]));
+    const csv = moduleType === "development"
+      ? developmentModuleToCsv(projects, adminLogs)
+      : (moduleType === "supply"
+          ? supplyModuleToCsv(supplyPriceItems, categoryLabelById)
+          : distributionModuleToCsv(supplyPriceItems));
+    downloadFile(
+      `PB_${MODULE_BACKUP_TYPES[moduleType]}_${moduleFileStamp()}.csv`,
+      `\uFEFF${csv}`,
+      "text/csv;charset=utf-8"
+    );
+    setTransferState({ status: "success", message: `${MODULE_BACKUP_TYPES[moduleType]} 통합 CSV 다운로드가 완료되었습니다.` });
+  };
+
+  const restoreModuleBackup = async (moduleType, file) => {
+    if (!isAdmin) return;
+    try {
+      setTransferState({ status: "working", message: `${MODULE_BACKUP_TYPES[moduleType]} 백업 파일을 검사하고 있습니다.` });
+      const parsed = parseModuleBackup(JSON.parse(await file.text()), moduleType);
+      if (!window.confirm(
+        `${parsed.moduleLabel} 데이터 ${parsed.recordCount}건을 복원하시겠습니까?\n\n다른 탭 데이터는 유지됩니다. 복원 전 현재 데이터를 먼저 내려받아 보관하세요.`
+      )) {
+        setTransferState({ status: "idle", message: "" });
+        return;
+      }
+
+      if (moduleType === "development") {
+        const nextProjects = normalizeProjects(parsed.data.projects);
+        onRestore({
+          projects: nextProjects,
+          adminLogs: normalizeAdminLogs(parsed.data.adminLogs),
+          selectedId: nextProjects[0]?.id || null
+        });
+        setTransferState({ status: "success", message: `제품개발 전체 데이터 ${nextProjects.length}건 복원이 완료되었습니다.` });
+        return;
+      }
+
+      const currentItems = normalizeSupplyPriceItems(supplyPriceItems);
+      const currentById = new Map(currentItems.map((item) => [String(item.id), item]));
+      const currentByIdentity = new Map(currentItems.map((item) => [supplyItemIdentityKey(item), item]));
+
+      if (moduleType === "supply") {
+        const nextItems = normalizeSupplyPriceItems(parsed.data.supplyPriceItems).map((item) => {
+          const current = currentById.get(String(item.id)) || currentByIdentity.get(supplyItemIdentityKey(item));
+          return normalizeSupplyPriceItem({
+            ...item,
+            distributionStructure: current?.distributionStructure || item.distributionStructure
+          });
+        });
+        onRestore({ supplyPriceItems: nextItems });
+        setTransferState({ status: "success", message: `공급단가 전체 데이터 ${nextItems.length}건 복원이 완료되었습니다. 기존 유통 구조는 연결 가능한 건에 유지했습니다.` });
+        return;
+      }
+
+      const recordsById = new Map(parsed.data.distributionItems.map((record) => [String(record.supplyItemId), record]));
+      const recordsByIdentity = new Map(parsed.data.distributionItems.map((record) => [String(record.identityKey || ""), record]));
+      const matchedRecordIds = new Set();
+      const nextItems = currentItems.map((item) => {
+        const record = recordsById.get(String(item.id)) || recordsByIdentity.get(supplyItemIdentityKey(item));
+        if (!record) return item;
+        matchedRecordIds.add(record);
+        return normalizeSupplyPriceItem({ ...item, distributionStructure: record.distributionStructure });
+      });
+      onRestore({ supplyPriceItems: nextItems });
+      const unmatchedCount = parsed.data.distributionItems.length - matchedRecordIds.size;
+      setTransferState({
+        status: unmatchedCount > 0 ? "warning" : "success",
+        message: `유통 구조 ${matchedRecordIds.size}건 복원이 완료되었습니다.${unmatchedCount > 0 ? ` 연결할 공급단가가 없는 ${unmatchedCount}건은 제외했습니다. 공급단가 데이터를 먼저 복원해주세요.` : ""}`
+      });
+    } catch (error) {
+      setTransferState({ status: "error", message: `${MODULE_BACKUP_TYPES[moduleType]} 복원 실패: ${String(error?.message || error)}` });
+    }
   };
 
   return (
@@ -3261,67 +3382,61 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, selectedProject, onR
       </div>
 
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
-        <div style={{ fontWeight: 800, marginBottom: 8 }}>CSV 보조 백업</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button onClick={exportCsvWorkbook} style={subtleButton}>전체 프로젝트/체크리스트 CSV 묶음</button>
-          <button onClick={exportProjectCsv} style={subtleButton}>현재 프로젝트 전체 CSV 백업</button>
-          {isAdmin && <button onClick={() => fileInputRef.current?.click()} style={subtleButton}>현재 프로젝트 CSV 복원</button>}
+        <div style={{ fontWeight: 800, marginBottom: 4 }}>탭별 데이터 이전 및 CSV 보조 백업</div>
+        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+          각 탭의 전체 데이터를 독립적으로 내려받고 복원합니다. CSV는 조회·가공용이며 정확한 복원에는 JSON 데이터 파일을 사용하세요.
         </div>
-        <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>
-          CSV 묶음은 조회·가공용이며, 시스템 전체 이전에는 위의 전체 파일 데이터 기능을 사용합니다.
+        <div style={{ border: "1px solid #dbe3ee", borderRadius: 8, overflow: "hidden" }}>
+          {[
+            { id: "development", description: "모든 프로젝트, 태스크, 일정과 이력 기록" },
+            { id: "supply", description: "전체 공급단가, 견적 정보와 첨부파일" },
+            { id: "distribution", description: "물량별 가격대, 마진 설정과 경쟁제품 비교" }
+          ].map((module, index) => (
+            <div
+              key={module.id}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "180px minmax(260px, 1fr) auto",
+                gap: 12,
+                alignItems: "center",
+                padding: "12px 13px",
+                background: index % 2 === 0 ? "#fff" : "#f8fafc",
+                borderBottom: index < 2 ? "1px solid #e2e8f0" : "none"
+              }}
+            >
+              <div style={{ color: "#0f172a", fontSize: 14, fontWeight: 900 }}>{MODULE_BACKUP_TYPES[module.id]}</div>
+              <div style={{ color: "#64748b", fontSize: 12 }}>{module.description}</div>
+              <div style={{ display: "flex", gap: 7, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                {isAdmin && (
+                  <button onClick={() => downloadModuleBackup(module.id)} disabled={transferState.status === "working"} style={primaryButton}>
+                    데이터 다운로드
+                  </button>
+                )}
+                {isAdmin && (
+                  <button onClick={() => moduleBackupInputRefs.current[module.id]?.click()} disabled={transferState.status === "working"} style={subtleButton}>
+                    데이터 복원
+                  </button>
+                )}
+                <button onClick={() => downloadModuleCsv(module.id)} style={subtleButton}>통합 CSV</button>
+                {isAdmin && (
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    style={{ display: "none" }}
+                    ref={(element) => { moduleBackupInputRefs.current[module.id] = element; }}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) restoreModuleBackup(module.id, file);
+                      event.target.value = "";
+                    }}
+                  />
+                )}
+              </div>
+            </div>
+          ))}
         </div>
+        {!isAdmin && <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>JSON 데이터 다운로드와 복원은 ADMIN만 가능하며, 통합 CSV는 조회용으로 내려받을 수 있습니다.</div>}
       </div>
-      {isAdmin && <input
-        type="file"
-        accept=".csv,text/csv"
-        style={{ display: "none" }}
-        ref={fileInputRef}
-        onChange={async (event) => {
-          const file = event.target.files?.[0];
-          if (!file) return;
-          try {
-            const text = await file.text();
-            const isCsv = file.name.toLowerCase().endsWith(".csv") || file.type.includes("csv");
-
-            if (isCsv) {
-              const restored = projectFromBackupCsv(text);
-              const restoredProject = normalizeProject(restored.project);
-              const restoredProjectId = String(restoredProject.id);
-              const nextProjects = [
-                ...projects.filter((project) => String(project.id) !== restoredProjectId),
-                restoredProject
-              ];
-              const nextAdminLogs = [
-                ...adminLogs.filter((log) => String(log?.projectId ?? "") !== restoredProjectId),
-                ...normalizeAdminLogs(restored.adminLogs)
-              ];
-              onRestore({
-                projects: normalizeProjects(nextProjects),
-                adminLogs: normalizeAdminLogs(nextAdminLogs),
-                selectedId: restoredProject.id
-              });
-              window.alert("CSV 프로젝트 백업 복원이 완료되었습니다.");
-            } else {
-              const parsed = JSON.parse(text);
-              const nextProjects = Array.isArray(parsed)
-                ? parsed
-                : (Array.isArray(parsed?.projects) ? parsed.projects : null);
-              if (!Array.isArray(nextProjects)) throw new Error("프로젝트 배열 형식이 아닙니다.");
-              const nextAdminLogs = Array.isArray(parsed?.adminLogs) ? parsed.adminLogs : [];
-              onRestore({
-                projects: normalizeProjects(nextProjects),
-                adminLogs: normalizeAdminLogs(nextAdminLogs),
-                supplyPriceItems: normalizeSupplyPriceItems(Array.isArray(parsed?.supplyPriceItems) ? parsed.supplyPriceItems : supplyPriceItems)
-              });
-              window.alert("JSON 백업 데이터 복원이 완료되었습니다.");
-            }
-          } catch (error) {
-            window.alert(`복원 실패: ${String(error.message || error)}`);
-          } finally {
-            event.target.value = "";
-          }
-        }}
-      />}
       {pendingRestore && (
         <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(15, 23, 42, .56)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div style={{ width: "min(520px, 100%)", background: "#fff", border: "1px solid #cbd5e1", borderRadius: 8, padding: 18, boxShadow: "0 18px 50px rgba(15, 23, 42, .25)" }}>
@@ -4008,6 +4123,7 @@ export default function PmsApp() {
   const [moduleTab, setModuleTab] = useState("development");
   const [supplyCategory, setSupplyCategory] = useState("all");
   const [selectedDistributionItemId, setSelectedDistributionItemId] = useState(null);
+  const [focusedSupplyItemId, setFocusedSupplyItemId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [tab, setTab] = useState("overview");
   const initialUrlAppliedRef = useRef(false);
@@ -4126,6 +4242,35 @@ export default function PmsApp() {
             "유통 구조 설정에 물량 구간별 판매가·마진 가격대 탭을 추가했습니다.",
             "가격대별 적용 최소 물량, 참약사 마진율, 약국 판매가를 독립적으로 저장하도록 개선했습니다.",
             "유통 구조 공급단가 건 목록에 성분 함량을 함께 표시했습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_MODULE_BACKUP_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_MODULE_BACKUP_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260724_module_backup")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260724_module_backup",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changes: [
+            "제품개발·공급단가·유통 구조 설정 탭별 JSON 데이터 다운로드와 복원 기능을 추가했습니다.",
+            "각 탭의 전체 내용을 한 파일로 확인할 수 있는 통합 CSV 보조 백업을 추가했습니다.",
+            "유통 구조 설정에서 연결된 공급단가 건으로 돌아가는 양방향 이동 기능을 추가했습니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()
@@ -4373,13 +4518,15 @@ export default function PmsApp() {
 
   const applyRestoredData = ({ projects: nextProjects, adminLogs: nextAdminLogs, supplyPriceItems: nextSupplyPriceItems, selectedId: nextSelectedId }) => {
     if (!isAdmin) return;
-    const normalizedProjects = normalizeProjects(nextProjects);
-    setProjects(normalizedProjects);
-    setAdminLogs(normalizeAdminLogs(nextAdminLogs));
-    setSupplyPriceItems(normalizeSupplyPriceItems(nextSupplyPriceItems || []));
-    if (nextSelectedId) setSelectedId(nextSelectedId);
-    else if (normalizedProjects.length > 0) setSelectedId(normalizedProjects[0].id);
-    else setSelectedId(null);
+    if (Array.isArray(nextProjects)) {
+      const normalizedProjects = normalizeProjects(nextProjects);
+      setProjects(normalizedProjects);
+      if (nextSelectedId) setSelectedId(nextSelectedId);
+      else if (normalizedProjects.length > 0) setSelectedId(normalizedProjects[0].id);
+      else setSelectedId(null);
+    }
+    if (Array.isArray(nextAdminLogs)) setAdminLogs(normalizeAdminLogs(nextAdminLogs));
+    if (Array.isArray(nextSupplyPriceItems)) setSupplyPriceItems(normalizeSupplyPriceItems(nextSupplyPriceItems));
   };
 
   const updateSupplyPriceItem = (itemId, patch) => {
@@ -4393,9 +4540,17 @@ export default function PmsApp() {
   const openDistributionStructure = (itemId) => {
     const target = normalizeSupplyPriceItems(supplyPriceItems).find((item) => String(item.id) === String(itemId));
     if (target) setSupplyCategory(target.category);
+    setFocusedSupplyItemId(null);
     setSelectedDistributionItemId(itemId);
     setModuleTab("distribution");
     if (typeof window !== "undefined") window.scrollTo({ top: 0, left: 0 });
+  };
+
+  const openSupplyPriceItem = (itemId) => {
+    const target = normalizeSupplyPriceItems(supplyPriceItems).find((item) => String(item.id) === String(itemId));
+    if (target) setSupplyCategory(target.category);
+    setFocusedSupplyItemId(itemId);
+    setModuleTab("supply");
   };
 
   return (
@@ -4481,6 +4636,7 @@ export default function PmsApp() {
             onItemsChange={setSupplyPriceItems}
             syncState={syncState}
             selectedCategory={supplyCategory}
+            focusedItemId={focusedSupplyItemId}
             onOpenDistribution={openDistributionStructure}
             isAdmin={isAdmin}
           />
@@ -4492,6 +4648,7 @@ export default function PmsApp() {
             selectedItemId={selectedDistributionItemId}
             onSelectedItemChange={setSelectedDistributionItemId}
             onUpdateItem={updateSupplyPriceItem}
+            onOpenSupply={openSupplyPriceItem}
             syncState={syncState}
           />
         ) : moduleTab === "transfer" ? (
@@ -4510,7 +4667,6 @@ export default function PmsApp() {
               projects={projects}
               adminLogs={adminLogs}
               supplyPriceItems={supplyPriceItems}
-              selectedProject={selectedProject}
               isAdmin={isAdmin}
               onRestore={applyRestoredData}
             />
@@ -5108,7 +5264,6 @@ export default function PmsApp() {
                 projects={projects}
                 adminLogs={adminLogs}
                 supplyPriceItems={supplyPriceItems}
-                selectedProject={selectedProject}
                 isAdmin={isAdmin}
                 onRestore={applyRestoredData}
               />

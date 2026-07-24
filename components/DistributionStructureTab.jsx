@@ -180,6 +180,7 @@ export default function DistributionStructureTab({
   selectedItemId,
   onSelectedItemChange,
   onUpdateItem,
+  onOpenSupply,
   syncState
 }) {
   const [search, setSearch] = useState("");
@@ -406,18 +407,37 @@ export default function DistributionStructureTab({
                       {selectedItem.manufacturer || "제조사 미입력"} · {categoryLabelById[selectedItem.category] || selectedItem.category}
                     </div>
                   </div>
-                  <span style={{
-                    flex: "0 0 auto",
-                    padding: "4px 8px",
-                    borderRadius: 5,
-                    border: `1px solid ${selectedItem.quoteAdoptionExpected ? "#a7f3d0" : "#fde68a"}`,
-                    background: selectedItem.quoteAdoptionExpected ? "#ecfdf5" : "#fffbeb",
-                    color: selectedItem.quoteAdoptionExpected ? "#047857" : "#b45309",
-                    fontSize: 12,
-                    fontWeight: 900
-                  }}>
-                    {selectedItem.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
-                  </span>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7, flex: "0 0 auto", flexWrap: "wrap" }}>
+                    <span style={{
+                      padding: "4px 8px",
+                      borderRadius: 5,
+                      border: `1px solid ${selectedItem.quoteAdoptionExpected ? "#a7f3d0" : "#fde68a"}`,
+                      background: selectedItem.quoteAdoptionExpected ? "#ecfdf5" : "#fffbeb",
+                      color: selectedItem.quoteAdoptionExpected ? "#047857" : "#b45309",
+                      fontSize: 12,
+                      fontWeight: 900
+                    }}>
+                      {selectedItem.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onOpenSupply?.(selectedItem.id)}
+                      style={{
+                        minHeight: 32,
+                        padding: "6px 11px",
+                        border: "1px solid #93c5fd",
+                        borderRadius: 6,
+                        background: "#fff",
+                        color: "#1d4ed8",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontWeight: 900,
+                        whiteSpace: "nowrap"
+                      }}
+                    >
+                      공급단가 보기
+                    </button>
+                  </div>
                 </div>
                 <div className="base-grid">
                   {[
