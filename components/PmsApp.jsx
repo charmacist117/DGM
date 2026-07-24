@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import DistributionStructureTab from "@/components/DistributionStructureTab";
 import ProjectSidebar from "@/components/ProjectSidebar";
 import DesktopProjectPathControl from "@/components/DesktopProjectPathControl";
 import {
@@ -673,6 +674,29 @@ function normalizeSupplyIngredients(item = {}) {
   return ingredients.length > 0 ? ingredients : [normalizeSupplyIngredient()];
 }
 
+function normalizeDistributionCompetitor(value = {}, fallbackId = "competitor_1") {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    id: source.id ?? fallbackId,
+    date: String(source.date || ""),
+    productName: String(source.productName || ""),
+    packagingUnit: String(source.packagingUnit || ""),
+    salePrice: String(source.salePrice ?? "")
+  };
+}
+
+function normalizeDistributionStructure(value = {}) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    chamyaksaMarginRate: String(source.chamyaksaMarginRate ?? ""),
+    pharmacySellingPrice: String(source.pharmacySellingPrice ?? ""),
+    competitors: (Array.isArray(source.competitors) ? source.competitors : [])
+      .filter((competitor) => competitor && typeof competitor === "object")
+      .map((competitor, index) => normalizeDistributionCompetitor(competitor, `competitor_${index + 1}`)),
+    updatedAt: String(source.updatedAt || "")
+  };
+}
+
 function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
   const source = item && typeof item === "object" && !Array.isArray(item) ? item : {};
   const id = source.id ?? fallbackId;
@@ -703,6 +727,7 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     shelfLife: String(source.shelfLife || source.expirationPeriod || source.expiryPeriod || ""),
     memo: String(source.memo || ""),
     attachment: normalizeSupplyAttachment(source.attachment),
+    distributionStructure: normalizeDistributionStructure(source.distributionStructure),
     createdAt: String(source.createdAt || new Date().toISOString()),
     updatedAt: String(source.updatedAt || "")
   };
@@ -1740,7 +1765,7 @@ function TasksTab({
   );
 }
 
-function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "all" }) {
+function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "all", onOpenDistribution }) {
   const [search, setSearch] = useState("");
   const [fromMonth, setFromMonth] = useState("");
   const [toMonth, setToMonth] = useState("");
@@ -1920,7 +1945,11 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
   const cloneSupplyItem = (item) => normalizeSupplyPriceItem({
     ...item,
     ingredients: (item.ingredients || []).map((ingredient) => ({ ...ingredient })),
-    attachment: item.attachment ? { ...item.attachment } : null
+    attachment: item.attachment ? { ...item.attachment } : null,
+    distributionStructure: {
+      ...item.distributionStructure,
+      competitors: (item.distributionStructure?.competitors || []).map((competitor) => ({ ...competitor }))
+    }
   });
 
   const clearEditSnapshot = (itemId) => {
@@ -2176,7 +2205,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
           return (
             <div key={item.id} style={supplyCardStyle}>
               <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", minWidth: 1520, borderCollapse: "collapse", tableLayout: "fixed" }}>
+                <table style={{ width: "100%", minWidth: 1620, borderCollapse: "collapse", tableLayout: "fixed" }}>
                   <colgroup>
                     <col style={{ width: 110 }} />
                     <col style={{ width: 150 }} />
@@ -2184,7 +2213,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                     <col style={{ width: 210 }} />
                     <col style={{ width: 90 }} />
                     <col style={{ width: 230 }} />
-                    <col style={{ width: 100 }} />
+                    <col style={{ width: 200 }} />
                   </colgroup>
                   <thead>
                     <tr style={supplyHeaderRowStyle}>
@@ -2442,13 +2471,19 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                                 삭제
                               </button>
                             </>
-                          ) : (
-                            <button onClick={() => startEditing(item)} style={supplySubtleButtonStyle}>
-                              수정
-                            </button>
-                          )}
-                        </div>
-                      </td>
+                           ) : (
+                             <button onClick={() => startEditing(item)} style={supplySubtleButtonStyle}>
+                               수정
+                             </button>
+                           )}
+                           <button
+                             onClick={() => onOpenDistribution?.(item.id)}
+                             style={{ ...supplySubtleButtonStyle, borderColor: "#93c5fd", color: "#1d4ed8" }}
+                           >
+                             유통 구조 바로가기
+                           </button>
+                         </div>
+                       </td>
                     </tr>
                   </tbody>
                 </table>
@@ -3587,6 +3622,7 @@ export default function PmsApp() {
   const [userRole, setUserRole] = useState(ROLE_GUEST);
   const [moduleTab, setModuleTab] = useState("development");
   const [supplyCategory, setSupplyCategory] = useState("all");
+  const [selectedDistributionItemId, setSelectedDistributionItemId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [tab, setTab] = useState("overview");
   const initialUrlAppliedRef = useRef(false);
@@ -3863,6 +3899,22 @@ export default function PmsApp() {
     else setSelectedId(null);
   };
 
+  const updateSupplyPriceItem = (itemId, patch) => {
+    setSupplyPriceItems((previousItems) => normalizeSupplyPriceItems(previousItems.map((item) => (
+      String(item.id) === String(itemId)
+        ? { ...item, ...patch, updatedAt: new Date().toISOString() }
+        : item
+    ))));
+  };
+
+  const openDistributionStructure = (itemId) => {
+    const target = normalizeSupplyPriceItems(supplyPriceItems).find((item) => String(item.id) === String(itemId));
+    if (target) setSupplyCategory(target.category);
+    setSelectedDistributionItemId(itemId);
+    setModuleTab("distribution");
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, left: 0 });
+  };
+
   return (
     <div style={{
       minHeight: "100vh",
@@ -3898,11 +3950,15 @@ export default function PmsApp() {
           {[
             ["development", "제품개발"],
             ["supply", "공급단가"],
+            ["distribution", "유통 구조 설정"],
             ["transfer", "데이터 이전"]
           ].map(([id, label]) => (
             <button
               key={id}
-              onClick={() => setModuleTab(id)}
+              onClick={() => {
+                setModuleTab(id);
+                if (typeof window !== "undefined") window.scrollTo({ top: 0, left: 0 });
+              }}
               style={moduleTabButtonStyle(moduleTab === id)}
             >
               {label}
@@ -3935,13 +3991,24 @@ export default function PmsApp() {
         TODAY={TODAY}
       />
 
-      <main style={{ flex: 1, padding: 16, minWidth: 0 }}>
+      <main style={{ flex: 1, padding: 16, minWidth: 0, overflowX: "hidden" }}>
         {moduleTab === "supply" ? (
           <SupplyPriceTab
             items={supplyPriceItems}
             onItemsChange={setSupplyPriceItems}
             syncState={syncState}
             selectedCategory={supplyCategory}
+            onOpenDistribution={openDistributionStructure}
+          />
+        ) : moduleTab === "distribution" ? (
+          <DistributionStructureTab
+            items={normalizeSupplyPriceItems(supplyPriceItems)}
+            categories={SUPPLY_PRICE_CATEGORIES}
+            selectedCategory={supplyCategory}
+            selectedItemId={selectedDistributionItemId}
+            onSelectedItemChange={setSelectedDistributionItemId}
+            onUpdateItem={updateSupplyPriceItem}
+            syncState={syncState}
           />
         ) : moduleTab === "transfer" ? (
           <>

@@ -25,7 +25,8 @@ export default function ProjectSidebar({
   TODAY
 }) {
   const [dragOverTarget, setDragOverTarget] = useState(null);
-  const isSupplyMode = moduleTab === "supply";
+  const isDistributionMode = moduleTab === "distribution";
+  const isSupplyMode = moduleTab === "supply" || isDistributionMode;
   const isTransferMode = moduleTab === "transfer";
   const totalSupplyCount = Object.values(supplyCategoryCounts || {}).reduce((sum, count) => sum + Number(count || 0), 0);
   const supplyCategoryOptions = [
@@ -60,7 +61,7 @@ export default function ProjectSidebar({
         <div>
           <div style={{ fontSize: 14, fontWeight: 900 }}>PB 제품개발 시트</div>
           <div style={{ fontSize: 11, color: "var(--app-nav-muted, #94a3b8)", fontWeight: 700 }}>
-            {isSupplyMode ? "공급단가 카테고리" : (isTransferMode ? "전체 백업 및 복원" : "제품개발 통합관리")}
+            {isDistributionMode ? "유통 구조 공급단가 목록" : (isSupplyMode ? "공급단가 카테고리" : (isTransferMode ? "전체 백업 및 복원" : "제품개발 통합관리"))}
           </div>
         </div>
         <button
@@ -123,7 +124,7 @@ export default function ProjectSidebar({
           paddingRight: 4
         }}>
           <div style={{ fontSize: 11, fontWeight: 900, color: "#94a3b8", padding: "0 4px 2px" }}>
-            공급단가 카테고리
+            {isDistributionMode ? "유통 구조 카테고리" : "공급단가 카테고리"}
           </div>
           {supplyCategoryOptions.map((category) => {
             const active = supplyCategory === category.id;
