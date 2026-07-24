@@ -694,9 +694,11 @@ function normalizeDistributionCompetitor(value = {}, fallbackId = "competitor_1"
     id: source.id ?? fallbackId,
     date: String(source.date || ""),
     productName: String(source.productName || ""),
+    salesChannel: String(source.salesChannel || source.seller || source.salesPlace || ""),
     packagingUnit: String(source.packagingUnit || ""),
     salePrice: String(source.salePrice ?? priceTiers[0]?.price ?? ""),
-    priceTiers
+    priceTiers,
+    memo: String(source.memo || source.note || "")
   };
 }
 

@@ -124,9 +124,11 @@ function createCompetitor() {
     id: `competitor_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     date: "",
     productName: "",
+    salesChannel: "",
     packagingUnit: "",
     salePrice: "",
-    priceTiers: [createPriceTier()]
+    priceTiers: [createPriceTier()],
+    memo: ""
   };
 }
 
@@ -335,7 +337,7 @@ export default function DistributionStructureTab({
                       "허가사 수수료",
                       permitFeeStatus,
                       hasPermitCompanyFee
-                        ? `허가사: ${selectedItem.permitCompany || "미입력"}${permitFeeRateUnknown ? " · 공급단가에 포함" : ""}`
+                        ? `허가사: ${selectedItem.permitCompany || "미입력"}${permitFeeRateUnknown ? "\n공급단가에 포함" : ""}`
                         : ""
                     ],
                     ["최종 유통 원가", formatWon(baseAmounts.finalTotal), `${permitFeeApplied ? (permitFeeRateUnknown ? "VAT 반영 · 허가사 수수료는 공급단가에 포함" : "VAT 및 허가사 수수료 반영") : "VAT 반영"} · 개당: ${formatWon(baseAmounts.finalUnitCost)}`]
@@ -343,7 +345,7 @@ export default function DistributionStructureTab({
                     <div key={label} style={{ padding: 13, borderRight: "1px solid #e2e8f0", borderBottom: "1px solid #e2e8f0" }}>
                       <div style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>{label}</div>
                       <div style={{ marginTop: 7, color: "#0f172a", fontSize: 16, fontWeight: 900 }}>{value}</div>
-                      {subtext && <div style={{ marginTop: 4, color: "#64748b", fontSize: 11 }}>{subtext}</div>}
+                      {subtext && <div style={{ marginTop: 4, color: "#64748b", fontSize: 11, whiteSpace: "pre-line" }}>{subtext}</div>}
                     </div>
                   ))}
                 </div>
@@ -432,17 +434,19 @@ export default function DistributionStructureTab({
                   </div>
                 </div>
                 <div>
-                  <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
                     <colgroup>
-                      <col style={{ width: 130 }} />
-                      <col />
-                      <col style={{ width: 150 }} />
-                      <col style={{ width: 260 }} />
-                      {isEditing && <col style={{ width: 76 }} />}
+                      <col style={{ width: "10%" }} />
+                      <col style={{ width: isEditing ? "21%" : "24%" }} />
+                      <col style={{ width: isEditing ? "14%" : "16%" }} />
+                      <col style={{ width: "11%" }} />
+                      <col style={{ width: "22%" }} />
+                      <col style={{ width: isEditing ? "16%" : "17%" }} />
+                      {isEditing && <col style={{ width: "6%" }} />}
                     </colgroup>
                     <thead>
                       <tr style={{ background: "#f1f5f9" }}>
-                        {["기준일", "경쟁제품명", "포장단위", "판매단가", ...(isEditing ? ["관리"] : [])].map((header) => (
+                        {["기준일", "경쟁제품명", "판매처", "포장단위", "판매단가", "비고", ...(isEditing ? ["관리"] : [])].map((header) => (
                           <th key={header} style={{ padding: "9px 10px", borderBottom: "1px solid #dbe3ee", color: "#475569", fontSize: 12, textAlign: "left" }}>
                             {header}
                           </th>
@@ -464,6 +468,13 @@ export default function DistributionStructureTab({
                               <input value={competitor.productName || ""} onChange={(event) => updateCompetitor(competitor.id, { productName: event.target.value })} placeholder="경쟁제품명" style={inputStyle} />
                             ) : (
                               <div style={{ color: "#0f172a", fontSize: 13, fontWeight: 700 }}>{competitor.productName || "-"}</div>
+                            )}
+                          </td>
+                          <td style={{ padding: 7, borderBottom: "1px solid #edf2f7" }}>
+                            {isEditing ? (
+                              <input value={competitor.salesChannel || ""} onChange={(event) => updateCompetitor(competitor.id, { salesChannel: event.target.value })} placeholder="판매처" style={inputStyle} />
+                            ) : (
+                              <div style={{ color: "#334155", fontSize: 13, overflowWrap: "anywhere" }}>{competitor.salesChannel || "-"}</div>
                             )}
                           </td>
                           <td style={{ padding: 7, borderBottom: "1px solid #edf2f7" }}>
@@ -523,6 +534,19 @@ export default function DistributionStructureTab({
                               </div>
                             )}
                           </td>
+                          <td style={{ padding: 7, borderBottom: "1px solid #edf2f7" }}>
+                            {isEditing ? (
+                              <textarea
+                                value={competitor.memo || ""}
+                                onChange={(event) => updateCompetitor(competitor.id, { memo: event.target.value })}
+                                placeholder="비고"
+                                rows={2}
+                                style={{ ...inputStyle, minHeight: 66, resize: "vertical", fontFamily: "inherit" }}
+                              />
+                            ) : (
+                              <div style={{ color: "#475569", fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{competitor.memo || "-"}</div>
+                            )}
+                          </td>
                           {isEditing && <td style={{ padding: 7, borderBottom: "1px solid #edf2f7" }}>
                             <button
                               type="button"
@@ -536,7 +560,7 @@ export default function DistributionStructureTab({
                       ))}
                       {distribution.competitors.length === 0 && (
                         <tr>
-                            <td colSpan={isEditing ? 5 : 4} style={{ padding: 20, color: "#94a3b8", fontSize: 13, textAlign: "center" }}>
+                            <td colSpan={isEditing ? 7 : 6} style={{ padding: 20, color: "#94a3b8", fontSize: 13, textAlign: "center" }}>
                             등록된 경쟁제품이 없습니다.
                           </td>
                         </tr>
@@ -565,12 +589,18 @@ export default function DistributionStructureTab({
         .base-grid {
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
+          grid-auto-rows: 1fr;
+          height: 100%;
         }
         .decision-grid {
           display: grid;
           grid-template-columns: minmax(390px, 0.9fr) minmax(540px, 1.1fr);
           gap: 14px;
-          align-items: start;
+          align-items: stretch;
+        }
+        .decision-grid > section:not(.competitor-panel) {
+          display: grid;
+          grid-template-rows: auto 1fr;
         }
         .competitor-panel {
           grid-column: 1 / -1;
