@@ -307,22 +307,11 @@ export default function DistributionStructureTab({
             <div style={{ display: "grid", gap: 14 }}>
               <div className="decision-grid">
               <section style={panelStyle}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 15px", borderBottom: "1px solid #cbd5e1", background: "#e8f1fb" }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ color: "#0f172a", fontSize: 17, fontWeight: 900 }}>{getItemLabel(selectedItem)}</div>
-                    <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>
-                      {selectedItem.manufacturer || "제조사 미입력"} · {categoryLabelById[selectedItem.category] || selectedItem.category}
-                    </div>
+                <div style={{ padding: "13px 15px", borderBottom: "1px solid #cbd5e1", background: "#e8f1fb" }}>
+                  <div style={{ color: "#0f172a", fontSize: 17, fontWeight: 900 }}>{getItemLabel(selectedItem)}</div>
+                  <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>
+                    {selectedItem.manufacturer || "제조사 미입력"} · {categoryLabelById[selectedItem.category] || selectedItem.category}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setEditingItemId(isEditing ? null : selectedItem.id)}
-                    style={isEditing
-                      ? { ...secondaryButtonStyle, background: "#0f172a", borderColor: "#0f172a", color: "#fff" }
-                      : secondaryButtonStyle}
-                  >
-                    {isEditing ? "완료" : "수정"}
-                  </button>
                 </div>
                 <div className="base-grid">
                   {[
@@ -352,18 +341,14 @@ export default function DistributionStructureTab({
                 <div className="margin-grid">
                   <div>
                     <label style={labelStyle}>참약사 마진 가산율 (%)</label>
-                    {isEditing ? (
-                      <input
-                        value={distribution.chamyaksaMarginRate}
-                        onChange={(event) => updateDistribution({ chamyaksaMarginRate: event.target.value })}
-                        inputMode="decimal"
-                        placeholder="예: 20"
-                        style={inputStyle}
-                      />
-                    ) : (
-                      <div className="readonly-value">{distribution.chamyaksaMarginRate ? `${distribution.chamyaksaMarginRate}%` : "-"}</div>
-                    )}
-                    {isEditing && distribution.chamyaksaMarginRate && !marginRateIsValid && (
+                    <input
+                      value={distribution.chamyaksaMarginRate}
+                      onChange={(event) => updateDistribution({ chamyaksaMarginRate: event.target.value })}
+                      inputMode="decimal"
+                      placeholder="예: 20"
+                      style={inputStyle}
+                    />
+                    {distribution.chamyaksaMarginRate && !marginRateIsValid && (
                       <div style={{ marginTop: 5, color: "#dc2626", fontSize: 11 }}>0 이상의 숫자를 입력해주세요.</div>
                     )}
                   </div>
@@ -378,17 +363,13 @@ export default function DistributionStructureTab({
                   </div>
                   <div>
                     <label style={labelStyle}>약국 판매가 (VAT 포함)</label>
-                    {isEditing ? (
-                      <input
-                        value={distribution.pharmacySellingPrice}
-                        onChange={(event) => updateDistribution({ pharmacySellingPrice: event.target.value })}
-                        inputMode="numeric"
-                        placeholder="예: 15,000"
-                        style={inputStyle}
-                      />
-                    ) : (
-                      <div className="readonly-value">{formatWon(pharmacySellingPrice)}</div>
-                    )}
+                    <input
+                      value={distribution.pharmacySellingPrice}
+                      onChange={(event) => updateDistribution({ pharmacySellingPrice: event.target.value })}
+                      inputMode="numeric"
+                      placeholder="예: 15,000"
+                      style={inputStyle}
+                    />
                   </div>
                   <div className="calculated-cell">
                     <span>약국 마진율 (판매가 기준)</span>
@@ -405,24 +386,35 @@ export default function DistributionStructureTab({
                 </div>
               </section>
 
-              <section style={panelStyle}>
+              <section className="competitor-panel" style={panelStyle}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 15px", borderBottom: "1px solid #cbd5e1" }}>
                   <div>
                     <div style={{ color: "#0f172a", fontSize: 16, fontWeight: 900 }}>경쟁제품 비교</div>
                     <div style={{ marginTop: 2, color: "#64748b", fontSize: 12 }}>동일 시장 제품의 판매 조건을 간단히 기록합니다.</div>
                   </div>
-                  {isEditing && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    {isEditing && (
+                      <button
+                        type="button"
+                        onClick={() => updateDistribution({ competitors: [...distribution.competitors, createCompetitor()] })}
+                        style={secondaryButtonStyle}
+                      >
+                        + 경쟁제품 추가
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => updateDistribution({ competitors: [...distribution.competitors, createCompetitor()] })}
-                      style={secondaryButtonStyle}
+                      onClick={() => setEditingItemId(isEditing ? null : selectedItem.id)}
+                      style={isEditing
+                        ? { ...secondaryButtonStyle, background: "#0f172a", borderColor: "#0f172a", color: "#fff" }
+                        : secondaryButtonStyle}
                     >
-                      + 경쟁제품 추가
+                      {isEditing ? "완료" : "수정"}
                     </button>
-                  )}
+                  </div>
                 </div>
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", minWidth: 790, borderCollapse: "collapse", tableLayout: "fixed" }}>
+                <div>
+                  <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "auto" }}>
                     <colgroup>
                       <col style={{ width: 130 }} />
                       <col />
@@ -562,6 +554,10 @@ export default function DistributionStructureTab({
           gap: 14px;
           align-items: start;
         }
+        .competitor-panel {
+          grid-column: 1 / -1;
+          min-width: 0;
+        }
         .margin-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -591,17 +587,6 @@ export default function DistributionStructureTab({
         .calculated-cell small {
           color: #64748b;
           font-size: 11px;
-        }
-        .readonly-value {
-          min-height: 38px;
-          padding: 8px 10px;
-          border: 1px solid #dbe3ee;
-          border-radius: 7px;
-          background: #f8fafc;
-          color: #0f172a;
-          font-size: 14px;
-          font-weight: 800;
-          box-sizing: border-box;
         }
         @media (max-width: 1500px) {
           .decision-grid {

@@ -2503,19 +2503,41 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
 
               <div style={{ borderTop: "1px solid #cbd5e1", overflowX: "auto" }}>
                 <table style={{ width: "100%", minWidth: 1460, borderCollapse: "collapse" }}>
-                  <thead>
+                  <tbody>
                     <tr style={supplyDetailHeaderRowStyle}>
                       {[
                         ...(supportsPermitCompanyFee ? ["허가사 수수료"] : []),
-                        "견적일자", "사용기한", "용법용량", "효능효과", "첨부파일", "비고", "유통 구조"
+                        "견적일자", "사용기한", "용법용량", "효능효과", "첨부파일", "비고"
                       ].map((header) => (
                         <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#3730a3", borderBottom: "1px solid #c7d2fe", whiteSpace: "nowrap" }}>
                           {header}
                         </th>
                       ))}
+                      <td rowSpan={2} style={{ padding: 8, width: 170, verticalAlign: "middle", background: "#fff", borderLeft: "1px solid #cbd5e1" }}>
+                        <button
+                          onClick={() => onOpenDistribution?.(item.id)}
+                          style={{
+                            ...supplySubtleButtonStyle,
+                            width: "100%",
+                            height: "100%",
+                            minHeight: 98,
+                            display: "grid",
+                            placeItems: "center",
+                            alignContent: "center",
+                            gap: 2,
+                            borderColor: "#93c5fd",
+                            background: "#fff",
+                            color: "#1d4ed8",
+                            fontSize: 14,
+                            lineHeight: 1.25,
+                            fontWeight: 900
+                          }}
+                        >
+                          <span>유통 구조</span>
+                          <span>바로가기</span>
+                        </button>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
                     <tr style={{ ...supplyDetailBodyRowStyle, verticalAlign: "top" }}>
                       {supportsPermitCompanyFee && <td style={{ padding: 8, width: 118 }}>
                         {isEditing ? (
@@ -2608,29 +2630,6 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                         ) : (
                           <div style={supplyTextCellStyle}>{item.memo || "-"}</div>
                         )}
-                      </td>
-                      <td style={{ padding: 8, width: 170, verticalAlign: "middle" }}>
-                        <button
-                          onClick={() => onOpenDistribution?.(item.id)}
-                          style={{
-                            ...supplySubtleButtonStyle,
-                            width: "100%",
-                            minHeight: 62,
-                            display: "grid",
-                            placeItems: "center",
-                            alignContent: "center",
-                            gap: 2,
-                            borderColor: "#93c5fd",
-                            background: "#eff6ff",
-                            color: "#1d4ed8",
-                            fontSize: 14,
-                            lineHeight: 1.25,
-                            fontWeight: 900
-                          }}
-                        >
-                          <span>유통 구조</span>
-                          <span>바로가기</span>
-                        </button>
                       </td>
                     </tr>
                   </tbody>
