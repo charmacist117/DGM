@@ -272,6 +272,16 @@ export default function DistributionStructureTab({
     setActivePricingScenarioId(nextScenarios[0]?.id || null);
   };
 
+  const resetDistributionStructure = () => {
+    if (!selectedItem || !distribution.updatedAt) return;
+    if (!window.confirm(
+      "이 공급단가 건의 판매가·마진 설정과 경쟁제품 비교 내용을 모두 초기화하시겠습니까?\n초기화 후 유통 구조 미설정 상태로 돌아갑니다."
+    )) return;
+    onUpdateItem?.(selectedItem.id, { distributionStructure: {} });
+    setActivePricingScenarioId(null);
+    setEditingItemId(null);
+  };
+
   const updateCompetitor = (competitorId, patch) => {
     updateDistribution({
       competitors: distribution.competitors.map((competitor) => (
@@ -573,7 +583,22 @@ export default function DistributionStructureTab({
                       {formatWon(pharmacyMarginAmount)}
                     </strong>
                   </div>
-                  <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end" }}>
+                  <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      onClick={resetDistributionStructure}
+                      disabled={!distribution.updatedAt}
+                      style={{
+                        ...secondaryButtonStyle,
+                        color: distribution.updatedAt ? "#c2410c" : "#94a3b8",
+                        borderColor: distribution.updatedAt ? "#fdba74" : "#e2e8f0",
+                        background: distribution.updatedAt ? "#fff7ed" : "#f8fafc",
+                        cursor: distribution.updatedAt ? "pointer" : "not-allowed",
+                        opacity: distribution.updatedAt ? 1 : 0.65
+                      }}
+                    >
+                      유통 구조 설정 초기화
+                    </button>
                     <button
                       type="button"
                       onClick={removeActivePricingScenario}
