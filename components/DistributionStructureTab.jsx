@@ -52,6 +52,13 @@ function formatWon(value) {
   return `${new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(Math.round(value))}원`;
 }
 
+function formatEnteredPrice(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "-";
+  if (/^[\d,\s]+$/.test(raw)) return formatWon(parseNumber(raw));
+  return raw;
+}
+
 function formatPercent(value) {
   if (!Number.isFinite(value)) return "-";
   return `${new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(value)}%`;
@@ -77,22 +84,34 @@ function getDistribution(item) {
 function getBaseAmounts(item) {
   const unitPrice = parseNumber(item?.supplyUnitPrice);
   const quantity = parseNumber(item?.quantity);
-  const permitFeeRate = parseNumber(item?.permitCompanyFeeRate);
-  const vatMultiplier = item?.vatIncluded ? 1.1 : 1;
-  const hasPermitFee = item?.category === "OTC" && item?.permitCompanyFee && permitFeeRate !== null;
-  const finalUnitCost = unitPrice === null
-    ? null
-    : unitPrice * (hasPermitFee ? 1.1 * (1 + (permitFeeRate / 100)) : vatMultiplier);
+  const finalUnitCost = unitPrice === null ? null : unitPrice * 1.1;
 
   return {
     unitPrice,
     quantity,
-    vatUnitPrice: unitPrice === null || !item?.vatIncluded ? null : unitPrice * 1.1,
+    vatUnitPrice: unitPrice === null ? null : unitPrice * 1.1,
     supplyTotal: unitPrice === null || quantity === null ? null : unitPrice * quantity,
-    vatTotal: unitPrice === null || quantity === null || !item?.vatIncluded ? null : unitPrice * quantity * 1.1,
+    vatTotal: unitPrice === null || quantity === null ? null : unitPrice * quantity * 1.1,
     finalUnitCost,
     finalTotal: finalUnitCost === null || quantity === null ? null : finalUnitCost * quantity
   };
+}
+
+function createPriceTier(index = 0) {
+  return {
+    id: `price_tier_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    label: index === 0 ? "기본" : `${index * 100}개 이상`,
+    price: ""
+  };
+}
+
+function getCompetitorPriceTiers(competitor = {}) {
+  if (Array.isArray(competitor.priceTiers) && competitor.priceTiers.length > 0) return competitor.priceTiers;
+  return [{
+    id: `${competitor.id || "competitor"}_legacy_price`,
+    label: "기본",
+    price: String(competitor.salePrice ?? "")
+  }];
 }
 
 function createCompetitor() {
@@ -101,7 +120,8 @@ function createCompetitor() {
     date: "",
     productName: "",
     packagingUnit: "",
-    salePrice: ""
+    salePrice: "",
+    priceTiers: [createPriceTier()]
   };
 }
 
@@ -115,6 +135,7 @@ export default function DistributionStructureTab({
   syncState
 }) {
   const [search, setSearch] = useState("");
+  const [editingItemId, setEditingItemId] = useState(null);
   const query = search.trim().toLowerCase();
   const visibleItems = useMemo(() => {
     const categoryItems = selectedCategory === "all"
@@ -132,12 +153,13 @@ export default function DistributionStructureTab({
   }, [items, query, selectedCategory]);
 
   const selectedItem = visibleItems.find((item) => String(item.id) === String(selectedItemId)) || visibleItems[0] || null;
+  const isEditing = selectedItem && String(editingItemId) === String(selectedItem.id);
   const distribution = getDistribution(selectedItem);
   const baseAmounts = getBaseAmounts(selectedItem);
   const chamyaksaMarginRate = parseNumber(distribution.chamyaksaMarginRate);
-  const marginRateIsValid = chamyaksaMarginRate !== null && chamyaksaMarginRate >= 0 && chamyaksaMarginRate < 100;
+  const marginRateIsValid = chamyaksaMarginRate !== null && chamyaksaMarginRate >= 0;
   const chamyaksaSellingPrice = marginRateIsValid && baseAmounts.finalUnitCost !== null
-    ? baseAmounts.finalUnitCost / (1 - (chamyaksaMarginRate / 100))
+    ? baseAmounts.finalUnitCost * (1 + (chamyaksaMarginRate / 100))
     : null;
   const chamyaksaMarginAmount = chamyaksaSellingPrice === null || baseAmounts.finalUnitCost === null
     ? null
@@ -167,6 +189,38 @@ export default function DistributionStructureTab({
       competitors: distribution.competitors.map((competitor) => (
         String(competitor.id) === String(competitorId) ? { ...competitor, ...patch } : competitor
       ))
+    });
+  };
+
+  const updateCompetitorPriceTier = (competitorId, tierId, patch) => {
+    const competitor = distribution.competitors.find((entry) => String(entry.id) === String(competitorId));
+    if (!competitor) return;
+    const priceTiers = getCompetitorPriceTiers(competitor).map((tier) => (
+      String(tier.id) === String(tierId) ? { ...tier, ...patch } : tier
+    ));
+    updateCompetitor(competitorId, {
+      priceTiers,
+      salePrice: priceTiers[0]?.price || ""
+    });
+  };
+
+  const addCompetitorPriceTier = (competitorId) => {
+    const competitor = distribution.competitors.find((entry) => String(entry.id) === String(competitorId));
+    if (!competitor) return;
+    const priceTiers = getCompetitorPriceTiers(competitor);
+    updateCompetitor(competitorId, {
+      priceTiers: [...priceTiers, createPriceTier(priceTiers.length)],
+      salePrice: priceTiers[0]?.price || ""
+    });
+  };
+
+  const removeCompetitorPriceTier = (competitorId, tierId) => {
+    const competitor = distribution.competitors.find((entry) => String(entry.id) === String(competitorId));
+    if (!competitor) return;
+    const priceTiers = getCompetitorPriceTiers(competitor).filter((tier) => String(tier.id) !== String(tierId));
+    updateCompetitor(competitorId, {
+      priceTiers,
+      salePrice: priceTiers[0]?.price || ""
     });
   };
 
@@ -253,11 +307,22 @@ export default function DistributionStructureTab({
             <div style={{ display: "grid", gap: 14 }}>
               <div className="decision-grid">
               <section style={panelStyle}>
-                <div style={{ padding: "13px 15px", borderBottom: "1px solid #cbd5e1", background: "#e8f1fb" }}>
-                  <div style={{ color: "#0f172a", fontSize: 17, fontWeight: 900 }}>{getItemLabel(selectedItem)}</div>
-                  <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>
-                    {selectedItem.manufacturer || "제조사 미입력"} · {categoryLabelById[selectedItem.category] || selectedItem.category}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 15px", borderBottom: "1px solid #cbd5e1", background: "#e8f1fb" }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ color: "#0f172a", fontSize: 17, fontWeight: 900 }}>{getItemLabel(selectedItem)}</div>
+                    <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>
+                      {selectedItem.manufacturer || "제조사 미입력"} · {categoryLabelById[selectedItem.category] || selectedItem.category}
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditingItemId(isEditing ? null : selectedItem.id)}
+                    style={isEditing
+                      ? { ...secondaryButtonStyle, background: "#0f172a", borderColor: "#0f172a", color: "#fff" }
+                      : secondaryButtonStyle}
+                  >
+                    {isEditing ? "완료" : "수정"}
+                  </button>
                 </div>
                 <div className="base-grid">
                   {[
@@ -265,8 +330,8 @@ export default function DistributionStructureTab({
                     ["수량", selectedItem.quantity || "-", ""],
                     ["배치 당 공급단가", formatWon(baseAmounts.unitPrice), `총 금액: ${formatWon(baseAmounts.supplyTotal)}`],
                     ["배치 당 VAT 포함 가격", formatWon(baseAmounts.vatUnitPrice), `VAT 포함 총금액: ${formatWon(baseAmounts.vatTotal)}`],
-                    ["허가사 수수료율", selectedItem.category === "OTC" && selectedItem.permitCompanyFee ? `${selectedItem.permitCompanyFeeRate || "-"}%` : "-", ""],
-                    ["수수료 포함 총금액", formatWon(baseAmounts.finalTotal), `유통 원가 기준: ${formatWon(baseAmounts.finalUnitCost)}`]
+                    ["허가사 수수료", selectedItem.category === "OTC" && selectedItem.permitCompanyFee ? "포함" : "-", ""],
+                    ["VAT 포함 유통 원가", formatWon(baseAmounts.finalTotal), `개당: ${formatWon(baseAmounts.finalUnitCost)}`]
                   ].map(([label, value, subtext]) => (
                     <div key={label} style={{ padding: 13, borderRight: "1px solid #e2e8f0", borderBottom: "1px solid #e2e8f0" }}>
                       <div style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>{label}</div>
@@ -278,50 +343,61 @@ export default function DistributionStructureTab({
               </section>
 
               <section style={panelStyle}>
-                <div style={{ padding: "12px 15px", borderBottom: "1px solid #cbd5e1", color: "#0f172a", fontSize: 16, fontWeight: 900 }}>
-                  판매가 및 마진 설정
+                <div style={{ padding: "12px 15px", borderBottom: "1px solid #cbd5e1" }}>
+                  <div style={{ color: "#0f172a", fontSize: 16, fontWeight: 900 }}>판매가 및 마진 설정</div>
+                  <div style={{ marginTop: 4, color: "#475569", fontSize: 12, lineHeight: 1.5 }}>
+                    모든 금액은 VAT 포함 기준입니다. 참약사 마진은 VAT 포함 유통 원가 {formatWon(baseAmounts.finalUnitCost)}에 입력한 비율을 가산합니다.
+                  </div>
                 </div>
                 <div className="margin-grid">
                   <div>
-                    <label style={labelStyle}>참약사 마진율 (%)</label>
-                    <input
-                      value={distribution.chamyaksaMarginRate}
-                      onChange={(event) => updateDistribution({ chamyaksaMarginRate: event.target.value })}
-                      inputMode="decimal"
-                      placeholder="예: 20"
-                      style={inputStyle}
-                    />
-                    {distribution.chamyaksaMarginRate && !marginRateIsValid && (
-                      <div style={{ marginTop: 5, color: "#dc2626", fontSize: 11 }}>0 이상 100 미만의 숫자를 입력해주세요.</div>
+                    <label style={labelStyle}>참약사 마진 가산율 (%)</label>
+                    {isEditing ? (
+                      <input
+                        value={distribution.chamyaksaMarginRate}
+                        onChange={(event) => updateDistribution({ chamyaksaMarginRate: event.target.value })}
+                        inputMode="decimal"
+                        placeholder="예: 20"
+                        style={inputStyle}
+                      />
+                    ) : (
+                      <div className="readonly-value">{distribution.chamyaksaMarginRate ? `${distribution.chamyaksaMarginRate}%` : "-"}</div>
+                    )}
+                    {isEditing && distribution.chamyaksaMarginRate && !marginRateIsValid && (
+                      <div style={{ marginTop: 5, color: "#dc2626", fontSize: 11 }}>0 이상의 숫자를 입력해주세요.</div>
                     )}
                   </div>
                   <div className="calculated-cell">
-                    <span>참약사 마진금액</span>
+                    <span>참약사 마진금액 (VAT 포함)</span>
                     <strong>{formatWon(chamyaksaMarginAmount)}</strong>
                   </div>
                   <div className="calculated-cell">
-                    <span>참약사 판매가</span>
+                    <span>참약사 판매가 (VAT 포함)</span>
                     <strong>{formatWon(chamyaksaSellingPrice)}</strong>
                     <small>약국 사입 금액</small>
                   </div>
                   <div>
-                    <label style={labelStyle}>약국 판매가</label>
-                    <input
-                      value={distribution.pharmacySellingPrice}
-                      onChange={(event) => updateDistribution({ pharmacySellingPrice: event.target.value })}
-                      inputMode="numeric"
-                      placeholder="예: 15,000"
-                      style={inputStyle}
-                    />
+                    <label style={labelStyle}>약국 판매가 (VAT 포함)</label>
+                    {isEditing ? (
+                      <input
+                        value={distribution.pharmacySellingPrice}
+                        onChange={(event) => updateDistribution({ pharmacySellingPrice: event.target.value })}
+                        inputMode="numeric"
+                        placeholder="예: 15,000"
+                        style={inputStyle}
+                      />
+                    ) : (
+                      <div className="readonly-value">{formatWon(pharmacySellingPrice)}</div>
+                    )}
                   </div>
                   <div className="calculated-cell">
-                    <span>약국 마진율</span>
+                    <span>약국 마진율 (판매가 기준)</span>
                     <strong style={{ color: pharmacyMarginAmount !== null && pharmacyMarginAmount < 0 ? "#dc2626" : "#0f172a" }}>
                       {formatPercent(pharmacyMarginRate)}
                     </strong>
                   </div>
                   <div className="calculated-cell">
-                    <span>약국 마진금액</span>
+                    <span>약국 마진금액 (VAT 포함)</span>
                     <strong style={{ color: pharmacyMarginAmount !== null && pharmacyMarginAmount < 0 ? "#dc2626" : "#0f172a" }}>
                       {formatWon(pharmacyMarginAmount)}
                     </strong>
@@ -335,26 +411,28 @@ export default function DistributionStructureTab({
                     <div style={{ color: "#0f172a", fontSize: 16, fontWeight: 900 }}>경쟁제품 비교</div>
                     <div style={{ marginTop: 2, color: "#64748b", fontSize: 12 }}>동일 시장 제품의 판매 조건을 간단히 기록합니다.</div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => updateDistribution({ competitors: [...distribution.competitors, createCompetitor()] })}
-                    style={secondaryButtonStyle}
-                  >
-                    + 경쟁제품 추가
-                  </button>
+                  {isEditing && (
+                    <button
+                      type="button"
+                      onClick={() => updateDistribution({ competitors: [...distribution.competitors, createCompetitor()] })}
+                      style={secondaryButtonStyle}
+                    >
+                      + 경쟁제품 추가
+                    </button>
+                  )}
                 </div>
                 <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", minWidth: 680, borderCollapse: "collapse", tableLayout: "fixed" }}>
+                  <table style={{ width: "100%", minWidth: 790, borderCollapse: "collapse", tableLayout: "fixed" }}>
                     <colgroup>
                       <col style={{ width: 130 }} />
                       <col />
                       <col style={{ width: 150 }} />
-                      <col style={{ width: 150 }} />
-                      <col style={{ width: 76 }} />
+                      <col style={{ width: 260 }} />
+                      {isEditing && <col style={{ width: 76 }} />}
                     </colgroup>
                     <thead>
                       <tr style={{ background: "#f1f5f9" }}>
-                        {["기준일", "경쟁제품명", "포장단위", "판매단가", "관리"].map((header) => (
+                        {["기준일", "경쟁제품명", "포장단위", "판매단가", ...(isEditing ? ["관리"] : [])].map((header) => (
                           <th key={header} style={{ padding: "9px 10px", borderBottom: "1px solid #dbe3ee", color: "#475569", fontSize: 12, textAlign: "left" }}>
                             {header}
                           </th>
@@ -365,18 +443,77 @@ export default function DistributionStructureTab({
                       {distribution.competitors.map((competitor) => (
                         <tr key={competitor.id}>
                           <td style={{ padding: 7, borderBottom: "1px solid #edf2f7" }}>
-                            <input type="date" value={competitor.date || ""} onChange={(event) => updateCompetitor(competitor.id, { date: event.target.value })} style={inputStyle} />
+                            {isEditing ? (
+                              <input type="date" value={competitor.date || ""} onChange={(event) => updateCompetitor(competitor.id, { date: event.target.value })} style={inputStyle} />
+                            ) : (
+                              <div style={labelStyle}>{competitor.date || "-"}</div>
+                            )}
                           </td>
                           <td style={{ padding: 7, borderBottom: "1px solid #edf2f7" }}>
-                            <input value={competitor.productName || ""} onChange={(event) => updateCompetitor(competitor.id, { productName: event.target.value })} placeholder="경쟁제품명" style={inputStyle} />
+                            {isEditing ? (
+                              <input value={competitor.productName || ""} onChange={(event) => updateCompetitor(competitor.id, { productName: event.target.value })} placeholder="경쟁제품명" style={inputStyle} />
+                            ) : (
+                              <div style={{ color: "#0f172a", fontSize: 13, fontWeight: 700 }}>{competitor.productName || "-"}</div>
+                            )}
                           </td>
                           <td style={{ padding: 7, borderBottom: "1px solid #edf2f7" }}>
-                            <input value={competitor.packagingUnit || ""} onChange={(event) => updateCompetitor(competitor.id, { packagingUnit: event.target.value })} placeholder="예: 30정" style={inputStyle} />
+                            {isEditing ? (
+                              <input value={competitor.packagingUnit || ""} onChange={(event) => updateCompetitor(competitor.id, { packagingUnit: event.target.value })} placeholder="예: 30정" style={inputStyle} />
+                            ) : (
+                              <div style={{ color: "#334155", fontSize: 13 }}>{competitor.packagingUnit || "-"}</div>
+                            )}
                           </td>
                           <td style={{ padding: 7, borderBottom: "1px solid #edf2f7" }}>
-                            <input value={competitor.salePrice || ""} onChange={(event) => updateCompetitor(competitor.id, { salePrice: event.target.value })} inputMode="numeric" placeholder="예: 20,000원" style={inputStyle} />
+                            {isEditing ? (
+                              <div style={{ display: "grid", gap: 6 }}>
+                                {getCompetitorPriceTiers(competitor).map((tier, tierIndex) => (
+                                  <div key={tier.id} style={{ display: "grid", gridTemplateColumns: "minmax(88px, 1fr) minmax(96px, 1fr) auto", gap: 5, alignItems: "center" }}>
+                                    <input
+                                      value={tier.label || ""}
+                                      onChange={(event) => updateCompetitorPriceTier(competitor.id, tier.id, { label: event.target.value })}
+                                      placeholder={tierIndex === 0 ? "기본" : "예: 100개 이상"}
+                                      style={{ ...inputStyle, minHeight: 34, padding: "6px 8px", fontSize: 12 }}
+                                    />
+                                    <input
+                                      value={tier.price || ""}
+                                      onChange={(event) => updateCompetitorPriceTier(competitor.id, tier.id, { price: event.target.value })}
+                                      inputMode="numeric"
+                                      placeholder="판매단가"
+                                      style={{ ...inputStyle, minHeight: 34, padding: "6px 8px", fontSize: 12 }}
+                                    />
+                                    {tierIndex > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => removeCompetitorPriceTier(competitor.id, tier.id)}
+                                        title="할인구간 삭제"
+                                        aria-label="할인구간 삭제"
+                                        style={{ ...secondaryButtonStyle, minHeight: 34, padding: "5px 8px", color: "#dc2626", borderColor: "#fecaca" }}
+                                      >
+                                        삭제
+                                      </button>
+                                    )}
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => addCompetitorPriceTier(competitor.id)}
+                                  style={{ ...secondaryButtonStyle, minHeight: 32, padding: "5px 8px", justifySelf: "start", fontSize: 12 }}
+                                >
+                                  + 할인구간
+                                </button>
+                              </div>
+                            ) : (
+                              <div style={{ display: "grid", gap: 5 }}>
+                                {getCompetitorPriceTiers(competitor).map((tier) => (
+                                  <div key={tier.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, paddingBottom: 4, borderBottom: "1px dashed #dbe3ee", color: "#334155", fontSize: 12 }}>
+                                    <span>{tier.label || "구간 미입력"}</span>
+                                    <strong style={{ color: "#0f172a", whiteSpace: "nowrap" }}>{formatEnteredPrice(tier.price)}</strong>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </td>
-                          <td style={{ padding: 7, borderBottom: "1px solid #edf2f7" }}>
+                          {isEditing && <td style={{ padding: 7, borderBottom: "1px solid #edf2f7" }}>
                             <button
                               type="button"
                               onClick={() => updateDistribution({ competitors: distribution.competitors.filter((entry) => String(entry.id) !== String(competitor.id)) })}
@@ -384,12 +521,12 @@ export default function DistributionStructureTab({
                             >
                               삭제
                             </button>
-                          </td>
+                          </td>}
                         </tr>
                       ))}
                       {distribution.competitors.length === 0 && (
                         <tr>
-                          <td colSpan={5} style={{ padding: 20, color: "#94a3b8", fontSize: 13, textAlign: "center" }}>
+                            <td colSpan={isEditing ? 5 : 4} style={{ padding: 20, color: "#94a3b8", fontSize: 13, textAlign: "center" }}>
                             등록된 경쟁제품이 없습니다.
                           </td>
                         </tr>
@@ -454,6 +591,17 @@ export default function DistributionStructureTab({
         .calculated-cell small {
           color: #64748b;
           font-size: 11px;
+        }
+        .readonly-value {
+          min-height: 38px;
+          padding: 8px 10px;
+          border: 1px solid #dbe3ee;
+          border-radius: 7px;
+          background: #f8fafc;
+          color: #0f172a;
+          font-size: 14px;
+          font-weight: 800;
+          box-sizing: border-box;
         }
         @media (max-width: 1500px) {
           .decision-grid {

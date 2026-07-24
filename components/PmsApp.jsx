@@ -676,12 +676,27 @@ function normalizeSupplyIngredients(item = {}) {
 
 function normalizeDistributionCompetitor(value = {}, fallbackId = "competitor_1") {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const priceTiers = (Array.isArray(source.priceTiers) ? source.priceTiers : [])
+    .filter((tier) => tier && typeof tier === "object")
+    .map((tier, index) => ({
+      id: tier.id ?? `${fallbackId}_price_${index + 1}`,
+      label: String(tier.label ?? ""),
+      price: String(tier.price ?? "")
+    }));
+  if (priceTiers.length === 0 && source.salePrice !== undefined && source.salePrice !== null && String(source.salePrice).trim()) {
+    priceTiers.push({
+      id: `${fallbackId}_price_1`,
+      label: "기본",
+      price: String(source.salePrice)
+    });
+  }
   return {
     id: source.id ?? fallbackId,
     date: String(source.date || ""),
     productName: String(source.productName || ""),
     packagingUnit: String(source.packagingUnit || ""),
-    salePrice: String(source.salePrice ?? "")
+    salePrice: String(source.salePrice ?? priceTiers[0]?.price ?? ""),
+    priceTiers
   };
 }
 
@@ -1948,7 +1963,10 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
     attachment: item.attachment ? { ...item.attachment } : null,
     distributionStructure: {
       ...item.distributionStructure,
-      competitors: (item.distributionStructure?.competitors || []).map((competitor) => ({ ...competitor }))
+      competitors: (item.distributionStructure?.competitors || []).map((competitor) => ({
+        ...competitor,
+        priceTiers: (competitor.priceTiers || []).map((tier) => ({ ...tier }))
+      }))
     }
   });
 
@@ -2205,7 +2223,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
           return (
             <div key={item.id} style={supplyCardStyle}>
               <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", minWidth: 1620, borderCollapse: "collapse", tableLayout: "fixed" }}>
+                <table style={{ width: "100%", minWidth: 1520, borderCollapse: "collapse", tableLayout: "fixed" }}>
                   <colgroup>
                     <col style={{ width: 110 }} />
                     <col style={{ width: 150 }} />
@@ -2213,7 +2231,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                     <col style={{ width: 210 }} />
                     <col style={{ width: 90 }} />
                     <col style={{ width: 230 }} />
-                    <col style={{ width: 200 }} />
+                    <col style={{ width: 100 }} />
                   </colgroup>
                   <thead>
                     <tr style={supplyHeaderRowStyle}>
@@ -2476,12 +2494,6 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                                수정
                              </button>
                            )}
-                           <button
-                             onClick={() => onOpenDistribution?.(item.id)}
-                             style={{ ...supplySubtleButtonStyle, borderColor: "#93c5fd", color: "#1d4ed8" }}
-                           >
-                             유통 구조 바로가기
-                           </button>
                          </div>
                        </td>
                     </tr>
@@ -2490,12 +2502,12 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
               </div>
 
               <div style={{ borderTop: "1px solid #cbd5e1", overflowX: "auto" }}>
-                <table style={{ width: "100%", minWidth: 1340, borderCollapse: "collapse" }}>
+                <table style={{ width: "100%", minWidth: 1460, borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={supplyDetailHeaderRowStyle}>
                       {[
                         ...(supportsPermitCompanyFee ? ["허가사 수수료"] : []),
-                        "견적일자", "사용기한", "용법용량", "효능효과", "첨부파일", "비고"
+                        "견적일자", "사용기한", "용법용량", "효능효과", "첨부파일", "비고", "유통 구조"
                       ].map((header) => (
                         <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#3730a3", borderBottom: "1px solid #c7d2fe", whiteSpace: "nowrap" }}>
                           {header}
@@ -2590,12 +2602,35 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                           <div style={{ fontSize: 14, color: "#94a3b8" }}>첨부파일 없음</div>
                         )}
                       </td>
-                      <td style={{ padding: 8, width: 260 }}>
+                      <td style={{ padding: 8, width: 190 }}>
                         {isEditing ? (
                           <textarea value={item.memo} onChange={(event) => updateItem(item.id, { memo: event.target.value })} placeholder="비고" style={supplyCompactTextareaStyle} />
                         ) : (
                           <div style={supplyTextCellStyle}>{item.memo || "-"}</div>
                         )}
+                      </td>
+                      <td style={{ padding: 8, width: 170, verticalAlign: "middle" }}>
+                        <button
+                          onClick={() => onOpenDistribution?.(item.id)}
+                          style={{
+                            ...supplySubtleButtonStyle,
+                            width: "100%",
+                            minHeight: 62,
+                            display: "grid",
+                            placeItems: "center",
+                            alignContent: "center",
+                            gap: 2,
+                            borderColor: "#93c5fd",
+                            background: "#eff6ff",
+                            color: "#1d4ed8",
+                            fontSize: 14,
+                            lineHeight: 1.25,
+                            fontWeight: 900
+                          }}
+                        >
+                          <span>유통 구조</span>
+                          <span>바로가기</span>
+                        </button>
                       </td>
                     </tr>
                   </tbody>
