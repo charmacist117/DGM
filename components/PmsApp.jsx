@@ -721,6 +721,9 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     id,
     category,
     manufacturer: String(source.manufacturer || ""),
+    permitCompany: supportsPermitCompanyFee
+      ? String(source.permitCompany || source.licenseCompany || source.approvalCompany || "")
+      : "",
     ingredients: normalizeSupplyIngredients(source),
     packagingUnit: String(source.packagingUnit || source.packageUnit || ""),
     packagingForm: String(source.packagingForm || source.packageForm || ""),
@@ -738,6 +741,9 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     permitCompanyFeeRate: supportsPermitCompanyFee
       ? String(source.permitCompanyFeeRate || source.licenseCompanyFeeRate || source.approvalCompanyFeeRate || "")
       : "",
+    permitCompanyFeeRateUnknown: supportsPermitCompanyFee && normalizeSupplyCheckedValue(
+      source.permitCompanyFeeRateUnknown ?? source.licenseCompanyFeeRateUnknown ?? source.approvalCompanyFeeRateUnknown
+    ),
     quoteDate: String(source.quoteDate || ""),
     shelfLife: String(source.shelfLife || source.expirationPeriod || source.expiryPeriod || ""),
     memo: String(source.memo || ""),
@@ -752,6 +758,35 @@ function normalizeSupplyPriceItems(items = []) {
   return (Array.isArray(items) ? items : [])
     .filter((item) => item && typeof item === "object")
     .map((item, index) => normalizeSupplyPriceItem(item, item.id ?? `supply_price_${index + 1}`));
+}
+
+function isSupplyPriceItemEmpty(item = {}) {
+  const ingredientHasValue = (Array.isArray(item.ingredients) ? item.ingredients : []).some((ingredient) => (
+    [
+      ingredient?.name,
+      ingredient?.content,
+      ingredient?.origin,
+      ingredient?.brand,
+      ingredient?.kilogramPriceRange
+    ].some((value) => String(value || "").trim())
+  ));
+  const fieldHasValue = [
+    item.manufacturer,
+    item.permitCompany,
+    item.packagingUnit,
+    item.packagingForm,
+    item.quantity,
+    item.minimumOrderBatchQuantity,
+    item.dosage,
+    item.efficacy,
+    item.supplyUnitPrice,
+    item.permitCompanyFeeRate,
+    item.quoteDate,
+    item.shelfLife,
+    item.memo,
+    item.attachment?.name
+  ].some((value) => String(value || "").trim());
+  return !ingredientHasValue && !fieldHasValue && !item.vatIncluded && !item.permitCompanyFee;
 }
 
 function createSupplyPriceItem() {
@@ -1810,7 +1845,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
   const monthFilteredItems = useMemo(() => {
     if (!monthRangeActive) return categoryFilteredItems;
     return categoryFilteredItems.filter((item) => {
-      if (editingIds.has(String(item.id))) return true;
+      if (editingIds.has(String(item.id)) || isSupplyPriceItemEmpty(item)) return true;
       if (quickQuoteDateRange) {
         const quoteDate = String(item.quoteDate || "").slice(0, 10);
         return Boolean(quoteDate && quoteDate >= quickQuoteDateRange.from && quoteDate <= quickQuoteDateRange.to);
@@ -1825,7 +1860,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
   const query = useMemo(() => search.trim().toLowerCase(), [search]);
   const filteredItems = useMemo(() => {
     const searchedItems = !query ? monthFilteredItems : monthFilteredItems.filter((item) => (
-      editingIds.has(String(item.id)) || (item.ingredients || []).some((ingredient) => (
+      editingIds.has(String(item.id)) || isSupplyPriceItemEmpty(item) || (item.ingredients || []).some((ingredient) => (
         ingredient.name.toLowerCase().includes(query)
       ))
     ));
@@ -1833,6 +1868,9 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
       const leftEditing = editingIds.has(String(left.id));
       const rightEditing = editingIds.has(String(right.id));
       if (leftEditing !== rightEditing) return leftEditing ? -1 : 1;
+      const leftEmpty = isSupplyPriceItemEmpty(left);
+      const rightEmpty = isSupplyPriceItemEmpty(right);
+      if (leftEmpty !== rightEmpty) return leftEmpty ? -1 : 1;
       const leftQuoteDate = String(left.quoteDate || "").slice(0, 10);
       const rightQuoteDate = String(right.quoteDate || "").slice(0, 10);
       if (leftQuoteDate !== rightQuoteDate) {
@@ -1862,9 +1900,9 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
       return;
     }
     const headers = [
-      "카테고리", "제조사", "공급 성분", "함량/규격", "원료 원산지", "브랜드/공급처", "kg당 가격대",
+      "카테고리", "제조사", "허가사", "공급 성분", "함량/규격", "원료 원산지", "브랜드/공급처", "kg당 가격대",
       "포장단위", "포장형태", "수량", "최소 주문 배치 수량", "배치 당 공급단가", "VAT 포함", "배치 당 VAT 포함 가격",
-      "총 금액", "VAT 포함 총금액", "허가사 수수료", "허가사 수수료율(%)", "수수료 포함 총금액",
+      "총 금액", "VAT 포함 총금액", "허가사 수수료", "허가사 수수료율(%) / 상태", "수수료 포함 총금액",
       "견적일자", "사용기한", "용법용량", "효능효과", "첨부파일", "비고"
     ];
     const rows = exportItems.flatMap((item) => {
@@ -1873,12 +1911,16 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
       const vatUnitPrice = item.vatIncluded ? formatVatIncludedPrice(item.supplyUnitPrice) : "";
       const vatTotalPrice = item.vatIncluded ? formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1) : "";
       const supportsPermitCompanyFee = isPermitCompanyFeeCategory(item.category);
+      const permitFeeRateUnknown = supportsPermitCompanyFee && item.permitCompanyFee && item.permitCompanyFeeRateUnknown;
       const permitFeeTotal = supportsPermitCompanyFee && item.permitCompanyFee
-        ? formatPermitFeeIncludedTotalPrice(item.supplyUnitPrice, item.quantity, item.permitCompanyFeeRate)
+        ? (permitFeeRateUnknown
+            ? formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1)
+            : formatPermitFeeIncludedTotalPrice(item.supplyUnitPrice, item.quantity, item.permitCompanyFeeRate))
         : "";
       return ingredients.map((ingredient) => [
         SUPPLY_PRICE_CATEGORY_LABEL_BY_ID[item.category] || item.category,
         item.manufacturer,
+        item.permitCompany,
         ingredient.name,
         ingredient.content,
         ingredient.origin,
@@ -1894,7 +1936,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
         totalPrice,
         vatTotalPrice,
         supportsPermitCompanyFee && item.permitCompanyFee ? "해당" : "",
-        supportsPermitCompanyFee ? item.permitCompanyFeeRate : "",
+        supportsPermitCompanyFee ? (permitFeeRateUnknown ? "알 수 없음 (공급단가에 포함)" : item.permitCompanyFeeRate) : "",
         permitFeeTotal,
         item.quoteDate,
         item.shelfLife,
@@ -2056,11 +2098,6 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
   const saveItem = (itemId) => {
     const item = safeItems.find((candidate) => String(candidate.id) === String(itemId));
     if (!item) return;
-    const hasIngredient = (item.ingredients || []).some((ingredient) => ingredient.name.trim());
-    if (!item.manufacturer.trim() && !hasIngredient && !item.supplyUnitPrice.trim()) {
-      window.alert("제조사, 성분명, 공급단가 중 하나 이상 입력해주세요.");
-      return;
-    }
     if (isRawMaterialSupplyCategory(item.category)) {
       const missingKilogramPrice = (item.ingredients || []).some((ingredient) => (
         ingredient.name.trim() && !ingredient.kilogramPriceRange.trim()
@@ -2070,10 +2107,10 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
         return;
       }
     }
-    if (isPermitCompanyFeeCategory(item.category) && item.permitCompanyFee) {
+    if (isPermitCompanyFeeCategory(item.category) && item.permitCompanyFee && !item.permitCompanyFeeRateUnknown) {
       const permitFeeRate = parseSupplyPriceNumber(item.permitCompanyFeeRate);
       if (permitFeeRate === null || permitFeeRate < 0) {
-        window.alert("허가사 수수료를 체크한 경우 수수료율(%)을 숫자로 입력해주세요.");
+        window.alert("허가사 수수료율(%)을 숫자로 입력하거나 '알 수 없음'을 체크해주세요.");
         return;
       }
     }
@@ -2217,8 +2254,11 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
           const totalPrice = formatTotalPrice(item.supplyUnitPrice, item.quantity);
           const vatIncludedPrice = item.vatIncluded ? formatVatIncludedPrice(item.supplyUnitPrice) : "";
           const vatTotalPrice = item.vatIncluded ? formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1) : "";
+          const permitFeeRateUnknown = supportsPermitCompanyFee && item.permitCompanyFee && item.permitCompanyFeeRateUnknown;
           const permitFeeIncludedTotalPrice = supportsPermitCompanyFee && item.permitCompanyFee
-            ? formatPermitFeeIncludedTotalPrice(item.supplyUnitPrice, item.quantity, item.permitCompanyFeeRate)
+            ? (permitFeeRateUnknown
+                ? formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1)
+                : formatPermitFeeIncludedTotalPrice(item.supplyUnitPrice, item.quantity, item.permitCompanyFeeRate))
             : "";
           return (
             <div key={item.id} style={supplyCardStyle}>
@@ -2253,7 +2293,9 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                               updateItem(item.id, {
                                 category,
                                 permitCompanyFee: isPermitCompanyFeeCategory(category) ? item.permitCompanyFee : false,
-                                permitCompanyFeeRate: isPermitCompanyFeeCategory(category) ? item.permitCompanyFeeRate : ""
+                                permitCompanyFeeRate: isPermitCompanyFeeCategory(category) ? item.permitCompanyFeeRate : "",
+                                permitCompanyFeeRateUnknown: isPermitCompanyFeeCategory(category) ? item.permitCompanyFeeRateUnknown : false,
+                                permitCompany: isPermitCompanyFeeCategory(category) ? item.permitCompany : ""
                               });
                             }}
                             style={supplyCompactInputStyle}
@@ -2268,9 +2310,41 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                       </td>
                       <td style={{ padding: 8 }}>
                         {isEditing ? (
-                          <input value={item.manufacturer} onChange={(event) => updateItem(item.id, { manufacturer: event.target.value })} placeholder="제조사" style={supplyCompactInputStyle} />
+                          <div style={{ display: "grid", gap: 8 }}>
+                            <div>
+                              <label style={supplyFieldLabelStyle}>제조사</label>
+                              <input
+                                value={item.manufacturer}
+                                onChange={(event) => updateItem(item.id, { manufacturer: event.target.value })}
+                                placeholder="제조사"
+                                style={supplyCompactInputStyle}
+                              />
+                            </div>
+                            <div>
+                              <label style={supplyFieldLabelStyle}>허가사</label>
+                              <input
+                                value={item.permitCompany}
+                                disabled={!item.permitCompanyFee}
+                                onChange={(event) => updateItem(item.id, { permitCompany: event.target.value })}
+                                placeholder={item.permitCompanyFee ? "허가사" : "허가사 수수료 해당 체크 후 입력"}
+                                style={{
+                                  ...supplyCompactInputStyle,
+                                  background: item.permitCompanyFee ? "#fff" : "#f1f5f9",
+                                  color: item.permitCompanyFee ? "#0f172a" : "#94a3b8",
+                                  cursor: item.permitCompanyFee ? "text" : "not-allowed"
+                                }}
+                              />
+                            </div>
+                          </div>
                         ) : (
-                          <div style={supplyTextCellStyle}>{item.manufacturer || "-"}</div>
+                          <div style={{ display: "grid", gap: 5 }}>
+                            <div style={supplyTextCellStyle}>{item.manufacturer || "-"}</div>
+                            {item.permitCompanyFee && (
+                              <div style={{ ...supplyTextCellStyle, color: "#64748b", fontSize: 12 }}>
+                                허가사: {item.permitCompany || "미입력"}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </td>
                       <td style={{ padding: 8 }}>
@@ -2436,11 +2510,33 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                                   step="0.01"
                                   inputMode="decimal"
                                   value={item.permitCompanyFeeRate}
-                                  disabled={!item.permitCompanyFee}
+                                  disabled={!item.permitCompanyFee || item.permitCompanyFeeRateUnknown}
                                   onChange={(event) => updateItem(item.id, { permitCompanyFeeRate: event.target.value })}
-                                  placeholder={item.permitCompanyFee ? "예: 10" : "허가사 수수료 체크 후 입력"}
-                                  style={{ ...supplyCompactInputStyle, background: item.permitCompanyFee ? "#fff" : "#f1f5f9", color: item.permitCompanyFee ? "#0f172a" : "#94a3b8", cursor: item.permitCompanyFee ? "text" : "not-allowed" }}
+                                  placeholder={item.permitCompanyFeeRateUnknown ? "공급단가에 수수료 포함" : (item.permitCompanyFee ? "예: 10" : "허가사 수수료 체크 후 입력")}
+                                  style={{
+                                    ...supplyCompactInputStyle,
+                                    background: item.permitCompanyFee && !item.permitCompanyFeeRateUnknown ? "#fff" : "#f1f5f9",
+                                    color: item.permitCompanyFee && !item.permitCompanyFeeRateUnknown ? "#0f172a" : "#94a3b8",
+                                    cursor: item.permitCompanyFee && !item.permitCompanyFeeRateUnknown ? "text" : "not-allowed"
+                                  }}
                                 />
+                                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 6, color: item.permitCompanyFee ? "#334155" : "#94a3b8", fontSize: 13, fontWeight: 800 }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(item.permitCompanyFeeRateUnknown)}
+                                    disabled={!item.permitCompanyFee}
+                                    onChange={(event) => updateItem(item.id, {
+                                      permitCompanyFeeRateUnknown: event.target.checked,
+                                      permitCompanyFeeRate: event.target.checked ? "" : item.permitCompanyFeeRate
+                                    })}
+                                  />
+                                  알 수 없음
+                                </label>
+                                {item.permitCompanyFeeRateUnknown && (
+                                  <div style={{ marginTop: 4, color: "#64748b", fontSize: 11, lineHeight: 1.4 }}>
+                                    배치 당 공급단가에 허가사 수수료가 이미 포함된 것으로 계산합니다.
+                                  </div>
+                                )}
                               </div>
                               <div>
                                 <label style={supplyFieldLabelStyle}>수수료 포함 총금액</label>
@@ -2448,7 +2544,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                                   value={permitFeeIncludedTotalPrice}
                                   readOnly
                                   disabled={!item.permitCompanyFee}
-                                  placeholder={item.permitCompanyFee ? "수수료율 입력 시 자동계산" : "허가사 수수료 체크 후 자동계산"}
+                                  placeholder={item.permitCompanyFeeRateUnknown ? "공급단가 기준 자동계산" : (item.permitCompanyFee ? "수수료율 입력 시 자동계산" : "허가사 수수료 체크 후 자동계산")}
                                   style={{ ...supplyCompactInputStyle, background: item.permitCompanyFee ? "#f8fafc" : "#f1f5f9", color: permitFeeIncludedTotalPrice ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
                                 />
                               </div>
@@ -2466,6 +2562,9 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                             )}
                             {supportsPermitCompanyFee && item.permitCompanyFee && item.permitCompanyFeeRate && (
                               <div style={supplyTextCellStyle}>허가사 수수료율: {item.permitCompanyFeeRate}%</div>
+                            )}
+                            {supportsPermitCompanyFee && item.permitCompanyFee && item.permitCompanyFeeRateUnknown && (
+                              <div style={supplyTextCellStyle}>허가사 수수료율: 알 수 없음 · 공급단가에 포함</div>
                             )}
                             {supportsPermitCompanyFee && permitFeeIncludedTotalPrice && (
                               <div style={supplyMoneyTextStyle}>수수료 포함 총금액: {permitFeeIncludedTotalPrice}</div>
@@ -2504,7 +2603,7 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
               <div style={{ borderTop: "1px solid #cbd5e1", overflowX: "auto" }}>
                 <table style={{ width: "100%", minWidth: 1460, borderCollapse: "collapse" }}>
                   <tbody>
-                    <tr style={supplyDetailHeaderRowStyle}>
+                    <tr style={{ ...supplyDetailHeaderRowStyle, height: 38 }}>
                       {[
                         ...(supportsPermitCompanyFee ? ["허가사 수수료"] : []),
                         "견적일자", "사용기한", "용법용량", "효능효과", "첨부파일", "비고"
@@ -2513,14 +2612,14 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                           {header}
                         </th>
                       ))}
-                      <td rowSpan={2} style={{ padding: 8, width: 170, verticalAlign: "middle", background: "#fff", borderLeft: "1px solid #cbd5e1" }}>
+                      <td rowSpan={2} style={{ padding: 6, width: 170, verticalAlign: "middle", background: "#fff", borderLeft: "1px solid #cbd5e1" }}>
                         <button
                           onClick={() => onOpenDistribution?.(item.id)}
                           style={{
                             ...supplySubtleButtonStyle,
                             width: "100%",
                             height: "100%",
-                            minHeight: 98,
+                            minHeight: 64,
                             display: "grid",
                             placeItems: "center",
                             alignContent: "center",
@@ -2538,14 +2637,18 @@ function SupplyPriceTab({ items, onItemsChange, syncState, selectedCategory = "a
                         </button>
                       </td>
                     </tr>
-                    <tr style={{ ...supplyDetailBodyRowStyle, verticalAlign: "top" }}>
+                    <tr style={{ ...supplyDetailBodyRowStyle, height: 38, verticalAlign: "top" }}>
                       {supportsPermitCompanyFee && <td style={{ padding: 8, width: 118 }}>
                         {isEditing ? (
                           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 15, color: "#334155", fontWeight: 700 }}>
                             <input
                               type="checkbox"
                               checked={Boolean(item.permitCompanyFee)}
-                              onChange={(event) => updateItem(item.id, { permitCompanyFee: event.target.checked })}
+                              onChange={(event) => updateItem(item.id, {
+                                permitCompanyFee: event.target.checked,
+                                permitCompanyFeeRateUnknown: event.target.checked ? item.permitCompanyFeeRateUnknown : false,
+                                permitCompany: event.target.checked ? item.permitCompany : ""
+                              })}
                             />
                             해당
                           </label>
