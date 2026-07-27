@@ -58,6 +58,7 @@ const DASHBOARD_DISTRIBUTION_RESET_SEED_KEY = "pharmadev_dashboard_changelog_see
 const DASHBOARD_SECURITY_HARDENING_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_8";
 const DASHBOARD_MARKET_ANALYSIS_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_9";
 const DASHBOARD_MARKET_SEARCH_FIX_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_10";
+const DASHBOARD_SUPPLY_SCROLL_FIX_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_11";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -1943,6 +1944,7 @@ function SupplyPriceTab({
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [isCsvExportDialogOpen, setIsCsvExportDialogOpen] = useState(false);
   const [exportCategoryIds, setExportCategoryIds] = useState(SUPPLY_PRICE_CATEGORIES.map((category) => category.id));
+  const focusedScrollHandledRef = useRef(null);
   const safeItems = useMemo(() => normalizeSupplyPriceItems(items), [items]);
   const currentCategory = useMemo(() => (
     selectedCategory === "all" ? "all" : normalizeSupplyCategory(selectedCategory)
@@ -2008,13 +2010,17 @@ function SupplyPriceTab({
   }, [focusedItemId]);
 
   useEffect(() => {
-    if (!focusedItemId || typeof document === "undefined") return undefined;
-    const timer = window.setTimeout(() => {
-      document
-        .getElementById(`supply-price-item-${focusedItemId}`)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 80);
-    return () => window.clearTimeout(timer);
+    if (!focusedItemId) {
+      focusedScrollHandledRef.current = null;
+      return;
+    }
+    if (typeof document === "undefined") return;
+    const focusKey = String(focusedItemId);
+    if (focusedScrollHandledRef.current === focusKey) return;
+    const target = document.getElementById(`supply-price-item-${focusKey}`);
+    if (!target) return;
+    focusedScrollHandledRef.current = focusKey;
+    target.scrollIntoView({ behavior: "auto", block: "center" });
   }, [filteredItems, focusedItemId]);
 
   const applyQuickQuoteDateFilter = (filter) => {
@@ -4552,6 +4558,35 @@ export default function PmsApp() {
           changes: [
             "시장 규모 분석의 공급단가 건 검색 중 결과가 0건이 되어도 화면이 종료되지 않도록 수정했습니다.",
             "검색 결과가 없을 때 안내 화면을 표시하고, 다시 일치하는 검색어를 입력하면 품목 분석 화면이 복구됩니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_SUPPLY_SCROLL_FIX_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_SUPPLY_SCROLL_FIX_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260727_supply_scroll_fix")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260727_supply_scroll_fix",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "유통 구조에서 공급단가로 돌아온 뒤 신규 건을 추가할 때 목록이 기존 품목을 따라 움직이던 현상을 수정했습니다.",
+            "연결 품목 위치 이동은 최초 진입 시 한 번만 적용되고 이후 입력·정렬 중에는 자동 스크롤하지 않습니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()
