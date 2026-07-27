@@ -181,6 +181,7 @@ export default function DistributionStructureTab({
   onSelectedItemChange,
   onUpdateItem,
   onOpenSupply,
+  onOpenMarket,
   syncState
 }) {
   const [search, setSearch] = useState("");
@@ -433,24 +434,44 @@ export default function DistributionStructureTab({
                     }}>
                       {selectedItem.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => onOpenSupply?.(selectedItem.id)}
-                      style={{
-                        minHeight: 32,
-                        padding: "6px 11px",
-                        border: "1px solid #93c5fd",
-                        borderRadius: 6,
-                        background: "#fff",
-                        color: "#1d4ed8",
-                        cursor: "pointer",
-                        fontSize: 12,
-                        fontWeight: 900,
-                        whiteSpace: "nowrap"
-                      }}
-                    >
-                      공급단가 보기
-                    </button>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <button
+                        type="button"
+                        onClick={() => onOpenSupply?.(selectedItem.id)}
+                        style={{
+                          minHeight: 32,
+                          padding: "6px 11px",
+                          border: "1px solid #93c5fd",
+                          borderRadius: 6,
+                          background: "#fff",
+                          color: "#1d4ed8",
+                          cursor: "pointer",
+                          fontSize: 12,
+                          fontWeight: 900,
+                          whiteSpace: "nowrap"
+                        }}
+                      >
+                        공급단가 보기
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onOpenMarket?.(selectedItem.id)}
+                        style={{
+                          minHeight: 32,
+                          padding: "6px 11px",
+                          border: "1px solid #86efac",
+                          borderRadius: 6,
+                          background: "#f0fdf4",
+                          color: "#047857",
+                          cursor: "pointer",
+                          fontSize: 12,
+                          fontWeight: 900,
+                          whiteSpace: "nowrap"
+                        }}
+                      >
+                        시장 규모 분석
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <div className="base-grid">

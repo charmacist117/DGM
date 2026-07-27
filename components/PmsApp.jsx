@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import DistributionStructureTab from "@/components/DistributionStructureTab";
+import MarketSizeAnalysisTab from "@/components/MarketSizeAnalysisTab";
 import ProjectSidebar from "@/components/ProjectSidebar";
 import DesktopProjectPathControl from "@/components/DesktopProjectPathControl";
 import {
@@ -32,10 +33,12 @@ import {
 import {
   developmentModuleToCsv,
   distributionModuleToCsv,
+  marketModuleToCsv,
   supplyModuleToCsv
 } from "@/lib/pms/moduleCsv";
 import { calcSchedule } from "@/lib/pms/schedule";
 import { downloadFile } from "@/lib/pms/exporters";
+import { normalizeMarketSizeAnalysis } from "@/lib/pms/marketAnalysis";
 
 const LOCAL_CACHE_KEY = "pharmadev_pms_cache_v2";
 const DEVELOP_TASK_ID = "develop";
@@ -53,6 +56,7 @@ const DASHBOARD_HOME_SPLIT_SEED_KEY = "pharmadev_dashboard_changelog_seed_202607
 const DASHBOARD_HOME_BUTTON_STYLE_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_6";
 const DASHBOARD_DISTRIBUTION_RESET_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_7";
 const DASHBOARD_SECURITY_HARDENING_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_8";
+const DASHBOARD_MARKET_ANALYSIS_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_9";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -850,6 +854,7 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     ),
     attachment: normalizeSupplyAttachment(source.attachment),
     distributionStructure: normalizeDistributionStructure(source.distributionStructure),
+    marketSizeAnalysis: normalizeMarketSizeAnalysis(source.marketSizeAnalysis),
     createdAt: String(source.createdAt || new Date().toISOString()),
     updatedAt: String(source.updatedAt || "")
   };
@@ -2138,6 +2143,10 @@ function SupplyPriceTab({
         ...competitor,
         priceTiers: (competitor.priceTiers || []).map((tier) => ({ ...tier }))
       }))
+    },
+    marketSizeAnalysis: {
+      ...item.marketSizeAnalysis,
+      marketYears: (item.marketSizeAnalysis?.marketYears || []).map((year) => ({ ...year }))
     }
   });
 
@@ -3326,7 +3335,9 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, onRestore, isAdmin }
       ? developmentModuleToCsv(projects, adminLogs)
       : (moduleType === "supply"
           ? supplyModuleToCsv(supplyPriceItems, categoryLabelById)
-          : distributionModuleToCsv(supplyPriceItems));
+          : (moduleType === "distribution"
+              ? distributionModuleToCsv(supplyPriceItems)
+              : marketModuleToCsv(supplyPriceItems)));
     downloadFile(
       `PB_${MODULE_BACKUP_TYPES[moduleType]}_${moduleFileStamp()}.csv`,
       `\uFEFF${csv}`,
@@ -3367,28 +3378,34 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, onRestore, isAdmin }
           const current = currentById.get(String(item.id)) || currentByIdentity.get(supplyItemIdentityKey(item));
           return normalizeSupplyPriceItem({
             ...item,
-            distributionStructure: current?.distributionStructure || item.distributionStructure
+            distributionStructure: current?.distributionStructure || item.distributionStructure,
+            marketSizeAnalysis: current?.marketSizeAnalysis || item.marketSizeAnalysis
           });
         });
         onRestore({ supplyPriceItems: nextItems });
-        setTransferState({ status: "success", message: `공급단가 전체 데이터 ${nextItems.length}건 복원이 완료되었습니다. 기존 유통 구조는 연결 가능한 건에 유지했습니다.` });
+        setTransferState({ status: "success", message: `공급단가 전체 데이터 ${nextItems.length}건 복원이 완료되었습니다. 기존 유통 구조와 시장 분석은 연결 가능한 건에 유지했습니다.` });
         return;
       }
 
-      const recordsById = new Map(parsed.data.distributionItems.map((record) => [String(record.supplyItemId), record]));
-      const recordsByIdentity = new Map(parsed.data.distributionItems.map((record) => [String(record.identityKey || ""), record]));
+      const isDistributionRestore = moduleType === "distribution";
+      const linkedRecords = isDistributionRestore ? parsed.data.distributionItems : parsed.data.marketItems;
+      const recordsById = new Map(linkedRecords.map((record) => [String(record.supplyItemId), record]));
+      const recordsByIdentity = new Map(linkedRecords.map((record) => [String(record.identityKey || ""), record]));
       const matchedRecordIds = new Set();
       const nextItems = currentItems.map((item) => {
         const record = recordsById.get(String(item.id)) || recordsByIdentity.get(supplyItemIdentityKey(item));
         if (!record) return item;
         matchedRecordIds.add(record);
-        return normalizeSupplyPriceItem({ ...item, distributionStructure: record.distributionStructure });
+        return normalizeSupplyPriceItem(isDistributionRestore
+          ? { ...item, distributionStructure: record.distributionStructure }
+          : { ...item, marketSizeAnalysis: record.marketSizeAnalysis });
       });
       onRestore({ supplyPriceItems: nextItems });
-      const unmatchedCount = parsed.data.distributionItems.length - matchedRecordIds.size;
+      const unmatchedCount = linkedRecords.length - matchedRecordIds.size;
+      const restoreLabel = isDistributionRestore ? "유통 구조" : "시장 규모 분석";
       setTransferState({
         status: unmatchedCount > 0 ? "warning" : "success",
-        message: `유통 구조 ${matchedRecordIds.size}건 복원이 완료되었습니다.${unmatchedCount > 0 ? ` 연결할 공급단가가 없는 ${unmatchedCount}건은 제외했습니다. 공급단가 데이터를 먼저 복원해주세요.` : ""}`
+        message: `${restoreLabel} ${matchedRecordIds.size}건 복원이 완료되었습니다.${unmatchedCount > 0 ? ` 연결할 공급단가가 없는 ${unmatchedCount}건은 제외했습니다. 공급단가 데이터를 먼저 복원해주세요.` : ""}`
       });
     } catch (error) {
       setTransferState({ status: "error", message: `${MODULE_BACKUP_TYPES[moduleType]} 복원 실패: ${String(error?.message || error)}` });
@@ -3434,7 +3451,8 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, onRestore, isAdmin }
           {[
             { id: "development", description: "모든 프로젝트, 태스크, 일정과 이력 기록" },
             { id: "supply", description: "전체 공급단가, 견적 정보와 첨부파일" },
-            { id: "distribution", description: "물량별 가격대, 마진 설정과 경쟁제품 비교" }
+            { id: "distribution", description: "물량별 가격대, 마진 설정과 경쟁제품 비교" },
+            { id: "market", description: "5개년 시장 실적, 약국 침투율, 배치 소진과 금융비용" }
           ].map((module, index) => (
             <div
               key={module.id}
@@ -3445,7 +3463,7 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, onRestore, isAdmin }
                 alignItems: "center",
                 padding: "12px 13px",
                 background: index % 2 === 0 ? "#fff" : "#f8fafc",
-                borderBottom: index < 2 ? "1px solid #e2e8f0" : "none"
+                borderBottom: index < 3 ? "1px solid #e2e8f0" : "none"
               }}
             >
               <div style={{ color: "#0f172a", fontSize: 14, fontWeight: 900 }}>{MODULE_BACKUP_TYPES[module.id]}</div>
@@ -4177,6 +4195,7 @@ export default function PmsApp() {
   const [moduleTab, setModuleTab] = useState("development");
   const [supplyCategory, setSupplyCategory] = useState("all");
   const [selectedDistributionItemId, setSelectedDistributionItemId] = useState(null);
+  const [selectedMarketItemId, setSelectedMarketItemId] = useState(null);
   const [focusedSupplyItemId, setFocusedSupplyItemId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [tab, setTab] = useState("overview");
@@ -4481,6 +4500,36 @@ export default function PmsApp() {
     });
   }, [setAdminLogs, syncState.status]);
 
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_MARKET_ANALYSIS_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_MARKET_ANALYSIS_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260727_market_analysis")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260727_market_analysis",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "공급단가 품목과 연결되는 시장 규모 분석 탭을 추가했습니다.",
+            "최근 5개년 생산·수입실적, 환율, 약국 점유율과 가맹약국 침투율 분석을 지원합니다.",
+            "연간 소진수량, 필요 배치, 금융 기회비용과 공급단가 조정 기댓값을 자동 계산합니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
   const addDashboardChange = ({ changeDateTime, revision, changes }) => {
     if (!isAdmin) {
       window.alert("변경사항 기록은 ADMIN만 추가할 수 있습니다.");
@@ -4757,6 +4806,15 @@ export default function PmsApp() {
     if (typeof window !== "undefined") window.scrollTo({ top: 0, left: 0 });
   };
 
+  const openMarketSizeAnalysis = (itemId) => {
+    const target = normalizeSupplyPriceItems(supplyPriceItems).find((item) => String(item.id) === String(itemId));
+    if (target) setSupplyCategory(target.category);
+    setFocusedSupplyItemId(null);
+    setSelectedMarketItemId(itemId);
+    setModuleTab("market");
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, left: 0 });
+  };
+
   const openSupplyPriceItem = (itemId) => {
     const target = normalizeSupplyPriceItems(supplyPriceItems).find((item) => String(item.id) === String(itemId));
     if (target) setSupplyCategory(target.category);
@@ -4804,6 +4862,7 @@ export default function PmsApp() {
             ["development", "제품개발"],
             ["supply", "공급단가"],
             ["distribution", "유통 구조 설정"],
+            ["market", "시장 규모 분석"],
             ["transfer", "데이터 이전"]
           ].map(([id, label]) => (
             <button
@@ -4832,7 +4891,7 @@ export default function PmsApp() {
         <DesktopProjectPathControl />
       </div>
 
-      <div style={{ display: "flex", minHeight: "calc(100vh - var(--app-topbar-height))" }}>
+      <div className="pms-body-layout" style={{ display: "flex", minHeight: "calc(100vh - var(--app-topbar-height))" }}>
         <ProjectSidebar
         isHome={isHome}
         setIsHome={setIsHome}
@@ -4855,7 +4914,7 @@ export default function PmsApp() {
         TODAY={TODAY}
       />
 
-      <main style={{ flex: 1, padding: 16, minWidth: 0, overflowX: "hidden" }}>
+      <main className="pms-main-content" style={{ flex: 1, padding: 16, minWidth: 0, overflowX: "hidden" }}>
         {moduleTab === "home" ? (
           <>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12 }}>
@@ -4901,6 +4960,19 @@ export default function PmsApp() {
             onSelectedItemChange={setSelectedDistributionItemId}
             onUpdateItem={updateSupplyPriceItem}
             onOpenSupply={openSupplyPriceItem}
+            onOpenMarket={openMarketSizeAnalysis}
+            syncState={syncState}
+          />
+        ) : moduleTab === "market" ? (
+          <MarketSizeAnalysisTab
+            items={normalizeSupplyPriceItems(supplyPriceItems)}
+            categories={SUPPLY_PRICE_CATEGORIES}
+            selectedCategory={supplyCategory}
+            selectedItemId={selectedMarketItemId}
+            onSelectedItemChange={setSelectedMarketItemId}
+            onUpdateItem={updateSupplyPriceItem}
+            onOpenSupply={openSupplyPriceItem}
+            onOpenDistribution={openDistributionStructure}
             syncState={syncState}
           />
         ) : moduleTab === "transfer" ? (
@@ -5521,6 +5593,26 @@ export default function PmsApp() {
         )}
         </main>
       </div>
+      <style jsx global>{`
+        @media (max-width: 720px) {
+          .pms-body-layout {
+            display: block !important;
+            min-height: 0 !important;
+          }
+          .pms-project-sidebar {
+            width: 100% !important;
+            flex: none !important;
+            height: auto !important;
+            max-height: 210px !important;
+            position: static !important;
+            overflow: auto !important;
+            padding: 10px !important;
+          }
+          .pms-main-content {
+            padding: 10px !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }

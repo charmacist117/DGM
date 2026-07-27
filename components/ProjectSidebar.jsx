@@ -26,7 +26,8 @@ export default function ProjectSidebar({
 }) {
   const [dragOverTarget, setDragOverTarget] = useState(null);
   const isDistributionMode = moduleTab === "distribution";
-  const isSupplyMode = moduleTab === "supply" || isDistributionMode;
+  const isMarketMode = moduleTab === "market";
+  const isSupplyMode = moduleTab === "supply" || isDistributionMode || isMarketMode;
   const isTransferMode = moduleTab === "transfer";
   const isStandaloneHomeMode = moduleTab === "home";
   const totalSupplyCount = Object.values(supplyCategoryCounts || {}).reduce((sum, count) => sum + Number(count || 0), 0);
@@ -41,7 +42,7 @@ export default function ProjectSidebar({
   const readDraggedProjectId = (event) => event.dataTransfer.getData("text/project-id");
 
   return (
-    <aside style={{
+    <aside className="pms-project-sidebar" style={{
       width: 280,
       flex: "0 0 280px",
       height: "calc(100vh - var(--app-topbar-height, 0px))",
@@ -64,11 +65,13 @@ export default function ProjectSidebar({
           <div style={{ fontSize: 11, color: "var(--app-nav-muted, #94a3b8)", fontWeight: 700 }}>
             {isDistributionMode
               ? "유통 구조 공급단가 목록"
-              : (isSupplyMode
+              : (isMarketMode
+                  ? "시장 규모 분석 품목 목록"
+                  : (isSupplyMode
                   ? "공급단가 카테고리"
                   : (isTransferMode
                       ? "전체 백업 및 복원"
-                      : (isStandaloneHomeMode ? "시스템 업데이트 안내" : "제품개발 통합관리")))}
+                      : (isStandaloneHomeMode ? "시스템 업데이트 안내" : "제품개발 통합관리"))))}
           </div>
         </div>
         <button
@@ -132,7 +135,7 @@ export default function ProjectSidebar({
           paddingRight: 4
         }}>
           <div style={{ fontSize: 11, fontWeight: 900, color: "#94a3b8", padding: "0 4px 2px" }}>
-            {isDistributionMode ? "유통 구조 카테고리" : "공급단가 카테고리"}
+            {isDistributionMode ? "유통 구조 카테고리" : (isMarketMode ? "시장 분석 카테고리" : "공급단가 카테고리")}
           </div>
           {supplyCategoryOptions.map((category) => {
             const active = supplyCategory === category.id;
