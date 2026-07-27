@@ -59,6 +59,7 @@ const DASHBOARD_SECURITY_HARDENING_SEED_KEY = "pharmadev_dashboard_changelog_see
 const DASHBOARD_MARKET_ANALYSIS_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_9";
 const DASHBOARD_MARKET_SEARCH_FIX_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_10";
 const DASHBOARD_SUPPLY_SCROLL_FIX_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_11";
+const DASHBOARD_SUPPLY_DUPLICATE_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_12";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -1945,6 +1946,7 @@ function SupplyPriceTab({
   const [isCsvExportDialogOpen, setIsCsvExportDialogOpen] = useState(false);
   const [exportCategoryIds, setExportCategoryIds] = useState(SUPPLY_PRICE_CATEGORIES.map((category) => category.id));
   const focusedScrollHandledRef = useRef(null);
+  const pendingCopiedItemScrollRef = useRef(null);
   const safeItems = useMemo(() => normalizeSupplyPriceItems(items), [items]);
   const currentCategory = useMemo(() => (
     selectedCategory === "all" ? "all" : normalizeSupplyCategory(selectedCategory)
@@ -2022,6 +2024,15 @@ function SupplyPriceTab({
     focusedScrollHandledRef.current = focusKey;
     target.scrollIntoView({ behavior: "auto", block: "center" });
   }, [filteredItems, focusedItemId]);
+
+  useEffect(() => {
+    const copiedItemId = pendingCopiedItemScrollRef.current;
+    if (!copiedItemId || typeof document === "undefined") return;
+    const target = document.getElementById(`supply-price-item-${copiedItemId}`);
+    if (!target) return;
+    pendingCopiedItemScrollRef.current = null;
+    target.scrollIntoView({ behavior: "auto", block: "start" });
+  }, [filteredItems]);
 
   const applyQuickQuoteDateFilter = (filter) => {
     setQuickQuoteDateFilter(filter);
@@ -2171,6 +2182,22 @@ function SupplyPriceTab({
       ...createSupplyPriceItem(),
       category: currentCategory === "all" ? DEFAULT_SUPPLY_PRICE_CATEGORY : currentCategory
     });
+    replaceItems([nextItem, ...safeItems]);
+    setEditingIds((prev) => new Set([...prev, String(nextItem.id)]));
+    setEditSnapshots((prev) => ({ ...prev, [String(nextItem.id)]: null }));
+  };
+
+  const duplicateItem = (item) => {
+    const now = new Date().toISOString();
+    const nextItem = normalizeSupplyPriceItem({
+      ...cloneSupplyItem(item),
+      id: `supply_price_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      distributionStructure: {},
+      marketSizeAnalysis: {},
+      createdAt: now,
+      updatedAt: ""
+    });
+    pendingCopiedItemScrollRef.current = String(nextItem.id);
     replaceItems([nextItem, ...safeItems]);
     setEditingIds((prev) => new Set([...prev, String(nextItem.id)]));
     setEditSnapshots((prev) => ({ ...prev, [String(nextItem.id)]: null }));
@@ -2438,7 +2465,7 @@ function SupplyPriceTab({
                     <col style={{ width: 210 }} />
                     <col style={{ width: 90 }} />
                     <col style={{ width: 230 }} />
-                    <col style={{ width: 100 }} />
+                    <col style={{ width: 155 }} />
                   </colgroup>
                   <thead>
                     <tr style={supplyHeaderRowStyle}>
@@ -2758,9 +2785,18 @@ function SupplyPriceTab({
                               )}
                             </>
                            ) : (
-                             <button onClick={() => startEditing(item)} style={supplySubtleButtonStyle}>
-                               수정
-                             </button>
+                             <>
+                               <button
+                                 onClick={() => duplicateItem(item)}
+                                 title="입력값을 복사해 새로운 공급단가 건을 만듭니다."
+                                 style={supplySubtleButtonStyle}
+                               >
+                                 복사
+                               </button>
+                               <button onClick={() => startEditing(item)} style={supplySubtleButtonStyle}>
+                                 수정
+                               </button>
+                             </>
                            )}
                          </div>
                        </td>
@@ -4587,6 +4623,35 @@ export default function PmsApp() {
           changes: [
             "유통 구조에서 공급단가로 돌아온 뒤 신규 건을 추가할 때 목록이 기존 품목을 따라 움직이던 현상을 수정했습니다.",
             "연결 품목 위치 이동은 최초 진입 시 한 번만 적용되고 이후 입력·정렬 중에는 자동 스크롤하지 않습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_SUPPLY_DUPLICATE_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_SUPPLY_DUPLICATE_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260727_supply_duplicate")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260727_supply_duplicate",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "저장된 공급단가 건을 복사해 새로운 입력 건으로 만드는 기능을 추가했습니다.",
+            "복합 성분과 견적 정보는 유지하고 포장단위 등을 바로 수정할 수 있으며, 유통 구조와 시장 분석은 새 건으로 초기화됩니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()
