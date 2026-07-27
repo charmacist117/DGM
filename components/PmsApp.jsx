@@ -52,6 +52,7 @@ const DASHBOARD_PROJECT_BACKUP_REMOVAL_SEED_KEY = "pharmadev_dashboard_changelog
 const DASHBOARD_HOME_SPLIT_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_5";
 const DASHBOARD_HOME_BUTTON_STYLE_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_6";
 const DASHBOARD_DISTRIBUTION_RESET_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_7";
+const DASHBOARD_SECURITY_HARDENING_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_8";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -4442,6 +4443,36 @@ export default function PmsApp() {
           changes: [
             "유통 구조 설정에 전체 초기화 버튼을 추가했습니다.",
             "판매가·마진 설정과 경쟁제품 비교를 초기화한 뒤 유통 구조 미설정 상태로 되돌릴 수 있도록 개선했습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_SECURITY_HARDENING_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_SECURITY_HARDENING_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260727_security_hardening")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260727_security_hardening",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "웹·PC용 시스템의 인증, API 요청, 첨부파일 및 백업 데이터 보안을 강화했습니다.",
+            "로그인 반복 시도 차단, 외부 출처 변경 요청 차단, 보안 헤더와 요청 용량 제한을 적용했습니다.",
+            "Next.js와 하위 패키지를 보안 패치 버전으로 업데이트했습니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()
