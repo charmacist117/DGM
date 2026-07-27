@@ -23,6 +23,7 @@ export async function GET() {
       projects: result.projects,
       adminLogs: result.adminLogs,
       supplyPriceItems: result.supplyPriceItems,
+      marketAnalysisDefaults: result.marketAnalysisDefaults,
       updatedAt: result.updatedAt,
       source: result.source
     });
@@ -46,14 +47,20 @@ export async function PUT(request) {
 
     let adminLogs = Array.isArray(body.adminLogs) ? body.adminLogs : null;
     let supplyPriceItems = Array.isArray(body.supplyPriceItems) ? body.supplyPriceItems : null;
+    let marketAnalysisDefaults = body.marketAnalysisDefaults && typeof body.marketAnalysisDefaults === "object"
+      ? body.marketAnalysisDefaults
+      : null;
     let current = null;
-    if (adminLogs === null || supplyPriceItems === null || session.role !== "admin") {
+    if (adminLogs === null || supplyPriceItems === null || marketAnalysisDefaults === null || session.role !== "admin") {
       current = await loadProjects();
       if (adminLogs === null) {
         adminLogs = Array.isArray(current.adminLogs) ? current.adminLogs : [];
       }
       if (supplyPriceItems === null) {
         supplyPriceItems = Array.isArray(current.supplyPriceItems) ? current.supplyPriceItems : [];
+      }
+      if (marketAnalysisDefaults === null) {
+        marketAnalysisDefaults = current.marketAnalysisDefaults;
       }
     }
 
@@ -74,9 +81,15 @@ export async function PUT(request) {
     const validated = validateFullBackupData({
       projects: body.projects,
       adminLogs,
-      supplyPriceItems
+      supplyPriceItems,
+      marketAnalysisDefaults
     });
-    const result = await saveProjects(validated.projects, validated.adminLogs, validated.supplyPriceItems);
+    const result = await saveProjects(
+      validated.projects,
+      validated.adminLogs,
+      validated.supplyPriceItems,
+      validated.marketAnalysisDefaults
+    );
     return secureJson({ ok: true, updatedAt: result.updatedAt });
   } catch (error) {
     console.error("[PUT /api/projects] failed:", error);

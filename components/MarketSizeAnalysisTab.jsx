@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { calculateMarketAnalysis, normalizeMarketSizeAnalysis } from "@/lib/pms/marketAnalysis";
+import {
+  applyMarketAnalysisDefaults,
+  calculateMarketAnalysis,
+  marketAnalysisMatchesDefaults,
+  normalizeMarketAnalysisDefaults,
+  normalizeMarketSizeAnalysis
+} from "@/lib/pms/marketAnalysis";
 
 const panelStyle = {
   background: "#fff",
@@ -158,6 +164,8 @@ export default function MarketSizeAnalysisTab({
   selectedItemId,
   onSelectedItemChange,
   onUpdateItem,
+  marketAnalysisDefaults = {},
+  onMarketAnalysisDefaultsChange,
   onOpenSupply,
   onOpenDistribution,
   syncState
@@ -166,6 +174,9 @@ export default function MarketSizeAnalysisTab({
   const [editingItemId, setEditingItemId] = useState(null);
   const [draft, setDraft] = useState(null);
   const [growthRatePeriod, setGrowthRatePeriod] = useState("5y");
+  const [yearOneMode, setYearOneMode] = useState("annual");
+  const [showDefaultsModal, setShowDefaultsModal] = useState(false);
+  const [defaultsDraft, setDefaultsDraft] = useState(() => normalizeMarketAnalysisDefaults(marketAnalysisDefaults));
   const query = search.trim().toLowerCase();
   const categoryLabelById = Object.fromEntries(categories.map((category) => [category.id, category.label]));
   const visibleItems = useMemo(() => {
@@ -180,11 +191,16 @@ export default function MarketSizeAnalysisTab({
     ].join(" ").toLowerCase().includes(query));
   }, [items, query, selectedCategory]);
 
+  const normalizedDefaults = useMemo(
+    () => normalizeMarketAnalysisDefaults(marketAnalysisDefaults),
+    [marketAnalysisDefaults]
+  );
   const selectedItem = visibleItems.find((item) => String(item.id) === String(selectedItemId)) || visibleItems[0] || null;
-  const savedAnalysis = normalizeMarketSizeAnalysis(selectedItem?.marketSizeAnalysis);
+  const storedAnalysis = normalizeMarketSizeAnalysis(selectedItem?.marketSizeAnalysis);
+  const savedAnalysis = applyMarketAnalysisDefaults(storedAnalysis, normalizedDefaults);
   const isEditing = selectedItem && String(editingItemId) === String(selectedItem.id);
   const workingAnalysis = isEditing && draft ? draft : savedAnalysis;
-  const calculations = calculateMarketAnalysis(selectedItem, workingAnalysis);
+  const calculations = calculateMarketAnalysis(selectedItem, workingAnalysis, normalizedDefaults);
   const growthRateYears = growthRatePeriod === "3y" ? 3 : 5;
   const selectedGrowthRate = growthRatePeriod === "3y"
     ? calculations.cagr3Year
@@ -193,6 +209,24 @@ export default function MarketSizeAnalysisTab({
     ? selectedItem.distributionStructure.pricingScenarios
     : [];
   const maxYearTotal = Math.max(1, ...calculations.yearResults.map((entry) => entry.totalKrw));
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const startOfYear = new Date(currentYear, 0, 1);
+  const startOfNextYear = new Date(currentYear + 1, 0, 1);
+  const elapsedYearRatio = Math.min(
+    1,
+    Math.max(0, (today.getTime() - startOfYear.getTime() + 86_400_000) / (startOfNextYear.getTime() - startOfYear.getTime()))
+  );
+  const growthMultiplier = Number.isFinite(selectedGrowthRate)
+    ? Math.max(0, 1 + (selectedGrowthRate / 100))
+    : 1;
+  const annualDemandBase = calculations.annualDemandUnits;
+  const demandForecasts = [0, 1, 2].map((offset) => ({
+    year: currentYear + offset,
+    value: annualDemandBase === null
+      ? null
+      : annualDemandBase * (growthMultiplier ** offset) * (offset === 0 && yearOneMode === "ytd" ? elapsedYearRatio : 1)
+  }));
 
   useEffect(() => {
     setEditingItemId(null);
@@ -202,11 +236,15 @@ export default function MarketSizeAnalysisTab({
   const beginEdit = () => {
     if (!selectedItem) return;
     setEditingItemId(selectedItem.id);
-    setDraft(normalizeMarketSizeAnalysis(selectedItem.marketSizeAnalysis));
+    setDraft(applyMarketAnalysisDefaults(selectedItem.marketSizeAnalysis, normalizedDefaults));
   };
 
   const updateDraft = (patch) => {
-    setDraft((previous) => ({ ...normalizeMarketSizeAnalysis(previous), ...patch }));
+    setDraft((previous) => ({
+      ...normalizeMarketSizeAnalysis(previous),
+      ...patch,
+      conditionMode: patch.conditionMode ?? "custom"
+    }));
   };
 
   const updateMarketYear = (yearId, patch) => {
@@ -221,9 +259,12 @@ export default function MarketSizeAnalysisTab({
     if (!selectedItem || !draft) return;
     try {
       validateAnalysis(draft);
+      const usesDefaults = marketAnalysisMatchesDefaults(draft, normalizedDefaults);
+      if (!usesDefaults && !window.confirm("기본값과 다른 내용입니다. 저장하시겠습니까?")) return;
       onUpdateItem?.(selectedItem.id, {
         marketSizeAnalysis: {
           ...normalizeMarketSizeAnalysis(draft),
+          conditionMode: usesDefaults ? "default" : "custom",
           updatedAt: new Date().toISOString()
         }
       });
@@ -237,6 +278,32 @@ export default function MarketSizeAnalysisTab({
   const cancelEdit = () => {
     setEditingItemId(null);
     setDraft(null);
+  };
+
+  const resetConditionsToDefaults = () => {
+    if (!isEditing) return;
+    updateDraft({
+      ...normalizedDefaults,
+      adjustedUnitCostOverride: "",
+      pricingScenarioId: "",
+      conditionMode: "default"
+    });
+  };
+
+  const openDefaultsModal = () => {
+    setDefaultsDraft(normalizeMarketAnalysisDefaults(normalizedDefaults));
+    setShowDefaultsModal(true);
+  };
+
+  const saveDefaults = () => {
+    try {
+      const normalized = normalizeMarketAnalysisDefaults(defaultsDraft);
+      validateAnalysis(normalizeMarketSizeAnalysis({ ...normalized, conditionMode: "custom" }));
+      onMarketAnalysisDefaultsChange?.(normalized);
+      setShowDefaultsModal(false);
+    } catch (error) {
+      window.alert(String(error?.message || error));
+    }
   };
 
   const resetAnalysis = () => {
@@ -255,11 +322,14 @@ export default function MarketSizeAnalysisTab({
     <div className="market-root">
       <section style={{ ...panelStyle, padding: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
-          <div>
+          <div style={{ minWidth: 0 }}>
             <h1 style={{ margin: 0, color: "#0f172a", fontSize: 23 }}>시장 규모 분석</h1>
-            <p style={{ margin: "5px 0 0", color: "#64748b", fontSize: 14 }}>
-              공급단가 건별 시장 실적, 약국 침투율, 배치 소진과 금융비용을 분석합니다.
-            </p>
+            <div className="market-banner-description">
+              <p style={{ margin: 0, color: "#64748b", fontSize: 14 }}>
+                공급단가 건별 시장 실적, 약국 침투율, 배치 소진과 금융비용을 분석합니다.
+              </p>
+              <button type="button" onClick={openDefaultsModal} style={secondaryButtonStyle}>기본값 등록/수정</button>
+            </div>
           </div>
           <div style={{ color: syncState?.status === "error" ? "#dc2626" : "#059669", fontSize: 12, fontWeight: 800, textAlign: "right" }}>
             {syncState?.message || "변경 내용 자동 저장"}
@@ -423,6 +493,11 @@ export default function MarketSizeAnalysisTab({
                       <strong>분석 조건</strong>
                       <span>약국 점유율, 침투율과 원가 조정 시나리오</span>
                     </div>
+                    {isEditing && (
+                      <button type="button" onClick={resetConditionsToDefaults} style={secondaryButtonStyle}>
+                        기본값으로 초기화
+                      </button>
+                    )}
                   </div>
                   <div className="condition-grid">
                     <label>
@@ -529,6 +604,50 @@ export default function MarketSizeAnalysisTab({
                   <Metric label="연간 예상 소진수량" value={formatCount(calculations.annualDemandUnits)} tone="positive" />
                   <Metric label="침투 약국당 연간 수량" value={formatCount(calculations.annualUnitsPerActivePharmacy)} />
                 </div>
+                <div className="forecast-band">
+                  <div className="forecast-heading">
+                    <div>
+                      <strong>성장률 반영 예상 소진수량</strong>
+                      <span>
+                        {selectedGrowthRate === null
+                          ? "성장률이 없으면 현재 예상 소진수량을 유지합니다."
+                          : `${growthRateYears}개년 연평균 성장률 ${formatDecimal(selectedGrowthRate, 2, "%")} 적용`}
+                      </span>
+                    </div>
+                    <div className="growth-period-control" role="group" aria-label="Year 1 계산 기준">
+                      {[
+                        ["annual", "Year 1 연간"],
+                        ["ytd", "Year 1 YTD"]
+                      ].map(([mode, label]) => {
+                        const active = yearOneMode === mode;
+                        return (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => setYearOneMode(mode)}
+                            aria-pressed={active}
+                            className={active ? "segment-active" : ""}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="forecast-grid">
+                    {demandForecasts.map((forecast, index) => (
+                      <Metric
+                        key={forecast.year}
+                        label={`Year ${index + 1}${index === 0 && yearOneMode === "ytd" ? " · YTD" : ""}`}
+                        value={formatCount(forecast.value)}
+                        subtext={index === 0 && yearOneMode === "ytd"
+                          ? `${forecast.year}년 현재까지 ${(elapsedYearRatio * 100).toFixed(1)}% 적용`
+                          : `${forecast.year}년 예상`}
+                        tone="positive"
+                      />
+                    ))}
+                  </div>
+                </div>
               </section>
 
               <div className="market-result-grid">
@@ -595,8 +714,58 @@ export default function MarketSizeAnalysisTab({
         </main>
       </div>
 
+      {showDefaultsModal && (
+        <div className="market-modal-backdrop" role="presentation" onMouseDown={() => setShowDefaultsModal(false)}>
+          <section
+            className="market-defaults-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="market-defaults-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="market-defaults-header">
+              <div>
+                <h2 id="market-defaults-title">시장 규모 분석 기본값</h2>
+                <p>기본값을 사용하는 모든 품목에 공통 적용됩니다.</p>
+              </div>
+              <button type="button" onClick={() => setShowDefaultsModal(false)} aria-label="닫기" className="modal-close-button">×</button>
+            </div>
+            <div className="condition-grid defaults-condition-grid">
+              {[
+                ["nationwidePharmacyCount", "전국 약국 수", "예: 25760"],
+                ["chamyaksaPharmacyCount", "참약사 약국 수", "예: 500"],
+                ["franchisePenetrationRate", "가맹약국 예상 침투율 (%)", "예: 30"],
+                ["chamyaksaSellingPriceAdjustmentRate", "참약사 판매가 조정률 (%)", "인하 시 음수"],
+                ["manufacturerSellingPriceAdjustmentRate", "제조사 판매가 조정률 (%)", "인하 시 음수"],
+                ["annualInterestRate", "연 금융비용 이자율 (%)", "예: 4"]
+              ].map(([field, label, placeholder]) => (
+                <label key={field}>
+                  <span>{label}</span>
+                  <input
+                    value={defaultsDraft[field]}
+                    onChange={(event) => setDefaultsDraft((previous) => ({ ...previous, [field]: event.target.value }))}
+                    inputMode="decimal"
+                    placeholder={placeholder}
+                    style={inputStyle}
+                  />
+                </label>
+              ))}
+              <div className="defaults-pricing-note">
+                <strong>유통 가격대 기준</strong>
+                <span>각 품목에 등록된 첫 번째 기본 가격대를 사용합니다.</span>
+              </div>
+            </div>
+            <div className="market-defaults-actions">
+              <button type="button" onClick={() => setShowDefaultsModal(false)} style={secondaryButtonStyle}>취소</button>
+              <button type="button" onClick={saveDefaults} style={primaryButtonStyle}>기본값 저장</button>
+            </div>
+          </section>
+        </div>
+      )}
+
       <style jsx>{`
         .market-root { display: grid; gap: 14px; }
+        .market-banner-description { margin-top: 5px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .market-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 14px; align-items: start; }
         .market-item-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; padding: 14px 15px; background: #e8f1fb; }
         .market-actions { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
@@ -615,8 +784,27 @@ export default function MarketSizeAnalysisTab({
         .condition-grid label { min-width: 0; }
         .condition-grid label > span { display: block; margin-bottom: 5px; color: #475569; font-size: 11px; font-weight: 800; }
         .growth-period-control { display: inline-flex !important; grid-auto-flow: column; gap: 5px !important; }
+        .growth-period-control button { min-height: 30px; padding: 5px 10px; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; color: #475569; cursor: pointer; font-size: 12px; font-weight: 900; }
+        .growth-period-control button.segment-active { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; }
         .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
         .metric-grid-compact { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .forecast-band { border-top: 1px solid #dbe3ee; background: #f8fafc; }
+        .forecast-heading { min-height: 58px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+        .forecast-heading > div:first-child { display: grid; gap: 3px; }
+        .forecast-heading strong { color: #0f172a; font-size: 14px; }
+        .forecast-heading span { color: #64748b; font-size: 11px; }
+        .forecast-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid #dbe3ee; background: #fff; }
+        .market-modal-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 20px; background: rgba(15, 23, 42, .52); }
+        .market-defaults-modal { width: min(620px, 100%); max-height: calc(100vh - 40px); overflow: auto; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; box-shadow: 0 24px 70px rgba(15, 23, 42, .3); }
+        .market-defaults-header { padding: 16px; border-bottom: 1px solid #dbe3ee; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+        .market-defaults-header h2 { margin: 0; color: #0f172a; font-size: 18px; }
+        .market-defaults-header p { margin: 5px 0 0; color: #64748b; font-size: 12px; }
+        .modal-close-button { width: 32px; height: 32px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #475569; cursor: pointer; font-size: 21px; line-height: 1; }
+        .defaults-condition-grid { padding: 16px; }
+        .defaults-pricing-note { grid-column: 1 / -1; padding: 11px; border: 1px solid #dbe3ee; border-radius: 6px; background: #f8fafc; display: grid; gap: 4px; }
+        .defaults-pricing-note strong { color: #334155; font-size: 12px; }
+        .defaults-pricing-note span { color: #64748b; font-size: 11px; }
+        .market-defaults-actions { padding: 12px 16px 16px; display: flex; justify-content: flex-end; gap: 8px; }
         :global(.market-metric) { min-height: 96px; padding: 13px; border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; display: grid; align-content: center; gap: 6px; box-sizing: border-box; }
         :global(.market-metric span) { color: #64748b; font-size: 11px; font-weight: 800; }
         :global(.market-metric strong) { font-size: 17px; line-height: 1.25; overflow-wrap: anywhere; }
@@ -633,7 +821,8 @@ export default function MarketSizeAnalysisTab({
         }
         @media (max-width: 640px) {
           .market-year-table { grid-template-columns: 68px minmax(110px, 1fr) minmax(110px, 1fr) minmax(130px, 1fr); overflow-x: auto; }
-          .condition-grid, .metric-grid, .metric-grid-compact { grid-template-columns: 1fr; }
+          .condition-grid, .metric-grid, .metric-grid-compact, .forecast-grid { grid-template-columns: 1fr; }
+          .forecast-heading { align-items: flex-start; flex-direction: column; }
         }
       `}</style>
     </div>

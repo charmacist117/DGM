@@ -31,7 +31,8 @@ export async function GET() {
     const backup = createFullBackup({
       projects: stored.projects,
       adminLogs: stored.adminLogs,
-      supplyPriceItems: stored.supplyPriceItems
+      supplyPriceItems: stored.supplyPriceItems,
+      marketAnalysisDefaults: stored.marketAnalysisDefaults
     }, { source: stored.source || "online-database" });
 
     return new Response(JSON.stringify(backup, null, 2), {
@@ -57,7 +58,12 @@ export async function POST(request) {
 
     const body = await readJsonRequest(request, { maxBytes: REQUEST_LIMITS.backup });
     const parsed = parseFullBackup(body?.backup || body, { allowLegacy: true });
-    const saved = await saveProjects(parsed.data.projects, parsed.data.adminLogs, parsed.data.supplyPriceItems);
+    const saved = await saveProjects(
+      parsed.data.projects,
+      parsed.data.adminLogs,
+      parsed.data.supplyPriceItems,
+      parsed.data.marketAnalysisDefaults
+    );
 
     return secureJson({ ok: true, updatedAt: saved.updatedAt, summary: parsed.summary, legacy: parsed.legacy });
   } catch (error) {

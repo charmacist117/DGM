@@ -38,7 +38,10 @@ import {
 } from "@/lib/pms/moduleCsv";
 import { calcSchedule } from "@/lib/pms/schedule";
 import { downloadFile } from "@/lib/pms/exporters";
-import { normalizeMarketSizeAnalysis } from "@/lib/pms/marketAnalysis";
+import {
+  normalizeMarketAnalysisDefaults,
+  normalizeMarketSizeAnalysis
+} from "@/lib/pms/marketAnalysis";
 
 const LOCAL_CACHE_KEY = "pharmadev_pms_cache_v2";
 const DEVELOP_TASK_ID = "develop";
@@ -61,6 +64,7 @@ const DASHBOARD_MARKET_SEARCH_FIX_SEED_KEY = "pharmadev_dashboard_changelog_seed
 const DASHBOARD_SUPPLY_SCROLL_FIX_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_11";
 const DASHBOARD_SUPPLY_DUPLICATE_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_12";
 const DASHBOARD_MARKET_GROWTH_COST_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_13";
+const DASHBOARD_MARKET_DEFAULT_FORECAST_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_14";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -565,7 +569,15 @@ function errorMessage(error, fallback = "알 수 없는 오류") {
 }
 
 function readLocalCacheState() {
-  if (typeof window === "undefined") return { projects: [], adminLogs: [], supplyPriceItems: [], hasData: false };
+  if (typeof window === "undefined") {
+    return {
+      projects: [],
+      adminLogs: [],
+      supplyPriceItems: [],
+      marketAnalysisDefaults: normalizeMarketAnalysisDefaults(),
+      hasData: false
+    };
+  }
   try {
     const cached = window.localStorage.getItem(LOCAL_CACHE_KEY);
     if (!cached) return { projects: [], adminLogs: [], supplyPriceItems: [], hasData: false };
@@ -579,14 +591,27 @@ function readLocalCacheState() {
     const supplyPriceItems = Array.isArray(parsed)
       ? []
       : normalizeSupplyPriceItems(Array.isArray(parsed?.supplyPriceItems) ? parsed.supplyPriceItems : []);
+    const marketAnalysisDefaults = Array.isArray(parsed)
+      ? normalizeMarketAnalysisDefaults()
+      : normalizeMarketAnalysisDefaults(parsed?.marketAnalysisDefaults);
     return {
       projects,
       adminLogs,
       supplyPriceItems,
-      hasData: projects.length > 0 || adminLogs.length > 0 || supplyPriceItems.length > 0
+      marketAnalysisDefaults,
+      hasData: projects.length > 0
+        || adminLogs.length > 0
+        || supplyPriceItems.length > 0
+        || Boolean(parsed?.marketAnalysisDefaults)
     };
   } catch {
-    return { projects: [], adminLogs: [], supplyPriceItems: [], hasData: false };
+    return {
+      projects: [],
+      adminLogs: [],
+      supplyPriceItems: [],
+      marketAnalysisDefaults: normalizeMarketAnalysisDefaults(),
+      hasData: false
+    };
   }
 }
 
@@ -921,6 +946,10 @@ function useProjectsStore() {
     return readLocalCacheState().supplyPriceItems;
   });
 
+  const [marketAnalysisDefaults, setMarketAnalysisDefaults] = useState(() => {
+    return readLocalCacheState().marketAnalysisDefaults;
+  });
+
   const [syncState, setSyncState] = useState({ status: "loading", message: "서버 데이터 확인 중..." });
   const readyRef = useRef(false);
   const serverAvailableRef = useRef(false);
@@ -942,11 +971,13 @@ function useProjectsStore() {
           const nextProjects = normalizeProjects(Array.isArray(payload.projects) ? payload.projects : []);
           const nextAdminLogs = normalizeAdminLogs(Array.isArray(payload.adminLogs) ? payload.adminLogs : []);
           const nextSupplyPriceItems = normalizeSupplyPriceItems(Array.isArray(payload.supplyPriceItems) ? payload.supplyPriceItems : []);
+          const nextMarketAnalysisDefaults = normalizeMarketAnalysisDefaults(payload.marketAnalysisDefaults);
           const serverIsEmpty = nextProjects.length === 0 && nextAdminLogs.length === 0 && nextSupplyPriceItems.length === 0;
           if (serverIsEmpty && localCache.hasData) {
             setProjects(localCache.projects);
             setAdminLogs(localCache.adminLogs);
             setSupplyPriceItems(localCache.supplyPriceItems);
+            setMarketAnalysisDefaults(localCache.marketAnalysisDefaults);
             serverAvailableRef.current = true;
             setSyncState({
               status: "warning",
@@ -958,6 +989,7 @@ function useProjectsStore() {
           setProjects(nextProjects);
           setAdminLogs(nextAdminLogs);
           setSupplyPriceItems(nextSupplyPriceItems);
+          setMarketAnalysisDefaults(nextMarketAnalysisDefaults);
           serverAvailableRef.current = true;
           setSyncState({
             status: "ready",
@@ -972,6 +1004,7 @@ function useProjectsStore() {
           setProjects((prev) => (prev.length ? normalizeProjects(prev) : fallbackProjects));
           setAdminLogs((prev) => normalizeAdminLogs(prev));
           setSupplyPriceItems((prev) => normalizeSupplyPriceItems(prev));
+          setMarketAnalysisDefaults((prev) => normalizeMarketAnalysisDefaults(prev));
           serverAvailableRef.current = false;
           setSyncState({
             status: "warning",
@@ -992,7 +1025,13 @@ function useProjectsStore() {
     if (!readyRef.current) return;
 
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify({ projects, adminLogs, supplyPriceItems, cachedAt: new Date().toISOString() }));
+      window.localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify({
+        projects,
+        adminLogs,
+        supplyPriceItems,
+        marketAnalysisDefaults,
+        cachedAt: new Date().toISOString()
+      }));
     }
 
     if (!serverAvailableRef.current) {
@@ -1006,7 +1045,7 @@ function useProjectsStore() {
         const response = await fetch("/api/projects", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projects, adminLogs, supplyPriceItems })
+          body: JSON.stringify({ projects, adminLogs, supplyPriceItems, marketAnalysisDefaults })
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.ok) {
@@ -1025,9 +1064,19 @@ function useProjectsStore() {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [projects, adminLogs, supplyPriceItems]);
+  }, [projects, adminLogs, supplyPriceItems, marketAnalysisDefaults]);
 
-  return { projects, setProjects, adminLogs, setAdminLogs, supplyPriceItems, setSupplyPriceItems, syncState };
+  return {
+    projects,
+    setProjects,
+    adminLogs,
+    setAdminLogs,
+    supplyPriceItems,
+    setSupplyPriceItems,
+    marketAnalysisDefaults,
+    setMarketAnalysisDefaults,
+    syncState
+  };
 }
 
 function SyncBadge({ syncState }) {
@@ -3286,7 +3335,7 @@ function DecisionTab({ project, onSaveLog }) {
   );
 }
 
-function BackupTab({ projects, adminLogs, supplyPriceItems, onRestore, isAdmin }) {
+function BackupTab({ projects, adminLogs, supplyPriceItems, marketAnalysisDefaults, onRestore, isAdmin }) {
   const fullBackupInputRef = useRef(null);
   const moduleBackupInputRefs = useRef({});
   const [transferState, setTransferState] = useState({ status: "idle", message: "" });
@@ -3350,6 +3399,7 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, onRestore, isAdmin }
         projects: pendingRestore.data.projects,
         adminLogs: pendingRestore.data.adminLogs,
         supplyPriceItems: pendingRestore.data.supplyPriceItems,
+        marketAnalysisDefaults: pendingRestore.data.marketAnalysisDefaults,
         selectedId: pendingRestore.data.projects[0]?.id || null
       });
       setPendingRestore(null);
@@ -3364,7 +3414,11 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, onRestore, isAdmin }
 
   const downloadModuleBackup = (moduleType) => {
     if (!isAdmin) return;
-    const backup = createModuleBackup(moduleType, { projects, adminLogs, supplyPriceItems }, { source: "data-transfer-tab" });
+    const backup = createModuleBackup(
+      moduleType,
+      { projects, adminLogs, supplyPriceItems, marketAnalysisDefaults },
+      { source: "data-transfer-tab" }
+    );
     downloadFile(
       `PB_${MODULE_BACKUP_TYPES[moduleType]}_${moduleFileStamp()}.json`,
       JSON.stringify(backup, null, 2),
@@ -3381,7 +3435,7 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, onRestore, isAdmin }
           ? supplyModuleToCsv(supplyPriceItems, categoryLabelById)
           : (moduleType === "distribution"
               ? distributionModuleToCsv(supplyPriceItems)
-              : marketModuleToCsv(supplyPriceItems)));
+              : marketModuleToCsv(supplyPriceItems, marketAnalysisDefaults)));
     downloadFile(
       `PB_${MODULE_BACKUP_TYPES[moduleType]}_${moduleFileStamp()}.csv`,
       `\uFEFF${csv}`,
@@ -3444,7 +3498,10 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, onRestore, isAdmin }
           ? { ...item, distributionStructure: record.distributionStructure }
           : { ...item, marketSizeAnalysis: record.marketSizeAnalysis });
       });
-      onRestore({ supplyPriceItems: nextItems });
+      onRestore({
+        supplyPriceItems: nextItems,
+        ...(isDistributionRestore ? {} : { marketAnalysisDefaults: parsed.data.marketAnalysisDefaults })
+      });
       const unmatchedCount = linkedRecords.length - matchedRecordIds.size;
       const restoreLabel = isDistributionRestore ? "유통 구조" : "시장 규모 분석";
       setTransferState({
@@ -4233,6 +4290,8 @@ export default function PmsApp() {
     setAdminLogs,
     supplyPriceItems,
     setSupplyPriceItems,
+    marketAnalysisDefaults,
+    setMarketAnalysisDefaults,
     syncState
   } = useProjectsStore();
   const [userRole, setUserRole] = useState(ROLE_GUEST);
@@ -4690,6 +4749,36 @@ export default function PmsApp() {
     });
   }, [setAdminLogs, syncState.status]);
 
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_MARKET_DEFAULT_FORECAST_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_MARKET_DEFAULT_FORECAST_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260727_market_defaults_forecast")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260727_market_defaults_forecast",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "시장 규모 분석 전역 기본값과 개별 품목 기본값 초기화·차이 확인 기능을 추가했습니다.",
+            "참약사·제조사 판매가 조정률을 분리하고 최소 주문 배치 수를 소진기간·필요자금·금융비용에 반영했습니다.",
+            "선택한 성장률에 따른 Year 1~3 예상 소진수량과 Year 1 YTD 전환 기능을 추가했습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
   const addDashboardChange = ({ changeDateTime, revision, changes }) => {
     if (!isAdmin) {
       window.alert("변경사항 기록은 ADMIN만 추가할 수 있습니다.");
@@ -4936,7 +5025,13 @@ export default function PmsApp() {
     }
   };
 
-  const applyRestoredData = ({ projects: nextProjects, adminLogs: nextAdminLogs, supplyPriceItems: nextSupplyPriceItems, selectedId: nextSelectedId }) => {
+  const applyRestoredData = ({
+    projects: nextProjects,
+    adminLogs: nextAdminLogs,
+    supplyPriceItems: nextSupplyPriceItems,
+    marketAnalysisDefaults: nextMarketAnalysisDefaults,
+    selectedId: nextSelectedId
+  }) => {
     if (!isAdmin) return;
     if (Array.isArray(nextProjects)) {
       const normalizedProjects = normalizeProjects(nextProjects);
@@ -4947,6 +5042,9 @@ export default function PmsApp() {
     }
     if (Array.isArray(nextAdminLogs)) setAdminLogs(normalizeAdminLogs(nextAdminLogs));
     if (Array.isArray(nextSupplyPriceItems)) setSupplyPriceItems(normalizeSupplyPriceItems(nextSupplyPriceItems));
+    if (nextMarketAnalysisDefaults && typeof nextMarketAnalysisDefaults === "object") {
+      setMarketAnalysisDefaults(normalizeMarketAnalysisDefaults(nextMarketAnalysisDefaults));
+    }
   };
 
   const updateSupplyPriceItem = (itemId, patch) => {
@@ -5131,6 +5229,10 @@ export default function PmsApp() {
             selectedItemId={selectedMarketItemId}
             onSelectedItemChange={setSelectedMarketItemId}
             onUpdateItem={updateSupplyPriceItem}
+            marketAnalysisDefaults={marketAnalysisDefaults}
+            onMarketAnalysisDefaultsChange={(nextDefaults) => {
+              setMarketAnalysisDefaults(normalizeMarketAnalysisDefaults(nextDefaults));
+            }}
             onOpenSupply={openSupplyPriceItem}
             onOpenDistribution={openDistributionStructure}
             syncState={syncState}
@@ -5151,6 +5253,7 @@ export default function PmsApp() {
               projects={projects}
               adminLogs={adminLogs}
               supplyPriceItems={supplyPriceItems}
+              marketAnalysisDefaults={marketAnalysisDefaults}
               isAdmin={isAdmin}
               onRestore={applyRestoredData}
             />
