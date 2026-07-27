@@ -91,7 +91,9 @@ function validateAnalysis(analysis) {
     ["전국 약국 수", analysis.nationwidePharmacyCount],
     ["참약사 약국 수", analysis.chamyaksaPharmacyCount],
     ["가맹약국 침투율", analysis.franchisePenetrationRate],
-    ["공급단가 조정률", analysis.supplyPriceAdjustmentRate],
+    ["참약사 판매가 조정률", analysis.chamyaksaSellingPriceAdjustmentRate],
+    ["제조사 판매가 조정률", analysis.manufacturerSellingPriceAdjustmentRate],
+    ["직접 입력 조정 원가", analysis.adjustedUnitCostOverride],
     ["연 이자율", analysis.annualInterestRate]
   ];
   for (const [label, value] of numericFields) {
@@ -103,9 +105,17 @@ function validateAnalysis(analysis) {
   if (String(analysis.franchisePenetrationRate).trim() && (penetration < 0 || penetration > 100)) {
     throw new Error("가맹약국 침투율은 0~100 사이로 입력해주세요.");
   }
-  const adjustment = Number(analysis.supplyPriceAdjustmentRate);
-  if (String(analysis.supplyPriceAdjustmentRate).trim() && adjustment <= -100) {
-    throw new Error("공급단가 조정률은 -100%보다 커야 합니다.");
+  for (const [label, value] of [
+    ["참약사 판매가 조정률", analysis.chamyaksaSellingPriceAdjustmentRate],
+    ["제조사 판매가 조정률", analysis.manufacturerSellingPriceAdjustmentRate]
+  ]) {
+    if (String(value).trim() && Number(value) <= -100) {
+      throw new Error(`${label}은 -100%보다 커야 합니다.`);
+    }
+  }
+  const adjustedUnitCostOverride = Number(String(analysis.adjustedUnitCostOverride).replace(/,/g, ""));
+  if (String(analysis.adjustedUnitCostOverride).trim() && adjustedUnitCostOverride <= 0) {
+    throw new Error("직접 입력 조정 원가는 0원보다 커야 합니다.");
   }
   const nationwide = Number(String(analysis.nationwidePharmacyCount).replace(/,/g, ""));
   const chamyaksa = Number(String(analysis.chamyaksaPharmacyCount).replace(/,/g, ""));
@@ -155,6 +165,7 @@ export default function MarketSizeAnalysisTab({
   const [search, setSearch] = useState("");
   const [editingItemId, setEditingItemId] = useState(null);
   const [draft, setDraft] = useState(null);
+  const [growthRatePeriod, setGrowthRatePeriod] = useState("5y");
   const query = search.trim().toLowerCase();
   const categoryLabelById = Object.fromEntries(categories.map((category) => [category.id, category.label]));
   const visibleItems = useMemo(() => {
@@ -174,6 +185,10 @@ export default function MarketSizeAnalysisTab({
   const isEditing = selectedItem && String(editingItemId) === String(selectedItem.id);
   const workingAnalysis = isEditing && draft ? draft : savedAnalysis;
   const calculations = calculateMarketAnalysis(selectedItem, workingAnalysis);
+  const growthRateYears = growthRatePeriod === "3y" ? 3 : 5;
+  const selectedGrowthRate = growthRatePeriod === "3y"
+    ? calculations.cagr3Year
+    : calculations.cagr5Year;
   const pricingScenarios = Array.isArray(selectedItem?.distributionStructure?.pricingScenarios)
     ? selectedItem.distributionStructure.pricingScenarios
     : [];
@@ -423,8 +438,23 @@ export default function MarketSizeAnalysisTab({
                       <input value={workingAnalysis.franchisePenetrationRate} onChange={(event) => updateDraft({ franchisePenetrationRate: event.target.value })} disabled={!isEditing} inputMode="decimal" placeholder="예: 30" style={fieldStyle} />
                     </label>
                     <label>
-                      <span>공급단가 조정률 (%)</span>
-                      <input value={workingAnalysis.supplyPriceAdjustmentRate} onChange={(event) => updateDraft({ supplyPriceAdjustmentRate: event.target.value })} disabled={!isEditing} inputMode="decimal" placeholder="인하 시 음수" style={fieldStyle} />
+                      <span>참약사 판매가 조정률 (%)</span>
+                      <input value={workingAnalysis.chamyaksaSellingPriceAdjustmentRate} onChange={(event) => updateDraft({ chamyaksaSellingPriceAdjustmentRate: event.target.value })} disabled={!isEditing} inputMode="decimal" placeholder="인하 시 음수" style={fieldStyle} />
+                    </label>
+                    <label>
+                      <span>제조사 판매가 조정률 (%)</span>
+                      <input value={workingAnalysis.manufacturerSellingPriceAdjustmentRate} onChange={(event) => updateDraft({ manufacturerSellingPriceAdjustmentRate: event.target.value })} disabled={!isEditing} inputMode="decimal" placeholder="인하 시 음수" style={fieldStyle} />
+                    </label>
+                    <label>
+                      <span>조정 공급 원가 직접 입력 (원)</span>
+                      <input
+                        value={workingAnalysis.adjustedUnitCostOverride}
+                        onChange={(event) => updateDraft({ adjustedUnitCostOverride: event.target.value })}
+                        disabled={!isEditing}
+                        inputMode="decimal"
+                        placeholder="비우면 조정률로 자동계산"
+                        style={fieldStyle}
+                      />
                     </label>
                     <label>
                       <span>연 금융비용 이자율 (%)</span>
@@ -445,7 +475,7 @@ export default function MarketSizeAnalysisTab({
                       </select>
                     </label>
                   </div>
-                </section>
+      </section>
               </div>
 
               <section style={panelStyle}>
@@ -454,11 +484,45 @@ export default function MarketSizeAnalysisTab({
                     <strong>시장 환산 및 약국 침투</strong>
                     <span>{calculations.latestYear ? `${calculations.latestYear.year}년 실적 기준` : "최근 연도 실적을 입력해주세요."}</span>
                   </div>
+                  <div className="growth-period-control" role="group" aria-label="연평균 성장률 기간">
+                    {[
+                      ["5y", "5개년"],
+                      ["3y", "3개년"]
+                    ].map(([period, label]) => {
+                      const active = growthRatePeriod === period;
+                      return (
+                        <button
+                          key={period}
+                          type="button"
+                          onClick={() => setGrowthRatePeriod(period)}
+                          aria-pressed={active}
+                          style={{
+                            minHeight: 30,
+                            padding: "5px 10px",
+                            border: active ? "1px solid #2563eb" : "1px solid #cbd5e1",
+                            borderRadius: 5,
+                            background: active ? "#eff6ff" : "#fff",
+                            color: active ? "#1d4ed8" : "#475569",
+                            cursor: "pointer",
+                            fontSize: 12,
+                            fontWeight: 900
+                          }}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div className="metric-grid">
                   <Metric label="기준 시장 규모" value={formatCompactWon(calculations.latestYear?.totalKrw)} />
                   <Metric label="5개년 평균 시장 규모" value={formatCompactWon(calculations.averageMarketKrw)} />
-                  <Metric label="연평균 성장률" value={formatDecimal(calculations.cagr, 2, "%")} tone={calculations.cagr >= 0 ? "positive" : "warning"} />
+                  <Metric
+                    label={`${growthRateYears}개년 연평균 성장률`}
+                    value={formatDecimal(selectedGrowthRate, 2, "%")}
+                    subtext={selectedGrowthRate === null ? `${growthRateYears}개년 실적을 모두 입력해주세요.` : `최근 ${growthRateYears}개 실적 기준`}
+                    tone={selectedGrowthRate === null ? "default" : (selectedGrowthRate >= 0 ? "positive" : "warning")}
+                  />
                   <Metric label="전국 예상 공급수량" value={formatCount(calculations.marketUnitCount)} subtext={`조정 원가 ${formatWon(calculations.adjustedUnitCost)}`} />
                   <Metric label="참약사 약국 점유율" value={formatDecimal(calculations.pharmacyShareRate, 2, "%")} />
                   <Metric label="침투 예상 가맹약국" value={formatCount(calculations.activeChainPharmacies, "개소")} />
@@ -476,10 +540,10 @@ export default function MarketSizeAnalysisTab({
                     </div>
                   </div>
                   <div className="metric-grid metric-grid-compact">
-                    <Metric label="배치 당 공급수량" value={formatCount(calculations.batchQuantity)} />
-                    <Metric label="연간 필요 배치" value={formatDecimal(calculations.exactBatches, 2, "배치")} subtext={calculations.requiredBatches === null ? "" : `발주 한도 ${calculations.requiredBatches}배치`} />
-                    <Metric label="배치 소진 예상기간" value={formatDecimal(calculations.depletionMonthsPerBatch, 1, "개월")} tone={calculations.depletionMonthsPerBatch > 12 ? "warning" : "default"} />
-                    <Metric label="1배치 필요자금" value={formatCompactWon(calculations.batchCapital)} />
+                    <Metric label="최소 주문 반영 공급수량" value={formatCount(calculations.orderQuantity)} subtext={`배치당 ${formatCount(calculations.batchQuantity)} · 최소 ${calculations.minimumOrderBatches}배치`} />
+                    <Metric label="연간 필요 배치" value={formatDecimal(calculations.exactBatches, 2, "배치")} subtext={calculations.orderBatchCount === null ? "" : `실제 발주 기준 ${calculations.orderBatchCount}배치`} />
+                    <Metric label="주문 수량 소진 예상기간" value={formatDecimal(calculations.depletionMonthsPerBatch, 1, "개월")} tone={calculations.depletionMonthsPerBatch > 12 ? "warning" : "default"} />
+                    <Metric label="최소 주문 필요자금" value={formatCompactWon(calculations.batchCapital)} />
                     <Metric label="평균 재고자금" value={formatCompactWon(calculations.averageInventoryCapital)} />
                     <Metric label="연간 금융 기회비용" value={formatWon(calculations.annualFinanceCost)} tone="warning" />
                   </div>
@@ -494,7 +558,11 @@ export default function MarketSizeAnalysisTab({
                   </div>
                   <div className="metric-grid metric-grid-compact">
                     <Metric label="기준 공급 원가" value={formatWon(calculations.baseUnitCost)} />
-                    <Metric label="조정 공급 원가" value={formatWon(calculations.adjustedUnitCost)} />
+                    <Metric
+                      label="조정 공급 원가"
+                      value={formatWon(calculations.adjustedUnitCost)}
+                      subtext={calculations.adjustedUnitCostOverride !== null ? "직접 입력값" : "제조사 판매가 조정률 자동계산"}
+                    />
                     <Metric label="참약사 예상 판매가" value={formatWon(calculations.chamyaksaSellingPrice)} subtext={calculations.pricingScenario?.label || "유통 마진 미설정"} />
                     <Metric label="연간 기대 매출" value={formatCompactWon(calculations.expectedRevenue)} />
                     <Metric label="연간 기대 매출총이익" value={formatCompactWon(calculations.expectedGrossProfit)} tone="positive" />
@@ -546,13 +614,14 @@ export default function MarketSizeAnalysisTab({
         .condition-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; padding: 13px; }
         .condition-grid label { min-width: 0; }
         .condition-grid label > span { display: block; margin-bottom: 5px; color: #475569; font-size: 11px; font-weight: 800; }
+        .growth-period-control { display: inline-flex !important; grid-auto-flow: column; gap: 5px !important; }
         .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
         .metric-grid-compact { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         :global(.market-metric) { min-height: 96px; padding: 13px; border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; display: grid; align-content: center; gap: 6px; box-sizing: border-box; }
         :global(.market-metric span) { color: #64748b; font-size: 11px; font-weight: 800; }
         :global(.market-metric strong) { font-size: 17px; line-height: 1.25; overflow-wrap: anywhere; }
         :global(.market-metric small) { color: #64748b; font-size: 10px; line-height: 1.4; }
-        @media (max-width: 1250px) {
+        @media (max-width: 1500px) {
           .market-input-grid, .market-result-grid { grid-template-columns: 1fr; }
           .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }

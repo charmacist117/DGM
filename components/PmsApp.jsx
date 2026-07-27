@@ -60,6 +60,7 @@ const DASHBOARD_MARKET_ANALYSIS_SEED_KEY = "pharmadev_dashboard_changelog_seed_2
 const DASHBOARD_MARKET_SEARCH_FIX_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_10";
 const DASHBOARD_SUPPLY_SCROLL_FIX_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_11";
 const DASHBOARD_SUPPLY_DUPLICATE_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_12";
+const DASHBOARD_MARKET_GROWTH_COST_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_13";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -4652,6 +4653,35 @@ export default function PmsApp() {
           changes: [
             "저장된 공급단가 건을 복사해 새로운 입력 건으로 만드는 기능을 추가했습니다.",
             "복합 성분과 견적 정보는 유지하고 포장단위 등을 바로 수정할 수 있으며, 유통 구조와 시장 분석은 새 건으로 초기화됩니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_MARKET_GROWTH_COST_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_MARKET_GROWTH_COST_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260727_market_growth_cost")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260727_market_growth_cost",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "시장 규모 분석에서 5개년·3개년 연평균 성장률을 전환해 확인할 수 있도록 구분했습니다.",
+            "조정 공급 원가를 직접 입력하고 공급수량, 배치 자금, 금융비용과 기대값 전체에 반영할 수 있습니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()
