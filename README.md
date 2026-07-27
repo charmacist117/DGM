@@ -28,6 +28,18 @@ npm run dev
 
 `.env.local` 파일에 아래 중 하나 방식으로 설정
 
+```bash
+AUTH_SECRET=32바이트_이상의_무작위_비밀값
+APP_ADMIN_PASSWORD=충분히_긴_관리자_인증코드
+APP_USER_PASSWORD=충분히_긴_사용자_인증코드
+```
+
+`AUTH_SECRET`은 다음과 같이 생성할 수 있습니다.
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"
+```
+
 ### 방식 A) 단일 URL
 
 ```bash
@@ -58,6 +70,8 @@ POSTGRES_DATABASE=
 2. Vercel Marketplace에서 Postgres(예: Neon) 연동
 3. 환경변수(`DATABASE_URL` 또는 `PG*`)가 주입됐는지 확인
 4. 배포
+
+보안 운영 기준과 점검 방법은 [`SECURITY.md`](./SECURITY.md)를 확인하세요.
 
 첫 실행 시 `pms_state` 테이블이 자동 생성되고 초기 프로젝트가 시드됩니다.
 

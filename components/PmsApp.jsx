@@ -598,6 +598,30 @@ function readFileAsDataUrl(file) {
   });
 }
 
+const SAFE_ATTACHMENT_EXTENSIONS = new Set([
+  "pdf", "png", "jpg", "jpeg", "webp", "doc", "docx", "xls", "xlsx", "csv", "txt"
+]);
+const SAFE_ATTACHMENT_TYPES = new Set([
+  "",
+  "application/octet-stream",
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "text/csv",
+  "text/plain",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+]);
+
+function isSafeAttachmentFile(file) {
+  const extension = String(file?.name || "").split(".").pop().toLowerCase();
+  return SAFE_ATTACHMENT_EXTENSIONS.has(extension)
+    && SAFE_ATTACHMENT_TYPES.has(String(file?.type || "").toLowerCase());
+}
+
 function formatBytes(size = 0) {
   const value = Number(size) || 0;
   if (value < 1024) return `${value} B`;
@@ -2266,6 +2290,10 @@ function SupplyPriceTab({
         window.alert("첨부파일은 10MB 이하만 업로드할 수 있습니다.");
         return;
       }
+      if (!isSafeAttachmentFile(file)) {
+        window.alert("PDF, 이미지, Word, Excel, CSV, TXT 파일만 첨부할 수 있습니다.");
+        return;
+      }
       const dataUrl = await readFileAsDataUrl(file);
       updateItem(itemId, {
         attachment: {
@@ -2814,7 +2842,7 @@ function SupplyPriceTab({
                         {isEditing && (
                           <input
                             type="file"
-                            accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,application/pdf"
+                            accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg,.webp,application/pdf"
                             onChange={(event) => handleAttachmentChange(item.id, event)}
                             style={{ width: "100%", fontSize: 14, marginBottom: 5 }}
                           />

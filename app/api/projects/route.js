@@ -1,5 +1,13 @@
 import { loadProjects, saveProjects } from "@/lib/server/projectStore";
 import { readSession } from "@/lib/server/auth";
+import { validateFullBackupData } from "@/lib/pms/fullBackup";
+import {
+  assertSameOrigin,
+  readJsonRequest,
+  REQUEST_LIMITS,
+  secureJson,
+  securityErrorResponse
+} from "@/lib/server/security";
 
 export const runtime = "nodejs";
 
@@ -7,10 +15,10 @@ export async function GET() {
   try {
     const session = await readSession();
     if (!session) {
-      return Response.json({ ok: false, message: "로그인이 필요합니다." }, { status: 401 });
+      return secureJson({ ok: false, message: "로그인이 필요합니다." }, { status: 401 });
     }
     const result = await loadProjects();
-    return Response.json({
+    return secureJson({
       ok: true,
       projects: result.projects,
       adminLogs: result.adminLogs,
@@ -20,22 +28,20 @@ export async function GET() {
     });
   } catch (error) {
     console.error("[GET /api/projects] failed:", error);
-    return Response.json(
-      { ok: false, message: "프로젝트 데이터를 불러오지 못했습니다.", error: String(error?.message || error) },
-      { status: 500 }
-    );
+    return secureJson({ ok: false, message: "프로젝트 데이터를 불러오지 못했습니다." }, { status: 500 });
   }
 }
 
 export async function PUT(request) {
   try {
+    assertSameOrigin(request);
     const session = await readSession();
     if (!session) {
-      return Response.json({ ok: false, message: "로그인이 필요합니다." }, { status: 401 });
+      return secureJson({ ok: false, message: "로그인이 필요합니다." }, { status: 401 });
     }
-    const body = await request.json();
+    const body = await readJsonRequest(request, { maxBytes: REQUEST_LIMITS.projects });
     if (!body || !Array.isArray(body.projects)) {
-      return Response.json({ ok: false, message: "projects 배열이 필요합니다." }, { status: 400 });
+      return secureJson({ ok: false, message: "projects 배열이 필요합니다." }, { status: 400 });
     }
 
     let adminLogs = Array.isArray(body.adminLogs) ? body.adminLogs : null;
@@ -65,13 +71,15 @@ export async function PUT(request) {
       supplyPriceItems = [...(supplyPriceItems || []), ...protectedDeletedItems];
     }
 
-    const result = await saveProjects(body.projects, adminLogs, supplyPriceItems);
-    return Response.json({ ok: true, updatedAt: result.updatedAt });
+    const validated = validateFullBackupData({
+      projects: body.projects,
+      adminLogs,
+      supplyPriceItems
+    });
+    const result = await saveProjects(validated.projects, validated.adminLogs, validated.supplyPriceItems);
+    return secureJson({ ok: true, updatedAt: result.updatedAt });
   } catch (error) {
     console.error("[PUT /api/projects] failed:", error);
-    return Response.json(
-      { ok: false, message: "프로젝트 데이터를 저장하지 못했습니다.", error: String(error?.message || error) },
-      { status: 500 }
-    );
+    return securityErrorResponse(error, "프로젝트 데이터를 저장하지 못했습니다.");
   }
 }

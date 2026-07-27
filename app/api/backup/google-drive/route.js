@@ -1,5 +1,12 @@
 import { readSession } from "@/lib/server/auth";
 import {
+  assertSameOrigin,
+  readJsonRequest,
+  REQUEST_LIMITS,
+  secureJson,
+  securityErrorResponse
+} from "@/lib/server/security";
+import {
   downloadGoogleDriveBackup,
   getGoogleDriveBackupStatus,
   listGoogleDriveBackups,
@@ -7,6 +14,12 @@ import {
 } from "@/lib/server/googleDriveBackup";
 
 export const runtime = "nodejs";
+
+function requireAdmin(session) {
+  if (!session) return secureJson({ ok: false, message: "로그인이 필요합니다." }, { status: 401 });
+  if (session.role !== "admin") return secureJson({ ok: false, message: "관리자 권한이 필요합니다." }, { status: 403 });
+  return null;
+}
 
 function normalizeBackupPayload(payload) {
   if (Array.isArray(payload)) {
@@ -23,72 +36,66 @@ function normalizeBackupPayload(payload) {
 
 export async function GET(request) {
   const session = await readSession();
-  if (!session) {
-    return Response.json({ ok: false, message: "Login required." }, { status: 401 });
-  }
+  const denied = requireAdmin(session);
+  if (denied) return denied;
 
   try {
     const { searchParams } = new URL(request.url);
     const action = searchParams.get("action") || "list";
 
     if (action === "status") {
-      return Response.json({ ok: true, ...getGoogleDriveBackupStatus() });
+      return secureJson({ ok: true, ...getGoogleDriveBackupStatus() });
     }
 
     if (action === "list") {
       const status = getGoogleDriveBackupStatus();
       if (!status.configured) {
-        return Response.json({ ok: true, files: [], ...status });
+        return secureJson({ ok: true, files: [], ...status });
       }
       const files = await listGoogleDriveBackups(Number(searchParams.get("limit") || 30));
-      return Response.json({ ok: true, files, ...status });
+      return secureJson({ ok: true, files, ...status });
     }
 
     if (action === "download") {
       const fileId = searchParams.get("fileId") || "";
       const payload = await downloadGoogleDriveBackup(fileId);
-      return Response.json({
+      return secureJson({
         ok: true,
         ...normalizeBackupPayload(payload),
         raw: payload
       });
     }
 
-    return Response.json({ ok: false, message: "Unsupported action." }, { status: 400 });
+    return secureJson({ ok: false, message: "지원하지 않는 백업 요청입니다." }, { status: 400 });
   } catch (error) {
-    return Response.json(
-      { ok: false, message: String(error?.message || error) },
-      { status: 500 }
-    );
+    console.error("[GET /api/backup/google-drive] failed:", error);
+    return secureJson({ ok: false, message: "Google Drive 백업을 불러오지 못했습니다." }, { status: 500 });
   }
 }
 
 export async function POST(request) {
-  const session = await readSession();
-  if (!session) {
-    return Response.json({ ok: false, message: "Login required." }, { status: 401 });
-  }
-
   try {
-    const body = await request.json().catch(() => ({}));
+    assertSameOrigin(request);
+    const session = await readSession();
+    const denied = requireAdmin(session);
+    if (denied) return denied;
+    const body = await readJsonRequest(request, { maxBytes: REQUEST_LIMITS.backup });
     const action = body?.action || "upload";
 
     if (action !== "upload") {
-      return Response.json({ ok: false, message: "Unsupported action." }, { status: 400 });
+      return secureJson({ ok: false, message: "지원하지 않는 백업 요청입니다." }, { status: 400 });
     }
 
     const projects = Array.isArray(body?.projects) ? body.projects : null;
     const adminLogs = Array.isArray(body?.adminLogs) ? body.adminLogs : [];
     if (!projects) {
-      return Response.json({ ok: false, message: "projects array is required." }, { status: 400 });
+      return secureJson({ ok: false, message: "projects 배열이 필요합니다." }, { status: 400 });
     }
 
     const file = await uploadGoogleDriveBackup(projects, adminLogs, session.role || "user");
-    return Response.json({ ok: true, file });
+    return secureJson({ ok: true, file });
   } catch (error) {
-    return Response.json(
-      { ok: false, message: String(error?.message || error) },
-      { status: 500 }
-    );
+    console.error("[POST /api/backup/google-drive] failed:", error);
+    return securityErrorResponse(error, "Google Drive 백업을 저장하지 못했습니다.");
   }
 }
