@@ -223,15 +223,18 @@ export default function MarketSizeAnalysisTab({
     ? Math.max(0, 1 + (selectedGrowthRate / 100))
     : 1;
   const annualDemandBase = calculations.annualDemandUnits;
-  const forecastDemandBase = annualDemandBase === null
-    ? null
-    : annualDemandBase * (yearOneMode === "ytd" ? elapsedYearRatio : 1);
-  const demandForecasts = [0, 1, 2].map((offset) => ({
-    year: currentYear + offset,
-    value: forecastDemandBase === null
-      ? null
-      : forecastDemandBase * (growthMultiplier ** offset)
-  }));
+  const demandForecasts = [0, 1, 2].map((offset) => {
+    const growthYears = yearOneMode === "ytd" && offset === 0
+      ? elapsedYearRatio
+      : offset;
+    return {
+      year: currentYear + offset,
+      growthYears,
+      value: annualDemandBase === null
+        ? null
+        : annualDemandBase * (growthMultiplier ** growthYears)
+    };
+  });
 
   useEffect(() => {
     setEditingItemId(null);
@@ -629,6 +632,7 @@ export default function MarketSizeAnalysisTab({
                         {selectedGrowthRate === null
                           ? "성장률이 없으면 현재 예상 소진수량을 유지합니다."
                           : `${growthRateYears}개년 연평균 성장률 ${formatDecimal(selectedGrowthRate, 2, "%")} 적용`}
+                        {yearOneMode === "ytd" ? " · Year 1만 현재 날짜 기준, Year 2·3은 각 연도 1/1~12/31 기준" : ""}
                       </span>
                     </div>
                     <div className="growth-period-control" role="group" aria-label="Year 1 계산 기준">
@@ -659,8 +663,8 @@ export default function MarketSizeAnalysisTab({
                         value={formatCount(forecast.value)}
                         subtext={yearOneMode === "ytd"
                           ? (index === 0
-                              ? `${forecast.year}년 현재까지 ${(elapsedYearRatio * 100).toFixed(1)}% 적용`
-                              : `${forecast.year}년 · YTD 일할 기준 성장률 ${index}회 적용`)
+                              ? `${forecast.year}년 현재 시점 · 성장기간 ${forecast.growthYears.toFixed(2)}년 일할 반영`
+                              : `${forecast.year}년 1/1~12/31 · 성장률 ${index}년 누적`)
                           : `${forecast.year}년 예상`}
                         tone="positive"
                       />

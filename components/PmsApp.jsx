@@ -66,6 +66,7 @@ const DASHBOARD_SUPPLY_DUPLICATE_SEED_KEY = "pharmadev_dashboard_changelog_seed_
 const DASHBOARD_MARKET_GROWTH_COST_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_13";
 const DASHBOARD_MARKET_DEFAULT_FORECAST_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_14";
 const DASHBOARD_MARKET_GROWTH_YEAR_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_15";
+const DASHBOARD_MARKET_YTD_PRORATION_FIX_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_16";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -4803,6 +4804,35 @@ export default function PmsApp() {
             "불완전한 최근 연도를 제외하면 선택된 4개년과 포함된 최근 3개년 기준으로 성장률·수요 전망을 다시 계산합니다.",
             "Year 1을 YTD로 전환하면 일할 계산된 소진량을 기준으로 Year 2·3에도 선택한 성장률을 순차 적용합니다.",
             "시장 실적의 출처를 식품의약품안전처 의약품안전나라 공개 데이터로 명시했습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_MARKET_YTD_PRORATION_FIX_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_MARKET_YTD_PRORATION_FIX_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260727_market_ytd_proration_fix")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260727_market_ytd_proration_fix",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "시장 규모 분석의 YTD 예상 소진량이 연간 물량 자체를 경과일 비율만큼 축소하던 계산 오류를 수정했습니다.",
+            "YTD에서는 Year 1의 성장률 적용 기간만 현재 날짜 기준으로 일할 계산하고, Year 2·3은 각 연도 1월 1일부터 12월 31일까지의 연간 성장률로 계산합니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()
