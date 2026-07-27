@@ -57,6 +57,7 @@ const DASHBOARD_HOME_BUTTON_STYLE_SEED_KEY = "pharmadev_dashboard_changelog_seed
 const DASHBOARD_DISTRIBUTION_RESET_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_7";
 const DASHBOARD_SECURITY_HARDENING_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_8";
 const DASHBOARD_MARKET_ANALYSIS_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_9";
+const DASHBOARD_MARKET_SEARCH_FIX_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_10";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -4522,6 +4523,35 @@ export default function PmsApp() {
             "공급단가 품목과 연결되는 시장 규모 분석 탭을 추가했습니다.",
             "최근 5개년 생산·수입실적, 환율, 약국 점유율과 가맹약국 침투율 분석을 지원합니다.",
             "연간 소진수량, 필요 배치, 금융 기회비용과 공급단가 조정 기댓값을 자동 계산합니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_MARKET_SEARCH_FIX_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_MARKET_SEARCH_FIX_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260727_market_search_fix")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260727_market_search_fix",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "시장 규모 분석의 공급단가 건 검색 중 결과가 0건이 되어도 화면이 종료되지 않도록 수정했습니다.",
+            "검색 결과가 없을 때 안내 화면을 표시하고, 다시 일치하는 검색어를 입력하면 품목 분석 화면이 복구됩니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()
