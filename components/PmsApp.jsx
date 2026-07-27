@@ -67,6 +67,7 @@ const DASHBOARD_MARKET_GROWTH_COST_SEED_KEY = "pharmadev_dashboard_changelog_see
 const DASHBOARD_MARKET_DEFAULT_FORECAST_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_14";
 const DASHBOARD_MARKET_GROWTH_YEAR_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_15";
 const DASHBOARD_MARKET_YTD_PRORATION_FIX_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_16";
+const DASHBOARD_MARKET_RESULT_WIDTH_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260728_17";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -4833,6 +4834,35 @@ export default function PmsApp() {
           changes: [
             "시장 규모 분석의 YTD 예상 소진량이 연간 물량 자체를 경과일 비율만큼 축소하던 계산 오류를 수정했습니다.",
             "YTD에서는 Year 1의 성장률 적용 기간만 현재 날짜 기준으로 일할 계산하고, Year 2·3은 각 연도 1월 1일부터 12월 31일까지의 연간 성장률로 계산합니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_MARKET_RESULT_WIDTH_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_MARKET_RESULT_WIDTH_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260728_market_result_width")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260728_market_result_width",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "시장 규모 분석 하단에서 배치 소진 및 금융비용 표의 너비를 줄이고 조정 시나리오 기댓값 표를 넓혀 설명 문구의 가독성을 개선했습니다.",
+            "연평균 성장률 선택 버튼을 최대 5개년·최근 3개년으로 통일하고, 실제 포함 연도 수는 성장률 지표에서 동적으로 표시하도록 정리했습니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()

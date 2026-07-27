@@ -579,7 +579,7 @@ export default function MarketSizeAnalysisTab({
                   </div>
                   <div className="growth-period-control" role="group" aria-label="연평균 성장률 기간">
                     {[
-                      ["all", calculations.growthYearCount > 0 ? `${calculations.growthYearCount}개년` : "포함 연도"],
+                      ["all", "최대 5개년"],
                       ["3y", "최근 3개년"]
                     ].map(([period, label]) => {
                       const active = growthRatePeriod === period;
@@ -792,7 +792,9 @@ export default function MarketSizeAnalysisTab({
         .market-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 14px; align-items: start; }
         .market-item-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; padding: 14px 15px; background: #e8f1fb; }
         .market-actions { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
-        .market-input-grid, .market-result-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(340px, .75fr); gap: 14px; }
+        .market-input-grid, .market-result-grid { display: grid; gap: 14px; }
+        .market-input-grid { grid-template-columns: minmax(0, 1.25fr) minmax(340px, .75fr); }
+        .market-result-grid { grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr); }
         .section-title { min-height: 58px; padding: 11px 14px; border-bottom: 1px solid #dbe3ee; display: flex; align-items: center; justify-content: space-between; gap: 12px; box-sizing: border-box; background: #f8fafc; }
         .section-title > div { display: grid; gap: 3px; }
         .section-title strong { color: #0f172a; font-size: 15px; }
