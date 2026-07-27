@@ -65,6 +65,7 @@ const DASHBOARD_SUPPLY_SCROLL_FIX_SEED_KEY = "pharmadev_dashboard_changelog_seed
 const DASHBOARD_SUPPLY_DUPLICATE_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_12";
 const DASHBOARD_MARKET_GROWTH_COST_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_13";
 const DASHBOARD_MARKET_DEFAULT_FORECAST_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_14";
+const DASHBOARD_MARKET_GROWTH_YEAR_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_15";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -4771,6 +4772,37 @@ export default function PmsApp() {
             "시장 규모 분석 전역 기본값과 개별 품목 기본값 초기화·차이 확인 기능을 추가했습니다.",
             "참약사·제조사 판매가 조정률을 분리하고 최소 주문 배치 수를 소진기간·필요자금·금융비용에 반영했습니다.",
             "선택한 성장률에 따른 Year 1~3 예상 소진수량과 Year 1 YTD 전환 기능을 추가했습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_MARKET_GROWTH_YEAR_FILTER_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_MARKET_GROWTH_YEAR_FILTER_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260727_market_growth_year_filter")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260727_market_growth_year_filter",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "시장 규모 분석에서 연도별 실적을 성장률 계산에 포함하거나 제외할 수 있도록 추가했습니다.",
+            "불완전한 최근 연도를 제외하면 선택된 4개년과 포함된 최근 3개년 기준으로 성장률·수요 전망을 다시 계산합니다.",
+            "Year 1을 YTD로 전환하면 일할 계산된 소진량을 기준으로 Year 2·3에도 선택한 성장률을 순차 적용합니다.",
+            "시장 실적의 출처를 식품의약품안전처 의약품안전나라 공개 데이터로 명시했습니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()

@@ -173,7 +173,7 @@ export default function MarketSizeAnalysisTab({
   const [search, setSearch] = useState("");
   const [editingItemId, setEditingItemId] = useState(null);
   const [draft, setDraft] = useState(null);
-  const [growthRatePeriod, setGrowthRatePeriod] = useState("5y");
+  const [growthRatePeriod, setGrowthRatePeriod] = useState("all");
   const [yearOneMode, setYearOneMode] = useState("annual");
   const [showDefaultsModal, setShowDefaultsModal] = useState(false);
   const [defaultsDraft, setDefaultsDraft] = useState(() => normalizeMarketAnalysisDefaults(marketAnalysisDefaults));
@@ -201,7 +201,9 @@ export default function MarketSizeAnalysisTab({
   const isEditing = selectedItem && String(editingItemId) === String(selectedItem.id);
   const workingAnalysis = isEditing && draft ? draft : savedAnalysis;
   const calculations = calculateMarketAnalysis(selectedItem, workingAnalysis, normalizedDefaults);
-  const growthRateYears = growthRatePeriod === "3y" ? 3 : 5;
+  const growthRateYears = growthRatePeriod === "3y"
+    ? Math.min(3, calculations.growthYearCount)
+    : calculations.growthYearCount;
   const selectedGrowthRate = growthRatePeriod === "3y"
     ? calculations.cagr3Year
     : calculations.cagr5Year;
@@ -221,11 +223,14 @@ export default function MarketSizeAnalysisTab({
     ? Math.max(0, 1 + (selectedGrowthRate / 100))
     : 1;
   const annualDemandBase = calculations.annualDemandUnits;
+  const forecastDemandBase = annualDemandBase === null
+    ? null
+    : annualDemandBase * (yearOneMode === "ytd" ? elapsedYearRatio : 1);
   const demandForecasts = [0, 1, 2].map((offset) => ({
     year: currentYear + offset,
-    value: annualDemandBase === null
+    value: forecastDemandBase === null
       ? null
-      : annualDemandBase * (growthMultiplier ** offset) * (offset === 0 && yearOneMode === "ytd" ? elapsedYearRatio : 1)
+      : forecastDemandBase * (growthMultiplier ** offset)
   }));
 
   useEffect(() => {
@@ -435,7 +440,7 @@ export default function MarketSizeAnalysisTab({
                   <div className="section-title">
                     <div>
                       <strong>최근 5개년 시장 실적</strong>
-                      <span>생산실적 × 1,000원 + 수입실적 × 기준 환율</span>
+                      <span>생산실적 × 1,000원 + 수입실적 × 기준 환율 · 출처: 식품의약품안전처 의약품안전나라 공개 데이터</span>
                     </div>
                     <label>
                       기준 달러환율
@@ -453,6 +458,7 @@ export default function MarketSizeAnalysisTab({
                     <div className="market-year-head">생산실적 (천원)</div>
                     <div className="market-year-head">수입실적 (USD)</div>
                     <div className="market-year-head">합산 시장규모</div>
+                    <div className="market-year-head growth-include-head">성장률 포함</div>
                     {calculations.yearResults.map((entry) => (
                       <div key={entry.id} style={{ display: "contents" }}>
                         <input
@@ -482,6 +488,15 @@ export default function MarketSizeAnalysisTab({
                           <span>{formatCompactWon(entry.totalKrw || null)}</span>
                           <i style={{ width: `${Math.max(0, Math.min(100, (entry.totalKrw / maxYearTotal) * 100))}%` }} />
                         </div>
+                        <label className="growth-include-cell">
+                          <input
+                            type="checkbox"
+                            checked={entry.includeInGrowthRate}
+                            onChange={(event) => updateMarketYear(entry.id, { includeInGrowthRate: event.target.checked })}
+                            disabled={!isEditing}
+                          />
+                          <span>{entry.includeInGrowthRate ? "포함" : "제외"}</span>
+                        </label>
                       </div>
                     ))}
                   </div>
@@ -561,8 +576,8 @@ export default function MarketSizeAnalysisTab({
                   </div>
                   <div className="growth-period-control" role="group" aria-label="연평균 성장률 기간">
                     {[
-                      ["5y", "5개년"],
-                      ["3y", "3개년"]
+                      ["all", calculations.growthYearCount > 0 ? `${calculations.growthYearCount}개년` : "포함 연도"],
+                      ["3y", "최근 3개년"]
                     ].map(([period, label]) => {
                       const active = growthRatePeriod === period;
                       return (
@@ -593,9 +608,11 @@ export default function MarketSizeAnalysisTab({
                   <Metric label="기준 시장 규모" value={formatCompactWon(calculations.latestYear?.totalKrw)} />
                   <Metric label="5개년 평균 시장 규모" value={formatCompactWon(calculations.averageMarketKrw)} />
                   <Metric
-                    label={`${growthRateYears}개년 연평균 성장률`}
+                    label={growthRateYears > 0 ? `${growthRateYears}개년 연평균 성장률` : "연평균 성장률"}
                     value={formatDecimal(selectedGrowthRate, 2, "%")}
-                    subtext={selectedGrowthRate === null ? `${growthRateYears}개년 실적을 모두 입력해주세요.` : `최근 ${growthRateYears}개 실적 기준`}
+                    subtext={selectedGrowthRate === null
+                      ? "성장률 포함 실적을 2개년 이상 선택해주세요."
+                      : (growthRatePeriod === "3y" ? "포함된 최근 3개 실적 기준" : `포함 선택한 ${growthRateYears}개 실적 기준`)}
                     tone={selectedGrowthRate === null ? "default" : (selectedGrowthRate >= 0 ? "positive" : "warning")}
                   />
                   <Metric label="전국 예상 공급수량" value={formatCount(calculations.marketUnitCount)} subtext={`조정 원가 ${formatWon(calculations.adjustedUnitCost)}`} />
@@ -640,8 +657,10 @@ export default function MarketSizeAnalysisTab({
                         key={forecast.year}
                         label={`Year ${index + 1}${index === 0 && yearOneMode === "ytd" ? " · YTD" : ""}`}
                         value={formatCount(forecast.value)}
-                        subtext={index === 0 && yearOneMode === "ytd"
-                          ? `${forecast.year}년 현재까지 ${(elapsedYearRatio * 100).toFixed(1)}% 적용`
+                        subtext={yearOneMode === "ytd"
+                          ? (index === 0
+                              ? `${forecast.year}년 현재까지 ${(elapsedYearRatio * 100).toFixed(1)}% 적용`
+                              : `${forecast.year}년 · YTD 일할 기준 성장률 ${index}회 적용`)
                           : `${forecast.year}년 예상`}
                         tone="positive"
                       />
@@ -775,8 +794,12 @@ export default function MarketSizeAnalysisTab({
         .section-title strong { color: #0f172a; font-size: 15px; }
         .section-title span { color: #64748b; font-size: 11px; }
         .section-title label { display: flex; align-items: center; gap: 8px; color: #475569; font-size: 11px; font-weight: 800; white-space: nowrap; }
-        .market-year-table { display: grid; grid-template-columns: 82px minmax(130px, 1fr) minmax(130px, 1fr) minmax(150px, 1.1fr); gap: 7px; padding: 12px; align-items: center; }
+        .market-year-table { display: grid; grid-template-columns: 82px minmax(130px, 1fr) minmax(130px, 1fr) minmax(150px, 1.1fr) 86px; gap: 7px; padding: 12px; align-items: center; }
         .market-year-head { color: #475569; font-size: 11px; font-weight: 900; padding: 0 2px 2px; }
+        .growth-include-head { text-align: center; }
+        .growth-include-cell { min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 5px; color: #475569; font-size: 11px; font-weight: 800; }
+        .growth-include-cell input { width: 16px; height: 16px; margin: 0; accent-color: #2563eb; }
+        .growth-include-cell input:disabled { cursor: default; }
         .year-total-cell { position: relative; min-height: 36px; border: 1px solid #dbe3ee; border-radius: 6px; background: #f8fafc; overflow: hidden; display: flex; align-items: center; padding: 0 9px; box-sizing: border-box; }
         .year-total-cell i { position: absolute; left: 0; bottom: 0; height: 3px; background: #2563eb; }
         .year-total-cell span { position: relative; z-index: 1; color: #0f172a; font-size: 12px; font-weight: 900; }
@@ -820,7 +843,7 @@ export default function MarketSizeAnalysisTab({
           .market-actions { justify-content: flex-start; }
         }
         @media (max-width: 640px) {
-          .market-year-table { grid-template-columns: 68px minmax(110px, 1fr) minmax(110px, 1fr) minmax(130px, 1fr); overflow-x: auto; }
+          .market-year-table { grid-template-columns: 68px minmax(110px, 1fr) minmax(110px, 1fr) minmax(130px, 1fr) 80px; overflow-x: auto; }
           .condition-grid, .metric-grid, .metric-grid-compact, .forecast-grid { grid-template-columns: 1fr; }
           .forecast-heading { align-items: flex-start; flex-direction: column; }
         }
