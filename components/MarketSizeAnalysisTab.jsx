@@ -820,6 +820,12 @@ export default function MarketSizeAnalysisTab({
                         ? "유통 마진 미설정"
                         : `유통 구조 ${formatWon(calculations.distributionSellingPrice)} · ${calculations.pricingScenario?.label || "기본"}`}
                     />
+                    <Metric
+                      label="참약사 예상 마진율"
+                      value={formatDecimal(calculations.chamyaksaExpectedMarginRate, 2, "%")}
+                      subtext="제조사 조정 공급원가 반영"
+                      tone={calculations.chamyaksaExpectedMarginRate >= 0 ? "positive" : "warning"}
+                    />
                     <Metric label="개당 예상 매출총이익" value={formatWon(calculations.marginPerUnit)} tone="positive" />
                     <Metric label="연간 기대 매출" value={formatCompactWon(planningExpectedRevenue)} />
                     <Metric label="연간 기대 매출총이익" value={formatCompactWon(planningExpectedGrossProfit)} tone="positive" />

@@ -73,6 +73,7 @@ const DASHBOARD_MARKET_YTD_FORECAST_SEED_KEY = "pharmadev_dashboard_changelog_se
 const DASHBOARD_MARKET_PLANNING_LINK_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260728_20";
 const DASHBOARD_MARKET_ANNUAL_BASE_DATE_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260728_21";
 const DASHBOARD_MARKET_MANUFACTURER_COST_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260728_22";
+const DASHBOARD_MARKET_EXPECTED_MARGIN_RATE_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260728_23";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -5016,6 +5017,35 @@ export default function PmsApp() {
           changes: [
             "제조사 판매가 조정률이 기준 공급원가와 배치 자금·금융비용·마진·매출총이익 계산에 반영되도록 수정했습니다.",
             "시장 환산 평균 공급단가는 전국 예상 공급수량 계산에만 사용하도록 분리하고 관련 화면 및 CSV 명칭을 정리했습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_MARKET_EXPECTED_MARGIN_RATE_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_MARKET_EXPECTED_MARGIN_RATE_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260728_market_expected_margin_rate")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260728_market_expected_margin_rate",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "조정 시나리오 기댓값에 참약사 예상 마진율을 추가했습니다.",
+            "제조사 판매가 조정률에 따른 제조사 조정 공급원가 변화를 예상 마진율과 CSV 백업에 즉시 반영합니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()
