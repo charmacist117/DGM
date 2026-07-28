@@ -171,6 +171,7 @@ export default function MarketSizeAnalysisTab({
   syncState
 }) {
   const [search, setSearch] = useState("");
+  const [showConfiguredDistributionOnly, setShowConfiguredDistributionOnly] = useState(false);
   const [editingItemId, setEditingItemId] = useState(null);
   const [draft, setDraft] = useState(null);
   const [growthRatePeriod, setGrowthRatePeriod] = useState("all");
@@ -183,13 +184,16 @@ export default function MarketSizeAnalysisTab({
     const categoryItems = selectedCategory === "all"
       ? items
       : items.filter((item) => item.category === selectedCategory);
-    if (!query) return categoryItems;
-    return categoryItems.filter((item) => [
+    const distributionItems = showConfiguredDistributionOnly
+      ? categoryItems.filter((item) => Boolean(String(item.distributionStructure?.updatedAt || "").trim()))
+      : categoryItems;
+    if (!query) return distributionItems;
+    return distributionItems.filter((item) => [
       item.manufacturer,
       item.packagingUnit,
       ...(item.ingredients || []).flatMap((ingredient) => [ingredient.name, ingredient.content])
     ].join(" ").toLowerCase().includes(query));
-  }, [items, query, selectedCategory]);
+  }, [items, query, selectedCategory, showConfiguredDistributionOnly]);
 
   const normalizedDefaults = useMemo(
     () => normalizeMarketAnalysisDefaults(marketAnalysisDefaults),
@@ -348,6 +352,14 @@ export default function MarketSizeAnalysisTab({
       <div className="market-layout">
         <aside style={{ ...panelStyle, minWidth: 0, overflow: "hidden" }}>
           <div style={{ padding: 12, borderBottom: "1px solid #dbe3ee", background: "#f8fafc" }}>
+            <label className="market-distribution-filter">
+              <input
+                type="checkbox"
+                checked={showConfiguredDistributionOnly}
+                onChange={(event) => setShowConfiguredDistributionOnly(event.target.checked)}
+              />
+              <span>유통 구조 설정 건만 보기</span>
+            </label>
             <label htmlFor="market-search" style={labelStyle}>공급단가 건 검색</label>
             <input
               id="market-search"
@@ -364,6 +376,7 @@ export default function MarketSizeAnalysisTab({
               return (
                 <button
                   key={item.id}
+                  className="market-item-button"
                   type="button"
                   onClick={() => onSelectedItemChange?.(item.id)}
                   style={{
@@ -400,7 +413,11 @@ export default function MarketSizeAnalysisTab({
               );
             })}
             {visibleItems.length === 0 && (
-              <div style={{ padding: 18, color: "#94a3b8", fontSize: 13, textAlign: "center" }}>표시할 공급단가 건이 없습니다.</div>
+              <div style={{ padding: 18, color: "#94a3b8", fontSize: 13, textAlign: "center" }}>
+                {showConfiguredDistributionOnly
+                  ? "유통 구조가 설정된 공급단가 건이 없습니다."
+                  : "표시할 공급단가 건이 없습니다."}
+              </div>
             )}
           </div>
         </aside>
@@ -790,6 +807,8 @@ export default function MarketSizeAnalysisTab({
         .market-root { display: grid; gap: 14px; }
         .market-banner-description { margin-top: 5px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .market-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 14px; align-items: start; }
+        .market-distribution-filter { min-height: 34px; margin-bottom: 10px; padding: 7px 9px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; display: flex; align-items: center; gap: 7px; color: #334155; cursor: pointer; box-sizing: border-box; font-size: 12px; font-weight: 800; }
+        .market-distribution-filter input { width: 16px; height: 16px; margin: 0; accent-color: #2563eb; }
         .market-item-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; padding: 14px 15px; background: #e8f1fb; }
         .market-actions { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
         .market-input-grid, .market-result-grid { display: grid; gap: 14px; }
