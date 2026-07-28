@@ -92,6 +92,34 @@ function formatDecimal(value, digits = 2, suffix = "") {
   return `${value.toLocaleString("ko-KR", { maximumFractionDigits: digits })}${suffix}`;
 }
 
+function toDateInputValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateInput(value, fallback) {
+  const parsed = new Date(`${String(value || "")}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? fallback : parsed;
+}
+
+function addYears(date, years) {
+  const next = new Date(date);
+  next.setFullYear(next.getFullYear() + years);
+  return next;
+}
+
+function addDaysToDate(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function formatPeriodDate(date) {
+  return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
+}
+
 function validateAnalysis(analysis) {
   const numericFields = [
     ["달러 환율", analysis.exchangeRate],
@@ -100,7 +128,7 @@ function validateAnalysis(analysis) {
     ["가맹약국 침투율", analysis.franchisePenetrationRate],
     ["참약사 판매가 조정률", analysis.chamyaksaSellingPriceAdjustmentRate],
     ["제조사 판매가 조정률", analysis.manufacturerSellingPriceAdjustmentRate],
-    ["직접 입력 조정 원가", analysis.adjustedUnitCostOverride],
+    ["시장 환산 평균 공급단가", analysis.adjustedUnitCostOverride],
     ["연 이자율", analysis.annualInterestRate]
   ];
   for (const [label, value] of numericFields) {
@@ -122,7 +150,7 @@ function validateAnalysis(analysis) {
   }
   const adjustedUnitCostOverride = Number(String(analysis.adjustedUnitCostOverride).replace(/,/g, ""));
   if (String(analysis.adjustedUnitCostOverride).trim() && adjustedUnitCostOverride <= 0) {
-    throw new Error("직접 입력 조정 원가는 0원보다 커야 합니다.");
+    throw new Error("시장 환산 평균 공급단가는 0원보다 커야 합니다.");
   }
   const nationwide = Number(String(analysis.nationwidePharmacyCount).replace(/,/g, ""));
   const chamyaksa = Number(String(analysis.chamyaksaPharmacyCount).replace(/,/g, ""));
@@ -177,6 +205,9 @@ export default function MarketSizeAnalysisTab({
   const [draft, setDraft] = useState(null);
   const [growthRatePeriod, setGrowthRatePeriod] = useState("all");
   const [yearOneMode, setYearOneMode] = useState("annual");
+  const [annualForecastBaseDate, setAnnualForecastBaseDate] = useState(() => (
+    toDateInputValue(new Date(new Date().getFullYear(), 0, 1))
+  ));
   const [showDefaultsModal, setShowDefaultsModal] = useState(false);
   const [defaultsDraft, setDefaultsDraft] = useState(() => normalizeMarketAnalysisDefaults(marketAnalysisDefaults));
   const query = search.trim().toLowerCase();
@@ -229,11 +260,20 @@ export default function MarketSizeAnalysisTab({
     : 1;
   const annualDemandBase = calculations.annualDemandUnits;
   const forecastBaseGrowthYears = yearOneMode === "ytd" ? elapsedYearRatio : 1;
+  const annualPeriodStart = parseDateInput(annualForecastBaseDate, startOfYear);
   const demandForecasts = [0, 1, 2].map((offset) => {
     const growthYears = forecastBaseGrowthYears + offset;
+    const periodStart = yearOneMode === "annual"
+      ? addYears(annualPeriodStart, offset)
+      : new Date(currentYear + offset, 0, 1);
+    const periodEnd = yearOneMode === "annual"
+      ? addDaysToDate(addYears(annualPeriodStart, offset + 1), -1)
+      : new Date(currentYear + offset, 11, 31);
     return {
-      year: currentYear + offset,
+      year: periodStart.getFullYear(),
       growthYears,
+      periodStart,
+      periodEnd,
       value: annualDemandBase === null
         ? null
         : annualDemandBase * (growthMultiplier ** growthYears)
@@ -244,7 +284,7 @@ export default function MarketSizeAnalysisTab({
     demandUnits: planningDemandUnits,
     batchQuantity: calculations.batchQuantity,
     minimumOrderBatches: calculations.minimumOrderBatches,
-    unitCost: calculations.baseUnitCost,
+    unitCost: calculations.manufacturerAdjustedUnitCost,
     annualInterestRate: calculations.annualInterestRate
   });
   const planningExpectedRevenue = planningDemandUnits !== null && calculations.chamyaksaSellingPrice !== null
@@ -257,9 +297,17 @@ export default function MarketSizeAnalysisTab({
     && planningBatchFinance.annualFinanceCost !== null
     ? planningExpectedGrossProfit - planningBatchFinance.annualFinanceCost
     : null;
+  const manufacturerAdjustmentRate = Number(calculations.analysis.manufacturerSellingPriceAdjustmentRate);
+  const manufacturerCostSubtext = Number.isFinite(manufacturerAdjustmentRate) && manufacturerAdjustmentRate !== 0
+    ? `기존 ${formatWon(calculations.baseUnitCost)} · 제조사 ${manufacturerAdjustmentRate > 0 ? "+" : ""}${formatDecimal(manufacturerAdjustmentRate, 2, "%")}`
+    : "공급단가 기준";
   const planningBasisLabel = selectedGrowthRate === null
-    ? `Year 1 ${yearOneMode === "ytd" ? "YTD" : "연간"} 기준`
-    : `${growthRateYears}개년 성장률 · Year 1 ${yearOneMode === "ytd" ? "YTD" : "연간"} 기준`;
+    ? (yearOneMode === "ytd"
+        ? "Year 1 YTD 기준"
+        : `Year 1 연간 ${formatPeriodDate(annualPeriodStart)} 시작`)
+    : (yearOneMode === "ytd"
+        ? `${growthRateYears}개년 성장률 · Year 1 YTD 기준`
+        : `${growthRateYears}개년 성장률 · 연간 ${formatPeriodDate(annualPeriodStart)} 시작`);
 
   useEffect(() => {
     setEditingItemId(null);
@@ -577,13 +625,13 @@ export default function MarketSizeAnalysisTab({
                       <input value={workingAnalysis.manufacturerSellingPriceAdjustmentRate} onChange={(event) => updateDraft({ manufacturerSellingPriceAdjustmentRate: event.target.value })} disabled={!isEditing} inputMode="decimal" placeholder="인하 시 음수" style={fieldStyle} />
                     </label>
                     <label>
-                      <span>조정 공급 원가 직접 입력 (원)</span>
+                      <span>시장 환산 평균 공급단가 (원)</span>
                       <input
                         value={workingAnalysis.adjustedUnitCostOverride}
                         onChange={(event) => updateDraft({ adjustedUnitCostOverride: event.target.value })}
                         disabled={!isEditing}
                         inputMode="decimal"
-                        placeholder="비우면 조정률로 자동계산"
+                        placeholder="비우면 기존 공급원가 사용"
                         style={fieldStyle}
                       />
                     </label>
@@ -656,7 +704,7 @@ export default function MarketSizeAnalysisTab({
                       : (growthRatePeriod === "3y" ? "포함된 최근 3개 실적 기준" : `포함 선택한 ${growthRateYears}개 실적 기준`)}
                     tone={selectedGrowthRate === null ? "default" : (selectedGrowthRate >= 0 ? "positive" : "warning")}
                   />
-                  <Metric label="전국 예상 공급수량" value={formatCount(calculations.marketUnitCount)} subtext={`조정 원가 ${formatWon(calculations.adjustedUnitCost)}`} />
+                  <Metric label="전국 예상 공급수량" value={formatCount(calculations.marketUnitCount)} subtext={`시장 환산 단가 ${formatWon(calculations.adjustedUnitCost)}`} />
                   <Metric label="참약사 약국 점유율" value={formatDecimal(calculations.pharmacyShareRate, 2, "%")} />
                   <Metric label="침투 예상 가맹약국" value={formatCount(calculations.activeChainPharmacies, "개소")} />
                   <Metric label="연간 예상 소진수량" value={formatCount(calculations.annualDemandUnits)} tone="positive" />
@@ -675,37 +723,58 @@ export default function MarketSizeAnalysisTab({
                           : ""}
                       </span>
                     </div>
-                    <div className="growth-period-control" role="group" aria-label="예상 소진수량 계산 기준">
-                      {[
-                        ["annual", "연간 기준"],
-                        ["ytd", "YTD 기준"]
-                      ].map(([mode, label]) => {
-                        const active = yearOneMode === mode;
-                        return (
-                          <button
-                            key={mode}
-                            type="button"
-                            onClick={() => setYearOneMode(mode)}
-                            aria-pressed={active}
-                            className={active ? "segment-active" : ""}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
+                    <div className="forecast-controls">
+                      {yearOneMode === "annual" && (
+                        <label className="annual-base-date-control">
+                          <span>연간 기준 시작일</span>
+                          <input
+                            type="date"
+                            aria-label="연간 기준 시작일"
+                            value={annualForecastBaseDate}
+                            onInput={(event) => setAnnualForecastBaseDate(
+                              event.currentTarget.value || toDateInputValue(startOfYear)
+                            )}
+                            onChange={(event) => setAnnualForecastBaseDate(
+                              event.currentTarget.value || toDateInputValue(startOfYear)
+                            )}
+                            onBlur={(event) => setAnnualForecastBaseDate(
+                              event.currentTarget.value || toDateInputValue(startOfYear)
+                            )}
+                          />
+                        </label>
+                      )}
+                      <div className="growth-period-control" role="group" aria-label="예상 소진수량 계산 기준">
+                        {[
+                          ["annual", "연간 기준"],
+                          ["ytd", "YTD 기준"]
+                        ].map(([mode, label]) => {
+                          const active = yearOneMode === mode;
+                          return (
+                            <button
+                              key={mode}
+                              type="button"
+                              onClick={() => setYearOneMode(mode)}
+                              aria-pressed={active}
+                              className={active ? "segment-active" : ""}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                   <div className="forecast-grid">
                     {demandForecasts.map((forecast, index) => (
                       <Metric
-                        key={forecast.year}
+                        key={`${yearOneMode}_${toDateInputValue(forecast.periodStart)}`}
                         label={`Year ${index + 1}${index === 0 && yearOneMode === "ytd" ? " · YTD 환산" : ""}`}
                         value={formatCount(forecast.value)}
                         subtext={yearOneMode === "ytd"
                           ? (index === 0
                               ? `${forecast.year}년 현재 시점 · 성장률 ${forecast.growthYears.toFixed(2)}년 일할 반영`
                               : `${forecast.year}년 1/1~12/31 · YTD 환산값 대비 성장률 ${index}년 누적`)
-                          : `${forecast.year}년 연간 기준`}
+                          : `${formatPeriodDate(forecast.periodStart)}~${formatPeriodDate(forecast.periodEnd)} · 12개월`}
                         tone="positive"
                       />
                     ))}
@@ -739,7 +808,11 @@ export default function MarketSizeAnalysisTab({
                     </div>
                   </div>
                   <div className="metric-grid metric-grid-compact">
-                    <Metric label="기준 공급 원가" value={formatWon(calculations.baseUnitCost)} />
+                    <Metric
+                      label="기준 공급 원가"
+                      value={formatWon(calculations.manufacturerAdjustedUnitCost)}
+                      subtext={manufacturerCostSubtext}
+                    />
                     <Metric
                       label="참약사 예상 판매가"
                       value={formatWon(calculations.chamyaksaSellingPrice)}
@@ -839,6 +912,9 @@ export default function MarketSizeAnalysisTab({
         .market-input-grid, .market-result-grid { display: grid; gap: 14px; }
         .market-input-grid { grid-template-columns: minmax(0, 1.25fr) minmax(340px, .75fr); }
         .market-result-grid { grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr); }
+        .forecast-controls { display: flex; align-items: flex-end; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+        .annual-base-date-control { display: grid; gap: 3px; color: #475569; font-size: 11px; font-weight: 800; }
+        .annual-base-date-control input { width: 145px; min-height: 30px; padding: 4px 7px; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; color: #0f172a; box-sizing: border-box; font-size: 12px; }
         .section-title { min-height: 58px; padding: 11px 14px; border-bottom: 1px solid #dbe3ee; display: flex; align-items: center; justify-content: space-between; gap: 12px; box-sizing: border-box; background: #f8fafc; }
         .section-title > div { display: grid; gap: 3px; }
         .section-title strong { color: #0f172a; font-size: 15px; }
@@ -896,6 +972,7 @@ export default function MarketSizeAnalysisTab({
           .market-year-table { grid-template-columns: 68px minmax(110px, 1fr) minmax(110px, 1fr) minmax(130px, 1fr) 80px; overflow-x: auto; }
           .condition-grid, .metric-grid, .metric-grid-compact, .forecast-grid { grid-template-columns: 1fr; }
           .forecast-heading { align-items: flex-start; flex-direction: column; }
+          .forecast-controls { width: 100%; justify-content: flex-start; }
         }
       `}</style>
     </div>
