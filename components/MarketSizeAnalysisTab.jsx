@@ -227,10 +227,9 @@ export default function MarketSizeAnalysisTab({
     ? Math.max(0, 1 + (selectedGrowthRate / 100))
     : 1;
   const annualDemandBase = calculations.annualDemandUnits;
+  const forecastBaseGrowthYears = yearOneMode === "ytd" ? elapsedYearRatio : 0;
   const demandForecasts = [0, 1, 2].map((offset) => {
-    const growthYears = yearOneMode === "ytd" && offset === 0
-      ? elapsedYearRatio
-      : offset;
+    const growthYears = forecastBaseGrowthYears + offset;
     return {
       year: currentYear + offset,
       growthYears,
@@ -649,13 +648,15 @@ export default function MarketSizeAnalysisTab({
                         {selectedGrowthRate === null
                           ? "성장률이 없으면 현재 예상 소진수량을 유지합니다."
                           : `${growthRateYears}개년 연평균 성장률 ${formatDecimal(selectedGrowthRate, 2, "%")} 적용`}
-                        {yearOneMode === "ytd" ? " · Year 1만 현재 날짜 기준, Year 2·3은 각 연도 1/1~12/31 기준" : ""}
+                        {yearOneMode === "ytd"
+                          ? " · 현재 시점까지 성장률을 일할 반영한 환산값에 Year 2·3의 연간 성장률을 순차 적용합니다."
+                          : ""}
                       </span>
                     </div>
-                    <div className="growth-period-control" role="group" aria-label="Year 1 계산 기준">
+                    <div className="growth-period-control" role="group" aria-label="예상 소진수량 계산 기준">
                       {[
-                        ["annual", "Year 1 연간"],
-                        ["ytd", "Year 1 YTD"]
+                        ["annual", "연간 기준"],
+                        ["ytd", "YTD 기준"]
                       ].map(([mode, label]) => {
                         const active = yearOneMode === mode;
                         return (
@@ -676,13 +677,13 @@ export default function MarketSizeAnalysisTab({
                     {demandForecasts.map((forecast, index) => (
                       <Metric
                         key={forecast.year}
-                        label={`Year ${index + 1}${index === 0 && yearOneMode === "ytd" ? " · YTD" : ""}`}
+                        label={`Year ${index + 1}${index === 0 && yearOneMode === "ytd" ? " · YTD 환산" : ""}`}
                         value={formatCount(forecast.value)}
                         subtext={yearOneMode === "ytd"
                           ? (index === 0
-                              ? `${forecast.year}년 현재 시점 · 성장기간 ${forecast.growthYears.toFixed(2)}년 일할 반영`
-                              : `${forecast.year}년 1/1~12/31 · 성장률 ${index}년 누적`)
-                          : `${forecast.year}년 예상`}
+                              ? `${forecast.year}년 현재 시점 · 성장률 ${forecast.growthYears.toFixed(2)}년 일할 반영`
+                              : `${forecast.year}년 1/1~12/31 · YTD 환산값 대비 성장률 ${index}년 누적`)
+                          : `${forecast.year}년 연간 기준`}
                         tone="positive"
                       />
                     ))}
@@ -712,17 +713,19 @@ export default function MarketSizeAnalysisTab({
                   <div className="section-title">
                     <div>
                       <strong>조정 시나리오 기댓값</strong>
-                      <span>선택한 침투율·공급단가·유통 마진 기준</span>
+                      <span>선택한 침투율·실제 공급원가·유통 구조 판매가 기준</span>
                     </div>
                   </div>
                   <div className="metric-grid metric-grid-compact">
                     <Metric label="기준 공급 원가" value={formatWon(calculations.baseUnitCost)} />
                     <Metric
-                      label="조정 공급 원가"
-                      value={formatWon(calculations.adjustedUnitCost)}
-                      subtext={calculations.adjustedUnitCostOverride !== null ? "직접 입력값" : "제조사 판매가 조정률 자동계산"}
+                      label="참약사 예상 판매가"
+                      value={formatWon(calculations.chamyaksaSellingPrice)}
+                      subtext={calculations.distributionSellingPrice === null
+                        ? "유통 마진 미설정"
+                        : `유통 구조 ${formatWon(calculations.distributionSellingPrice)} · ${calculations.pricingScenario?.label || "기본"}`}
                     />
-                    <Metric label="참약사 예상 판매가" value={formatWon(calculations.chamyaksaSellingPrice)} subtext={calculations.pricingScenario?.label || "유통 마진 미설정"} />
+                    <Metric label="개당 예상 매출총이익" value={formatWon(calculations.marginPerUnit)} tone="positive" />
                     <Metric label="연간 기대 매출" value={formatCompactWon(calculations.expectedRevenue)} />
                     <Metric label="연간 기대 매출총이익" value={formatCompactWon(calculations.expectedGrossProfit)} tone="positive" />
                     <Metric label="금융비용 차감 기댓값" value={formatCompactWon(calculations.expectedProfitAfterFinance)} tone={calculations.expectedProfitAfterFinance >= 0 ? "positive" : "warning"} />
@@ -832,7 +835,7 @@ export default function MarketSizeAnalysisTab({
         .condition-grid label { min-width: 0; }
         .condition-grid label > span { display: block; margin-bottom: 5px; color: #475569; font-size: 11px; font-weight: 800; }
         .growth-period-control { display: inline-flex !important; grid-auto-flow: column; gap: 5px !important; }
-        .growth-period-control button { min-height: 30px; padding: 5px 10px; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; color: #475569; cursor: pointer; font-size: 12px; font-weight: 900; }
+        .growth-period-control button { min-height: 30px; padding: 5px 10px; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; color: #475569; cursor: pointer; font-size: 12px; font-weight: 900; white-space: nowrap; }
         .growth-period-control button.segment-active { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; }
         .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
         .metric-grid-compact { grid-template-columns: repeat(3, minmax(0, 1fr)); }

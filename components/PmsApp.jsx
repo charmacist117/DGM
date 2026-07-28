@@ -69,6 +69,7 @@ const DASHBOARD_MARKET_GROWTH_YEAR_FILTER_SEED_KEY = "pharmadev_dashboard_change
 const DASHBOARD_MARKET_YTD_PRORATION_FIX_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260727_16";
 const DASHBOARD_MARKET_RESULT_WIDTH_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260728_17";
 const DASHBOARD_MARKET_DISTRIBUTION_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260728_18";
+const DASHBOARD_MARKET_YTD_FORECAST_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260728_19";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -4893,6 +4894,37 @@ export default function PmsApp() {
           changes: [
             "시장 규모 분석의 공급단가 검색창 위에 유통 구조 설정 건만 보기 필터를 추가했습니다.",
             "유통 구조가 완료 저장된 품목만 기존 카테고리·성분명·제조사 검색 조건과 함께 조회할 수 있습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_MARKET_YTD_FORECAST_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_MARKET_YTD_FORECAST_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260728_market_forecast_calculation")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260728_market_forecast_calculation",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "시장 규모 분석의 예상 소진수량 기준 명칭을 연간 기준·YTD 기준으로 명확하게 정리했습니다.",
+            "YTD 환산 기준에서 현재 시점까지 일할 반영한 성장률을 기준값으로 삼고 Year 2·3에도 연간 성장률을 순차 누적하도록 계산식을 수정했습니다.",
+            "참약사 예상 판매가는 조정 공급원가가 아닌 유통 구조에서 설정한 참약사 판매가를 기준으로 계산하고, 참약사 판매가 조정률만 별도로 반영하도록 수정했습니다.",
+            "조정 공급원가는 전국 예상 공급수량 환산에만 사용하고 배치 자금·금융비용·참약사 마진·기대이익은 실제 기준 공급원가로 계산하도록 분리했습니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()
