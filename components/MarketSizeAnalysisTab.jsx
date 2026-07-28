@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   applyMarketAnalysisDefaults,
+  calculateBatchFinance,
   calculateMarketAnalysis,
   marketAnalysisMatchesDefaults,
   normalizeMarketAnalysisDefaults,
@@ -227,7 +228,7 @@ export default function MarketSizeAnalysisTab({
     ? Math.max(0, 1 + (selectedGrowthRate / 100))
     : 1;
   const annualDemandBase = calculations.annualDemandUnits;
-  const forecastBaseGrowthYears = yearOneMode === "ytd" ? elapsedYearRatio : 0;
+  const forecastBaseGrowthYears = yearOneMode === "ytd" ? elapsedYearRatio : 1;
   const demandForecasts = [0, 1, 2].map((offset) => {
     const growthYears = forecastBaseGrowthYears + offset;
     return {
@@ -238,6 +239,27 @@ export default function MarketSizeAnalysisTab({
         : annualDemandBase * (growthMultiplier ** growthYears)
     };
   });
+  const planningDemandUnits = demandForecasts[0]?.value ?? null;
+  const planningBatchFinance = calculateBatchFinance({
+    demandUnits: planningDemandUnits,
+    batchQuantity: calculations.batchQuantity,
+    minimumOrderBatches: calculations.minimumOrderBatches,
+    unitCost: calculations.baseUnitCost,
+    annualInterestRate: calculations.annualInterestRate
+  });
+  const planningExpectedRevenue = planningDemandUnits !== null && calculations.chamyaksaSellingPrice !== null
+    ? planningDemandUnits * calculations.chamyaksaSellingPrice
+    : null;
+  const planningExpectedGrossProfit = planningDemandUnits !== null && calculations.marginPerUnit !== null
+    ? planningDemandUnits * calculations.marginPerUnit
+    : null;
+  const planningExpectedProfitAfterFinance = planningExpectedGrossProfit !== null
+    && planningBatchFinance.annualFinanceCost !== null
+    ? planningExpectedGrossProfit - planningBatchFinance.annualFinanceCost
+    : null;
+  const planningBasisLabel = selectedGrowthRate === null
+    ? `Year 1 ${yearOneMode === "ytd" ? "YTD" : "연간"} 기준`
+    : `${growthRateYears}개년 성장률 · Year 1 ${yearOneMode === "ytd" ? "YTD" : "연간"} 기준`;
 
   useEffect(() => {
     setEditingItemId(null);
@@ -696,16 +718,16 @@ export default function MarketSizeAnalysisTab({
                   <div className="section-title">
                     <div>
                       <strong>배치 소진 및 금융비용</strong>
-                      <span>연간 4% 기본값을 분석 조건에서 조정할 수 있습니다.</span>
+                      <span>{planningBasisLabel} · 금융비용은 분석 조건에서 조정할 수 있습니다.</span>
                     </div>
                   </div>
                   <div className="metric-grid metric-grid-compact">
-                    <Metric label="최소 주문 반영 공급수량" value={formatCount(calculations.orderQuantity)} subtext={`배치당 ${formatCount(calculations.batchQuantity)} · 최소 ${calculations.minimumOrderBatches}배치`} />
-                    <Metric label="연간 필요 배치" value={formatDecimal(calculations.exactBatches, 2, "배치")} subtext={calculations.orderBatchCount === null ? "" : `실제 발주 기준 ${calculations.orderBatchCount}배치`} />
-                    <Metric label="주문 수량 소진 예상기간" value={formatDecimal(calculations.depletionMonthsPerBatch, 1, "개월")} tone={calculations.depletionMonthsPerBatch > 12 ? "warning" : "default"} />
-                    <Metric label="최소 주문 필요자금" value={formatCompactWon(calculations.batchCapital)} />
-                    <Metric label="평균 재고자금" value={formatCompactWon(calculations.averageInventoryCapital)} />
-                    <Metric label="연간 금융 기회비용" value={formatWon(calculations.annualFinanceCost)} tone="warning" />
+                    <Metric label="최소 주문 반영 공급수량" value={formatCount(planningBatchFinance.orderQuantity)} subtext={`배치당 ${formatCount(calculations.batchQuantity)} · 최소 ${calculations.minimumOrderBatches}배치`} />
+                    <Metric label="연간 필요 배치" value={formatDecimal(planningBatchFinance.exactBatches, 2, "배치")} subtext={planningBatchFinance.orderBatchCount === null ? "" : `실제 발주 기준 ${planningBatchFinance.orderBatchCount}배치`} />
+                    <Metric label="주문 수량 소진 예상기간" value={formatDecimal(planningBatchFinance.depletionMonthsPerBatch, 1, "개월")} tone={planningBatchFinance.depletionMonthsPerBatch > 12 ? "warning" : "default"} />
+                    <Metric label="최소 주문 필요자금" value={formatCompactWon(planningBatchFinance.batchCapital)} />
+                    <Metric label="평균 재고자금" value={formatCompactWon(planningBatchFinance.averageInventoryCapital)} />
+                    <Metric label="연간 금융 기회비용" value={formatWon(planningBatchFinance.annualFinanceCost)} tone="warning" />
                   </div>
                 </section>
 
@@ -713,7 +735,7 @@ export default function MarketSizeAnalysisTab({
                   <div className="section-title">
                     <div>
                       <strong>조정 시나리오 기댓값</strong>
-                      <span>선택한 침투율·실제 공급원가·유통 구조 판매가 기준</span>
+                      <span>{planningBasisLabel} · 침투율·실제 공급원가·유통 구조 판매가 기준</span>
                     </div>
                   </div>
                   <div className="metric-grid metric-grid-compact">
@@ -726,9 +748,9 @@ export default function MarketSizeAnalysisTab({
                         : `유통 구조 ${formatWon(calculations.distributionSellingPrice)} · ${calculations.pricingScenario?.label || "기본"}`}
                     />
                     <Metric label="개당 예상 매출총이익" value={formatWon(calculations.marginPerUnit)} tone="positive" />
-                    <Metric label="연간 기대 매출" value={formatCompactWon(calculations.expectedRevenue)} />
-                    <Metric label="연간 기대 매출총이익" value={formatCompactWon(calculations.expectedGrossProfit)} tone="positive" />
-                    <Metric label="금융비용 차감 기댓값" value={formatCompactWon(calculations.expectedProfitAfterFinance)} tone={calculations.expectedProfitAfterFinance >= 0 ? "positive" : "warning"} />
+                    <Metric label="연간 기대 매출" value={formatCompactWon(planningExpectedRevenue)} />
+                    <Metric label="연간 기대 매출총이익" value={formatCompactWon(planningExpectedGrossProfit)} tone="positive" />
+                    <Metric label="금융비용 차감 기댓값" value={formatCompactWon(planningExpectedProfitAfterFinance)} tone={planningExpectedProfitAfterFinance >= 0 ? "positive" : "warning"} />
                   </div>
                 </section>
               </div>
