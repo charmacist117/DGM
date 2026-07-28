@@ -175,10 +175,10 @@ function validateAnalysis(analysis) {
   }
 }
 
-function Metric({ label, value, subtext, tone = "default" }) {
+function Metric({ label, value, subtext, tone = "default", className = "" }) {
   const color = tone === "positive" ? "#047857" : (tone === "warning" ? "#b45309" : "#0f172a");
   return (
-    <div className="market-metric">
+    <div className={`market-metric ${className}`.trim()}>
       <span>{label}</span>
       <strong style={{ color }}>{value}</strong>
       {subtext ? <small>{subtext}</small> : null}
@@ -796,7 +796,19 @@ export default function MarketSizeAnalysisTab({
                     <Metric label="주문 수량 소진 예상기간" value={formatDecimal(planningBatchFinance.depletionMonthsPerBatch, 1, "개월")} tone={planningBatchFinance.depletionMonthsPerBatch > 12 ? "warning" : "default"} />
                     <Metric label="최소 주문 필요자금" value={formatCompactWon(planningBatchFinance.batchCapital)} />
                     <Metric label="평균 재고자금" value={formatCompactWon(planningBatchFinance.averageInventoryCapital)} />
-                    <Metric label="연간 금융 기회비용" value={formatWon(planningBatchFinance.annualFinanceCost)} tone="warning" />
+                    <Metric
+                      label="연간 금융 기회비용"
+                      value={formatWon(planningBatchFinance.annualFinanceCost)}
+                      subtext={`FY 기준 · 재고 보유 ${formatDecimal(planningBatchFinance.annualFinanceMonths, 1, "개월")} 반영`}
+                      tone="warning"
+                    />
+                    <Metric
+                      label="총 금융 기회비용"
+                      value={formatWon(planningBatchFinance.totalFinanceCost)}
+                      subtext={`${formatDecimal(planningBatchFinance.depletionMonthsPerBatch, 1, "개월")} 균등 소진 · 평균 재고 50% 가정`}
+                      tone="warning"
+                      className="total-finance-metric"
+                    />
                   </div>
                 </section>
 
@@ -965,6 +977,7 @@ export default function MarketSizeAnalysisTab({
         :global(.market-metric span) { color: #64748b; font-size: 11px; font-weight: 800; }
         :global(.market-metric strong) { font-size: 17px; line-height: 1.25; overflow-wrap: anywhere; }
         :global(.market-metric small) { color: #64748b; font-size: 10px; line-height: 1.4; }
+        :global(.total-finance-metric) { grid-column: 1 / -1; }
         @media (max-width: 1500px) {
           .market-input-grid, .market-result-grid { grid-template-columns: 1fr; }
           .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

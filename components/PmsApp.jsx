@@ -75,6 +75,7 @@ const DASHBOARD_MARKET_ANNUAL_BASE_DATE_SEED_KEY = "pharmadev_dashboard_changelo
 const DASHBOARD_MARKET_MANUFACTURER_COST_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260728_22";
 const DASHBOARD_MARKET_EXPECTED_MARGIN_RATE_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260728_23";
 const DASHBOARD_MARKET_SCENARIO_GRID_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260728_24";
+const DASHBOARD_MARKET_TOTAL_FINANCE_COST_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260728_25";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -5075,6 +5076,36 @@ export default function PmsApp() {
           changeDateTime: toDashboardDateTimeInput(),
           changes: [
             "조정 시나리오 기댓값 표를 첫째 줄 4개, 둘째 줄 3개 셀 구성으로 정렬했습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_MARKET_TOTAL_FINANCE_COST_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_MARKET_TOTAL_FINANCE_COST_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260728_market_total_finance_cost")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260728_market_total_finance_cost",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "배치 소진 및 금융비용 표에 주문 물량 전체 소진기간의 총 금융 기회비용을 추가했습니다.",
+            "연간 금융 기회비용은 FY 내 주문 수량 소진 예상기간의 월수를 반영하고, 총 금융 기회비용은 완전 소진일까지 재고가 균등하게 감소한다는 가정으로 계산합니다.",
+            "총 금융 기회비용을 CSV 백업에도 반영했습니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()
