@@ -279,23 +279,39 @@ export default function MarketSizeAnalysisTab({
         : annualDemandBase * (growthMultiplier ** growthYears)
     };
   });
-  const planningDemandUnits = demandForecasts[0]?.value ?? null;
-  const planningBatchFinance = calculateBatchFinance({
-    demandUnits: planningDemandUnits,
-    batchQuantity: calculations.batchQuantity,
-    minimumOrderBatches: calculations.minimumOrderBatches,
-    unitCost: calculations.manufacturerAdjustedUnitCost,
-    annualInterestRate: calculations.annualInterestRate
+  const scenarioForecasts = demandForecasts.map((forecast) => {
+    const finance = calculateBatchFinance({
+      demandUnits: forecast.value,
+      batchQuantity: calculations.batchQuantity,
+      minimumOrderBatches: calculations.minimumOrderBatches,
+      unitCost: calculations.manufacturerAdjustedUnitCost,
+      annualInterestRate: calculations.annualInterestRate
+    });
+    const expectedRevenue = forecast.value !== null && calculations.chamyaksaSellingPrice !== null
+      ? forecast.value * calculations.chamyaksaSellingPrice
+      : null;
+    const expectedGrossProfit = forecast.value !== null && calculations.marginPerUnit !== null
+      ? forecast.value * calculations.marginPerUnit
+      : null;
+    const expectedProfitAfterFinance = expectedGrossProfit !== null && finance.annualFinanceCost !== null
+      ? expectedGrossProfit - finance.annualFinanceCost
+      : null;
+    return {
+      ...forecast,
+      finance,
+      expectedRevenue,
+      expectedGrossProfit,
+      expectedProfitAfterFinance
+    };
   });
-  const planningExpectedRevenue = planningDemandUnits !== null && calculations.chamyaksaSellingPrice !== null
-    ? planningDemandUnits * calculations.chamyaksaSellingPrice
+  const planningBatchFinance = scenarioForecasts[0]?.finance ?? calculateBatchFinance();
+  const planningTotalExpectedGrossProfit = planningBatchFinance.orderQuantity !== null
+    && calculations.marginPerUnit !== null
+    ? planningBatchFinance.orderQuantity * calculations.marginPerUnit
     : null;
-  const planningExpectedGrossProfit = planningDemandUnits !== null && calculations.marginPerUnit !== null
-    ? planningDemandUnits * calculations.marginPerUnit
-    : null;
-  const planningExpectedProfitAfterFinance = planningExpectedGrossProfit !== null
-    && planningBatchFinance.annualFinanceCost !== null
-    ? planningExpectedGrossProfit - planningBatchFinance.annualFinanceCost
+  const planningTotalExpectedProfitAfterFinance = planningTotalExpectedGrossProfit !== null
+    && planningBatchFinance.totalFinanceCost !== null
+    ? planningTotalExpectedGrossProfit - planningBatchFinance.totalFinanceCost
     : null;
   const manufacturerAdjustmentRate = Number(calculations.analysis.manufacturerSellingPriceAdjustmentRate);
   const manufacturerCostSubtext = Number.isFinite(manufacturerAdjustmentRate) && manufacturerAdjustmentRate !== 0
@@ -805,7 +821,7 @@ export default function MarketSizeAnalysisTab({
                     <Metric
                       label="총 금융 기회비용"
                       value={formatWon(planningBatchFinance.totalFinanceCost)}
-                      subtext={`${formatDecimal(planningBatchFinance.depletionMonthsPerBatch, 1, "개월")} 균등 소진 · 평균 재고 50% 가정`}
+                      subtext={`연간 필요 ${formatDecimal(planningBatchFinance.exactBatches, 2, "배치")} · 주문물량 연 ${formatDecimal(planningBatchFinance.annualDepletionRatePercent, 1, "%")} 소진 · 총 ${formatDecimal(planningBatchFinance.depletionMonthsPerBatch, 1, "개월")}`}
                       tone="warning"
                       className="total-finance-metric"
                     />
@@ -839,9 +855,35 @@ export default function MarketSizeAnalysisTab({
                       tone={calculations.chamyaksaExpectedMarginRate >= 0 ? "positive" : "warning"}
                     />
                     <Metric label="개당 예상 매출총이익" value={formatWon(calculations.marginPerUnit)} tone="positive" />
-                    <Metric label="연간 기대 매출" value={formatCompactWon(planningExpectedRevenue)} />
-                    <Metric label="연간 기대 매출총이익" value={formatCompactWon(planningExpectedGrossProfit)} tone="positive" />
-                    <Metric label="금융비용 차감 기댓값" value={formatCompactWon(planningExpectedProfitAfterFinance)} tone={planningExpectedProfitAfterFinance >= 0 ? "positive" : "warning"} />
+                    {scenarioForecasts.map((forecast, index) => (
+                      <div className="market-metric scenario-year-metric" key={`scenario_${yearOneMode}_${toDateInputValue(forecast.periodStart)}`}>
+                        <span>Year {index + 1}{index === 0 && yearOneMode === "ytd" ? " · YTD" : ""}</span>
+                        <strong>{index === 0 && yearOneMode === "ytd" ? "YTD 손익 전망" : "연간 손익 전망"}</strong>
+                        <small>
+                          {formatPeriodDate(forecast.periodStart)}~
+                          {index === 0 && yearOneMode === "ytd" ? formatPeriodDate(today) : formatPeriodDate(forecast.periodEnd)}
+                        </small>
+                        <dl>
+                          <div><dt>기대 매출</dt><dd>{formatCompactWon(forecast.expectedRevenue)}</dd></div>
+                          <div><dt>매출총이익</dt><dd>{formatCompactWon(forecast.expectedGrossProfit)}</dd></div>
+                          <div><dt>금융비용 차감</dt><dd className={forecast.expectedProfitAfterFinance >= 0 ? "positive" : "warning"}>{formatCompactWon(forecast.expectedProfitAfterFinance)}</dd></div>
+                        </dl>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="scenario-total-grid">
+                    <Metric
+                      label="총 매출총이익"
+                      value={formatCompactWon(planningTotalExpectedGrossProfit)}
+                      subtext={`최초 주문 ${formatCount(planningBatchFinance.orderQuantity)} 완전 소진 기준`}
+                      tone="positive"
+                    />
+                    <Metric
+                      label="총 금융비용 차감 기댓값"
+                      value={formatCompactWon(planningTotalExpectedProfitAfterFinance)}
+                      subtext={`총 금융 기회비용 ${formatWon(planningBatchFinance.totalFinanceCost)} 차감`}
+                      tone={planningTotalExpectedProfitAfterFinance >= 0 ? "positive" : "warning"}
+                    />
                   </div>
                 </section>
               </div>
@@ -956,6 +998,7 @@ export default function MarketSizeAnalysisTab({
         .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
         .metric-grid-compact { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         .scenario-metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .scenario-total-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid #cbd5e1; background: #f8fafc; }
         .forecast-band { border-top: 1px solid #dbe3ee; background: #f8fafc; }
         .forecast-heading { min-height: 58px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
         .forecast-heading > div:first-child { display: grid; gap: 3px; }
@@ -978,6 +1021,13 @@ export default function MarketSizeAnalysisTab({
         :global(.market-metric strong) { font-size: 17px; line-height: 1.25; overflow-wrap: anywhere; }
         :global(.market-metric small) { color: #64748b; font-size: 10px; line-height: 1.4; }
         :global(.total-finance-metric) { grid-column: 1 / -1; }
+        :global(.scenario-year-metric) { align-content: start; }
+        :global(.scenario-year-metric dl) { margin: 2px 0 0; display: grid; gap: 4px; }
+        :global(.scenario-year-metric dl div) { display: flex; justify-content: space-between; gap: 8px; padding-top: 4px; border-top: 1px dashed #dbe3ee; }
+        :global(.scenario-year-metric dt) { color: #64748b; font-size: 10px; }
+        :global(.scenario-year-metric dd) { margin: 0; color: #0f172a; font-size: 11px; font-weight: 900; text-align: right; }
+        :global(.scenario-year-metric dd.positive) { color: #047857; }
+        :global(.scenario-year-metric dd.warning) { color: #b45309; }
         @media (max-width: 1500px) {
           .market-input-grid, .market-result-grid { grid-template-columns: 1fr; }
           .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -991,7 +1041,7 @@ export default function MarketSizeAnalysisTab({
         }
         @media (max-width: 640px) {
           .market-year-table { grid-template-columns: 68px minmax(110px, 1fr) minmax(110px, 1fr) minmax(130px, 1fr) 80px; overflow-x: auto; }
-          .condition-grid, .metric-grid, .metric-grid-compact, .scenario-metric-grid, .forecast-grid { grid-template-columns: 1fr; }
+          .condition-grid, .metric-grid, .metric-grid-compact, .scenario-metric-grid, .scenario-total-grid, .forecast-grid { grid-template-columns: 1fr; }
           .forecast-heading { align-items: flex-start; flex-direction: column; }
           .forecast-controls { width: 100%; justify-content: flex-start; }
         }
