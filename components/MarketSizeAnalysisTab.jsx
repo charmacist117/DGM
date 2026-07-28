@@ -807,7 +807,7 @@ export default function MarketSizeAnalysisTab({
                       <span>{planningBasisLabel} · 침투율·실제 공급원가·유통 구조 판매가 기준</span>
                     </div>
                   </div>
-                  <div className="metric-grid metric-grid-compact">
+                  <div className="metric-grid metric-grid-compact scenario-metric-grid">
                     <Metric
                       label="기준 공급 원가"
                       value={formatWon(calculations.manufacturerAdjustedUnitCost)}
@@ -943,6 +943,7 @@ export default function MarketSizeAnalysisTab({
         .growth-period-control button.segment-active { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; }
         .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
         .metric-grid-compact { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .scenario-metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
         .forecast-band { border-top: 1px solid #dbe3ee; background: #f8fafc; }
         .forecast-heading { min-height: 58px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
         .forecast-heading > div:first-child { display: grid; gap: 3px; }
@@ -967,6 +968,7 @@ export default function MarketSizeAnalysisTab({
         @media (max-width: 1500px) {
           .market-input-grid, .market-result-grid { grid-template-columns: 1fr; }
           .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .scenario-metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
         }
         @media (max-width: 920px) {
           .market-layout { grid-template-columns: 1fr; }
@@ -976,7 +978,7 @@ export default function MarketSizeAnalysisTab({
         }
         @media (max-width: 640px) {
           .market-year-table { grid-template-columns: 68px minmax(110px, 1fr) minmax(110px, 1fr) minmax(130px, 1fr) 80px; overflow-x: auto; }
-          .condition-grid, .metric-grid, .metric-grid-compact, .forecast-grid { grid-template-columns: 1fr; }
+          .condition-grid, .metric-grid, .metric-grid-compact, .scenario-metric-grid, .forecast-grid { grid-template-columns: 1fr; }
           .forecast-heading { align-items: flex-start; flex-direction: column; }
           .forecast-controls { width: 100%; justify-content: flex-start; }
         }
