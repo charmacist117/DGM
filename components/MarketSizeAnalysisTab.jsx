@@ -182,11 +182,28 @@ function validateAnalysis(analysis) {
   }
 }
 
-function Metric({ label, value, subtext, tone = "default", className = "" }) {
+function FormulaHint({ formula }) {
+  if (!formula) return null;
+  return (
+    <span
+      className="formula-hint"
+      title={`계산식: ${formula}`}
+      aria-label={`계산식: ${formula}`}
+      tabIndex={0}
+    >
+      i
+    </span>
+  );
+}
+
+function Metric({ label, value, subtext, tone = "default", className = "", formula = "" }) {
   const color = tone === "positive" ? "#047857" : (tone === "warning" ? "#b45309" : "#0f172a");
   return (
     <div className={`market-metric ${className}`.trim()}>
-      <span>{label}</span>
+      <div className="metric-label-line">
+        <span>{label}</span>
+        <FormulaHint formula={formula} />
+      </div>
       <strong style={{ color }}>{value}</strong>
       {subtext ? <small>{subtext}</small> : null}
     </div>
@@ -722,8 +739,16 @@ export default function MarketSizeAnalysisTab({
                   </div>
                 </div>
                 <div className="metric-grid">
-                  <Metric label="기준 시장 규모" value={formatCompactWon(calculations.latestYear?.totalKrw)} />
-                  <Metric label="5개년 평균 시장 규모" value={formatCompactWon(calculations.averageMarketKrw)} />
+                  <Metric
+                    label="기준 시장 규모"
+                    value={formatCompactWon(calculations.latestYear?.totalKrw)}
+                    formula="최신 연도 생산실적(천원) × 1,000 + 최신 연도 수입실적(USD) × 기준 환율"
+                  />
+                  <Metric
+                    label="5개년 평균 시장 규모"
+                    value={formatCompactWon(calculations.averageMarketKrw)}
+                    formula="값이 입력된 각 연도 합산 시장 규모의 합 ÷ 입력 연도 수"
+                  />
                   <Metric
                     label={growthRateYears > 0 ? `${growthRateYears}개년 연평균 성장률` : "연평균 성장률"}
                     value={formatDecimal(selectedGrowthRate, 2, "%")}
@@ -731,12 +756,35 @@ export default function MarketSizeAnalysisTab({
                       ? "성장률 포함 실적을 2개년 이상 선택해주세요."
                       : (growthRatePeriod === "3y" ? "포함된 최근 3개 실적 기준" : `포함 선택한 ${growthRateYears}개 실적 기준`)}
                     tone={selectedGrowthRate === null ? "default" : (selectedGrowthRate >= 0 ? "positive" : "warning")}
+                    formula="(마지막 포함 연도 시장 규모 ÷ 첫 포함 연도 시장 규모)^(1 ÷ 연도 간격) - 1"
                   />
-                  <Metric label="전국 예상 공급수량" value={formatCount(calculations.marketUnitCount)} subtext={`시장 환산 단가 ${formatWon(calculations.adjustedUnitCost)}`} />
-                  <Metric label="참약사 약국 점유율" value={formatDecimal(calculations.pharmacyShareRate, 2, "%")} />
-                  <Metric label="침투 예상 가맹약국" value={formatCount(calculations.activeChainPharmacies, "개소")} />
-                  <Metric label="연간 예상 소진수량" value={formatCount(calculations.annualDemandUnits)} tone="positive" />
-                  <Metric label="침투 약국당 연간 수량" value={formatCount(calculations.annualUnitsPerActivePharmacy)} />
+                  <Metric
+                    label="전국 예상 공급수량"
+                    value={formatCount(calculations.marketUnitCount)}
+                    subtext={`시장 환산 단가 ${formatWon(calculations.adjustedUnitCost)}`}
+                    formula="기준 시장 규모 ÷ 시장 환산 평균 공급단가"
+                  />
+                  <Metric
+                    label="참약사 약국 점유율"
+                    value={formatDecimal(calculations.pharmacyShareRate, 2, "%")}
+                    formula="참약사 약국 수 ÷ 전국 약국 수 × 100"
+                  />
+                  <Metric
+                    label="침투 예상 가맹약국"
+                    value={formatCount(calculations.activeChainPharmacies, "개소")}
+                    formula="참약사 약국 수 × 가맹약국 예상 침투율"
+                  />
+                  <Metric
+                    label="연간 예상 소진수량"
+                    value={formatCount(calculations.annualDemandUnits)}
+                    tone="positive"
+                    formula="전국 예상 공급수량 × 참약사 약국 점유율 × 가맹약국 예상 침투율"
+                  />
+                  <Metric
+                    label="침투 약국당 연간 수량"
+                    value={formatCount(calculations.annualUnitsPerActivePharmacy)}
+                    formula="연간 예상 소진수량 ÷ 침투 예상 가맹약국 수"
+                  />
                 </div>
                 <div className="forecast-band">
                   <div className="forecast-heading">
@@ -804,6 +852,9 @@ export default function MarketSizeAnalysisTab({
                               : `${forecast.year}년 1/1~12/31 · 성장률 ${formatDecimal(forecast.growthYears, 2, "년")} 반영`)
                           : `${formatPeriodDate(forecast.periodStart)}~${formatPeriodDate(forecast.periodEnd)} · 성장률 ${formatDecimal(forecast.growthYears, 2, "년")} 반영`}
                         tone="positive"
+                        formula={yearOneMode === "ytd" && index === 0
+                          ? "연간 예상 소진수량 × (1 + 연평균 성장률)^최신 실적 이후 연수 × 현재 연도 경과일수 비율"
+                          : "연간 예상 소진수량 × (1 + 연평균 성장률)^최신 실적 연도부터 해당 기간 시작일까지의 연수"}
                       />
                     ))}
                   </div>
@@ -819,16 +870,40 @@ export default function MarketSizeAnalysisTab({
                     </div>
                   </div>
                   <div className="metric-grid metric-grid-compact">
-                    <Metric label="최소 주문 반영 공급수량" value={formatCount(planningBatchFinance.orderQuantity)} subtext={`배치당 ${formatCount(calculations.batchQuantity)} · 최소 ${calculations.minimumOrderBatches}배치`} />
-                    <Metric label="연간 필요 배치" value={formatDecimal(planningBatchFinance.exactBatches, 2, "배치")} subtext={planningBatchFinance.orderBatchCount === null ? "" : `실제 발주 기준 ${planningBatchFinance.orderBatchCount}배치`} />
-                    <Metric label="주문 수량 소진 예상기간" value={formatDecimal(planningBatchFinance.depletionMonthsPerBatch, 1, "개월")} tone={planningBatchFinance.depletionMonthsPerBatch > 12 ? "warning" : "default"} />
-                    <Metric label="최소 주문 필요자금" value={formatCompactWon(planningBatchFinance.batchCapital)} />
-                    <Metric label="평균 재고자금" value={formatCompactWon(planningBatchFinance.averageInventoryCapital)} />
+                    <Metric
+                      label="최소 주문 반영 공급수량"
+                      value={formatCount(planningBatchFinance.orderQuantity)}
+                      subtext={`배치당 ${formatCount(calculations.batchQuantity)} · 최소 ${calculations.minimumOrderBatches}배치`}
+                      formula="max(올림(해당 연도 예상 소진수량 ÷ 배치당 공급수량), 최소 주문 배치 수) × 배치당 공급수량"
+                    />
+                    <Metric
+                      label="연간 필요 배치"
+                      value={formatDecimal(planningBatchFinance.exactBatches, 2, "배치")}
+                      subtext={planningBatchFinance.orderBatchCount === null ? "" : `실제 발주 기준 ${planningBatchFinance.orderBatchCount}배치`}
+                      formula="해당 연도 예상 소진수량 ÷ 배치당 공급수량"
+                    />
+                    <Metric
+                      label="주문 수량 소진 예상기간"
+                      value={formatDecimal(planningBatchFinance.depletionMonthsPerBatch, 1, "개월")}
+                      tone={planningBatchFinance.depletionMonthsPerBatch > 12 ? "warning" : "default"}
+                      formula="최소 주문 반영 공급수량 ÷ 해당 연도 예상 소진수량 × 12개월"
+                    />
+                    <Metric
+                      label="최소 주문 필요자금"
+                      value={formatCompactWon(planningBatchFinance.batchCapital)}
+                      formula="최소 주문 반영 공급수량 × 제조사 조정 공급원가"
+                    />
+                    <Metric
+                      label="평균 재고자금"
+                      value={formatCompactWon(planningBatchFinance.averageInventoryCapital)}
+                      formula="FY 내 월별 균등 소진을 가정한 평균 재고수량 × 제조사 조정 공급원가"
+                    />
                     <Metric
                       label="연간 금융 기회비용"
                       value={formatWon(planningBatchFinance.annualFinanceCost)}
                       subtext={`FY 기준 · 재고 보유 ${formatDecimal(planningBatchFinance.annualFinanceMonths, 1, "개월")} 반영`}
                       tone="warning"
+                      formula="FY 평균 재고자금 × 연 금융비용 이자율"
                     />
                     <Metric
                       label="총 금융 기회비용"
@@ -836,6 +911,7 @@ export default function MarketSizeAnalysisTab({
                       subtext={`연간 필요 ${formatDecimal(planningBatchFinance.exactBatches, 2, "배치")} · 주문물량 연 ${formatDecimal(planningBatchFinance.annualDepletionRatePercent, 1, "%")} 소진 · 총 ${formatDecimal(planningBatchFinance.depletionMonthsPerBatch, 1, "개월")}`}
                       tone="warning"
                       className="total-finance-metric"
+                      formula="최소 주문 필요자금 × 연 금융비용 이자율 × (총 소진개월 ÷ 12) ÷ 2"
                     />
                   </div>
                 </section>
@@ -852,6 +928,7 @@ export default function MarketSizeAnalysisTab({
                       label="기준 공급 원가"
                       value={formatWon(calculations.manufacturerAdjustedUnitCost)}
                       subtext={manufacturerCostSubtext}
+                      formula="기존 공급원가 × (1 + 제조사 판매가 조정률)"
                     />
                     <Metric
                       label="참약사 예상 판매가"
@@ -859,14 +936,21 @@ export default function MarketSizeAnalysisTab({
                       subtext={calculations.distributionSellingPrice === null
                         ? "유통 마진 미설정"
                         : `유통 구조 ${formatWon(calculations.distributionSellingPrice)} · ${calculations.pricingScenario?.label || "기본"}`}
+                      formula="유통 구조 참약사 판매가 × (1 + 참약사 판매가 조정률)"
                     />
                     <Metric
                       label="참약사 예상 마진율"
                       value={formatDecimal(calculations.chamyaksaExpectedMarginRate, 2, "%")}
                       subtext="제조사 조정 공급원가 반영"
                       tone={calculations.chamyaksaExpectedMarginRate >= 0 ? "positive" : "warning"}
+                      formula="(참약사 예상 판매가 - 제조사 조정 공급원가) ÷ 참약사 예상 판매가 × 100"
                     />
-                    <Metric label="개당 예상 매출총이익" value={formatWon(calculations.marginPerUnit)} tone="positive" />
+                    <Metric
+                      label="개당 예상 매출총이익"
+                      value={formatWon(calculations.marginPerUnit)}
+                      tone="positive"
+                      formula="참약사 예상 판매가 - 제조사 조정 공급원가"
+                    />
                     {scenarioForecasts.map((forecast, index) => (
                       <div className="market-metric scenario-year-metric" key={`scenario_${yearOneMode}_${toDateInputValue(forecast.periodStart)}`}>
                         <span>Year {index + 1}{index === 0 && yearOneMode === "ytd" ? " · YTD" : ""}</span>
@@ -876,9 +960,18 @@ export default function MarketSizeAnalysisTab({
                           {index === 0 && yearOneMode === "ytd" ? formatPeriodDate(today) : formatPeriodDate(forecast.periodEnd)}
                         </small>
                         <dl>
-                          <div><dt>기대 매출</dt><dd>{formatCompactWon(forecast.expectedRevenue)}</dd></div>
-                          <div><dt>매출총이익</dt><dd>{formatCompactWon(forecast.expectedGrossProfit)}</dd></div>
-                          <div><dt>금융비용 차감</dt><dd className={forecast.expectedProfitAfterFinance >= 0 ? "positive" : "warning"}>{formatCompactWon(forecast.expectedProfitAfterFinance)}</dd></div>
+                          <div>
+                            <dt>기대 매출 <FormulaHint formula="해당 Year 예상 소진수량 × 참약사 예상 판매가" /></dt>
+                            <dd>{formatCompactWon(forecast.expectedRevenue)}</dd>
+                          </div>
+                          <div>
+                            <dt>매출총이익 <FormulaHint formula="해당 Year 예상 소진수량 × 개당 예상 매출총이익" /></dt>
+                            <dd>{formatCompactWon(forecast.expectedGrossProfit)}</dd>
+                          </div>
+                          <div>
+                            <dt>금융비용 차감 <FormulaHint formula="해당 Year 매출총이익 - 해당 Year 연간 금융 기회비용" /></dt>
+                            <dd className={forecast.expectedProfitAfterFinance >= 0 ? "positive" : "warning"}>{formatCompactWon(forecast.expectedProfitAfterFinance)}</dd>
+                          </div>
                         </dl>
                       </div>
                     ))}
@@ -889,12 +982,14 @@ export default function MarketSizeAnalysisTab({
                       value={formatCompactWon(planningTotalExpectedGrossProfit)}
                       subtext={`최초 주문 ${formatCount(planningBatchFinance.orderQuantity)} 완전 소진 기준`}
                       tone="positive"
+                      formula="최소 주문 반영 공급수량 × 개당 예상 매출총이익"
                     />
                     <Metric
                       label="총 금융비용 차감 기댓값"
                       value={formatCompactWon(planningTotalExpectedProfitAfterFinance)}
                       subtext={`총 금융 기회비용 ${formatWon(planningBatchFinance.totalFinanceCost)} 차감`}
                       tone={planningTotalExpectedProfitAfterFinance >= 0 ? "positive" : "warning"}
+                      formula="총 매출총이익 - 총 금융 기회비용"
                     />
                   </div>
                 </section>
@@ -1032,11 +1127,15 @@ export default function MarketSizeAnalysisTab({
         :global(.market-metric span) { color: #64748b; font-size: 11px; font-weight: 800; }
         :global(.market-metric strong) { font-size: 17px; line-height: 1.25; overflow-wrap: anywhere; }
         :global(.market-metric small) { color: #64748b; font-size: 10px; line-height: 1.4; }
+        :global(.metric-label-line) { display: flex; align-items: center; gap: 5px; min-width: 0; }
+        :global(.formula-hint) { width: 16px; height: 16px; flex: 0 0 16px; display: inline-grid; place-items: center; border: 1px solid #94a3b8; border-radius: 50%; background: #fff; color: #475569 !important; cursor: help; font-size: 10px !important; font-style: normal; font-weight: 900 !important; line-height: 1; }
+        :global(.formula-hint:hover), :global(.formula-hint:focus-visible) { border-color: #2563eb; color: #1d4ed8 !important; outline: 2px solid #bfdbfe; outline-offset: 1px; }
         :global(.total-finance-metric) { grid-column: 1 / -1; }
         :global(.scenario-year-metric) { align-content: start; }
         :global(.scenario-year-metric dl) { margin: 2px 0 0; display: grid; gap: 4px; }
         :global(.scenario-year-metric dl div) { display: flex; justify-content: space-between; gap: 8px; padding-top: 4px; border-top: 1px dashed #dbe3ee; }
-        :global(.scenario-year-metric dt) { color: #64748b; font-size: 10px; }
+        :global(.scenario-year-metric dt) { color: #64748b; font-size: 10px; display: inline-flex; align-items: center; gap: 4px; }
+        :global(.scenario-year-metric dt .formula-hint) { width: 14px; height: 14px; flex-basis: 14px; font-size: 9px !important; }
         :global(.scenario-year-metric dd) { margin: 0; color: #0f172a; font-size: 11px; font-weight: 900; text-align: right; }
         :global(.scenario-year-metric dd.positive) { color: #047857; }
         :global(.scenario-year-metric dd.warning) { color: #b45309; }
