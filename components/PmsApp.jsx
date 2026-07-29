@@ -80,6 +80,7 @@ const DASHBOARD_MARKET_YEARLY_PROFIT_SEED_KEY = "pharmadev_dashboard_changelog_s
 const DASHBOARD_MARKET_ANNUAL_DATE_CALC_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_27";
 const DASHBOARD_MARKET_FORMULA_TOOLTIP_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_28";
 const DASHBOARD_DISTRIBUTION_MARGIN_FORMULA_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_29";
+const DASHBOARD_DISTRIBUTION_ADOPTION_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_30";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -5228,6 +5229,35 @@ export default function PmsApp() {
           changes: [
             "참약사 마진 입력값을 원가 가산율이 아닌 판매가 기준 목표 마진율로 바로잡았습니다.",
             "참약사 판매가는 최종 유통 원가 ÷ (1 - 목표 마진율)로 역산되며 시장 규모 분석과 CSV에도 동일한 산식을 적용합니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_DISTRIBUTION_ADOPTION_FILTER_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_DISTRIBUTION_ADOPTION_FILTER_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260729_distribution_adoption_filter")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260729_distribution_adoption_filter",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "유통 구조 설정 목록에 채택 예상 건만 보기 필터를 추가했습니다.",
+            "필터는 카테고리와 성분명·제조사 검색 조건에 함께 적용됩니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()

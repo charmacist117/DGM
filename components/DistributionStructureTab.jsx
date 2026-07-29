@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { calculateSellingPriceFromMarginRate } from "@/lib/pms/marketAnalysis";
 
 const panelStyle = {
@@ -186,6 +186,7 @@ export default function DistributionStructureTab({
   syncState
 }) {
   const [search, setSearch] = useState("");
+  const [onlyAdoptionExpected, setOnlyAdoptionExpected] = useState(false);
   const [editingItemId, setEditingItemId] = useState(null);
   const [activePricingScenarioId, setActivePricingScenarioId] = useState(null);
   const query = search.trim().toLowerCase();
@@ -193,8 +194,11 @@ export default function DistributionStructureTab({
     const categoryItems = selectedCategory === "all"
       ? items
       : items.filter((item) => item.category === selectedCategory);
-    if (!query) return categoryItems;
-    return categoryItems.filter((item) => {
+    const adoptionItems = onlyAdoptionExpected
+      ? categoryItems.filter((item) => item.quoteAdoptionExpected)
+      : categoryItems;
+    if (!query) return adoptionItems;
+    return adoptionItems.filter((item) => {
       const haystack = [
         item.manufacturer,
         item.packagingUnit,
@@ -202,7 +206,13 @@ export default function DistributionStructureTab({
       ].join(" ").toLowerCase();
       return haystack.includes(query);
     });
-  }, [items, query, selectedCategory]);
+  }, [items, onlyAdoptionExpected, query, selectedCategory]);
+
+  useEffect(() => {
+    if (visibleItems.length === 0) return;
+    const selectedItemIsVisible = visibleItems.some((item) => String(item.id) === String(selectedItemId));
+    if (!selectedItemIsVisible) onSelectedItemChange?.(visibleItems[0].id);
+  }, [onSelectedItemChange, selectedItemId, visibleItems]);
 
   const selectedItem = visibleItems.find((item) => String(item.id) === String(selectedItemId)) || visibleItems[0] || null;
   const isEditing = selectedItem && String(editingItemId) === String(selectedItem.id);
@@ -346,7 +356,31 @@ export default function DistributionStructureTab({
       <div className="distribution-layout">
         <aside style={{ ...panelStyle, minWidth: 0, overflow: "hidden" }}>
           <div style={{ padding: 12, borderBottom: "1px solid #dbe3ee", background: "#f8fafc" }}>
-            <label htmlFor="distribution-search" style={labelStyle}>공급단가 건 검색</label>
+            <div style={{ marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <label htmlFor="distribution-search" style={{ ...labelStyle, marginBottom: 0 }}>공급단가 건 검색</label>
+              <label
+                htmlFor="distribution-adoption-filter"
+                style={{
+                  color: onlyAdoptionExpected ? "#047857" : "#475569",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  fontSize: 11,
+                  fontWeight: 800
+                }}
+              >
+                <input
+                  id="distribution-adoption-filter"
+                  type="checkbox"
+                  checked={onlyAdoptionExpected}
+                  onChange={(event) => setOnlyAdoptionExpected(event.target.checked)}
+                  style={{ width: 15, height: 15, margin: 0, accentColor: "#059669" }}
+                />
+                채택 예상만
+              </label>
+            </div>
             <input
               id="distribution-search"
               value={search}
