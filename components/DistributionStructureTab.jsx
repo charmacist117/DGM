@@ -119,6 +119,10 @@ function getDistribution(item) {
   return {
     pricingScenarios,
     competitors: Array.isArray(source.competitors) ? source.competitors : [],
+    isConfigured: typeof source.isConfigured === "boolean"
+      ? source.isConfigured
+      : Boolean(source.updatedAt),
+    configuredAt: String(source.configuredAt || ""),
     updatedAt: String(source.updatedAt || "")
   };
 }
@@ -205,7 +209,7 @@ export default function DistributionStructureTab({
     const structureItems = structureStatusFilter === "all"
       ? adoptionItems
       : adoptionItems.filter((item) => {
-          const isConfigured = Boolean(getDistribution(item).updatedAt);
+          const isConfigured = getDistribution(item).isConfigured;
           return structureStatusFilter === "configured" ? isConfigured : !isConfigured;
         });
     if (!query) return structureItems;
@@ -306,6 +310,14 @@ export default function DistributionStructureTab({
     onUpdateItem?.(selectedItem.id, { distributionStructure: {} });
     setActivePricingScenarioId(null);
     setEditingItemId(null);
+  };
+
+  const completeDistributionStructure = () => {
+    if (!selectedItem || distribution.isConfigured) return;
+    updateDistribution({
+      isConfigured: true,
+      configuredAt: new Date().toISOString()
+    });
   };
 
   const updateCompetitor = (competitorId, patch) => {
@@ -481,8 +493,8 @@ export default function DistributionStructureTab({
                     {item.packagingForm ? ` · 포장형태: ${item.packagingForm}` : ""}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 7, marginTop: 5, fontSize: 11, fontWeight: 700 }}>
-                    <span style={{ color: structure.updatedAt ? "#047857" : "#94a3b8" }}>
-                      {structure.updatedAt ? "유통 구조 설정됨" : "유통 구조 미설정"}
+                    <span style={{ color: structure.isConfigured ? "#047857" : "#94a3b8" }}>
+                      {structure.isConfigured ? "유통 구조 설정됨" : "유통 구조 미설정"}
                     </span>
                     <span style={{ color: item.quoteAdoptionExpected ? "#047857" : "#b45309" }}>
                       {item.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
@@ -595,9 +607,30 @@ export default function DistributionStructureTab({
                 <div style={{ padding: "12px 15px", borderBottom: "1px solid #cbd5e1" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                     <div style={{ color: "#0f172a", fontSize: 16, fontWeight: 900 }}>판매가 및 마진 설정</div>
-                    <button type="button" onClick={addPricingScenario} style={{ ...secondaryButtonStyle, minHeight: 32, padding: "5px 9px", fontSize: 12 }}>
-                      + 가격대 탭 추가
-                    </button>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                      <button
+                        type="button"
+                        onClick={completeDistributionStructure}
+                        disabled={distribution.isConfigured}
+                        style={{
+                          minHeight: 32,
+                          padding: "5px 10px",
+                          border: `1px solid ${distribution.isConfigured ? "#a7f3d0" : "#2563eb"}`,
+                          borderRadius: 6,
+                          background: distribution.isConfigured ? "#ecfdf5" : "#2563eb",
+                          color: distribution.isConfigured ? "#047857" : "#fff",
+                          cursor: distribution.isConfigured ? "default" : "pointer",
+                          fontSize: 12,
+                          fontWeight: 900,
+                          whiteSpace: "nowrap"
+                        }}
+                      >
+                        {distribution.isConfigured ? "설정 완료됨" : "설정 완료"}
+                      </button>
+                      <button type="button" onClick={addPricingScenario} style={{ ...secondaryButtonStyle, minHeight: 32, padding: "5px 9px", fontSize: 12 }}>
+                        + 가격대 탭 추가
+                      </button>
+                    </div>
                   </div>
                   <div style={{ marginTop: 4, color: "#475569", fontSize: 12, lineHeight: 1.5 }}>
                     모든 금액은 VAT 포함 기준입니다.

@@ -68,6 +68,14 @@ function getItemLabel(item) {
   return ingredients.join(", ") || "성분 미입력";
 }
 
+function isDistributionConfigured(item) {
+  const distribution = item?.distributionStructure;
+  if (!distribution || typeof distribution !== "object" || Array.isArray(distribution)) return false;
+  return typeof distribution.isConfigured === "boolean"
+    ? distribution.isConfigured
+    : Boolean(String(distribution.updatedAt || "").trim());
+}
+
 function formatWon(value) {
   if (value === null || value === undefined || !Number.isFinite(value)) return "-";
   return `${Math.round(value).toLocaleString("ko-KR")}원`;
@@ -241,7 +249,7 @@ export default function MarketSizeAnalysisTab({
       ? items
       : items.filter((item) => item.category === selectedCategory);
     const distributionItems = showConfiguredDistributionOnly
-      ? categoryItems.filter((item) => Boolean(String(item.distributionStructure?.updatedAt || "").trim()))
+      ? categoryItems.filter(isDistributionConfigured)
       : categoryItems;
     if (!query) return distributionItems;
     return distributionItems.filter((item) => [

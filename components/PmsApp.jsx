@@ -83,6 +83,7 @@ const DASHBOARD_DISTRIBUTION_MARGIN_FORMULA_SEED_KEY = "pharmadev_dashboard_chan
 const DASHBOARD_DISTRIBUTION_ADOPTION_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_30";
 const DASHBOARD_DAILY_CHANGELOG_MARKET_ORDER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_31";
 const DASHBOARD_DISTRIBUTION_STRUCTURE_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_32";
+const DASHBOARD_DISTRIBUTION_EXPLICIT_COMPLETE_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_33";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -907,6 +908,10 @@ function normalizeDistributionStructure(value = {}) {
     competitors: (Array.isArray(source.competitors) ? source.competitors : [])
       .filter((competitor) => competitor && typeof competitor === "object")
       .map((competitor, index) => normalizeDistributionCompetitor(competitor, `competitor_${index + 1}`)),
+    isConfigured: typeof source.isConfigured === "boolean"
+      ? source.isConfigured
+      : Boolean(source.updatedAt),
+    configuredAt: String(source.configuredAt || ""),
     updatedAt: String(source.updatedAt || "")
   };
 }
@@ -5393,6 +5398,34 @@ export default function PmsApp() {
           changes: [
             "유통 구조 설정 검색 영역에 채택 전체·채택 예상·채택 재고 필터와 구조 전체·설정됨·미설정 필터를 추가했습니다.",
             "채택 상태와 구조 상태를 카테고리·검색어 조건과 함께 조합할 수 있습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_DISTRIBUTION_EXPLICIT_COMPLETE_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_DISTRIBUTION_EXPLICIT_COMPLETE_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260729_distribution_explicit_complete",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "유통 구조 입력 중 자동 저장과 설정 완료 상태를 분리했습니다.",
+            "미설정 품목은 값을 입력해도 목록에 유지되며 판매가 및 마진 설정의 설정 완료 버튼을 눌렀을 때만 설정됨으로 전환됩니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()
