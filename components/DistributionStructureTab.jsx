@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { calculateSellingPriceFromMarginRate } from "@/lib/pms/marketAnalysis";
 
 const panelStyle = {
   border: "1px solid #cbd5e1",
@@ -218,10 +219,13 @@ export default function DistributionStructureTab({
     : (permitFeeRateUnknown || permitFeeRate === null ? "알 수 없음" : formatPercent(permitFeeRate));
   const permitFeeApplied = hasPermitCompanyFee && (permitFeeRateUnknown || permitFeeRate !== null);
   const chamyaksaMarginRate = parseNumber(activePricingScenario?.chamyaksaMarginRate);
-  const marginRateIsValid = chamyaksaMarginRate !== null && chamyaksaMarginRate >= 0;
-  const chamyaksaSellingPrice = marginRateIsValid && baseAmounts.finalUnitCost !== null
-    ? baseAmounts.finalUnitCost * (1 + (chamyaksaMarginRate / 100))
-    : null;
+  const marginRateIsValid = chamyaksaMarginRate !== null
+    && chamyaksaMarginRate >= 0
+    && chamyaksaMarginRate < 100;
+  const chamyaksaSellingPrice = calculateSellingPriceFromMarginRate(
+    baseAmounts.finalUnitCost,
+    chamyaksaMarginRate
+  );
   const chamyaksaMarginAmount = chamyaksaSellingPrice === null || baseAmounts.finalUnitCost === null
     ? null
     : chamyaksaSellingPrice - baseAmounts.finalUnitCost;
@@ -561,17 +565,20 @@ export default function DistributionStructureTab({
                     />
                   </div>
                   <div>
-                    <label style={labelStyle}>참약사 마진 가산율 (%)</label>
+                    <label style={labelStyle}>참약사 목표 마진율 (판매가 기준, %)</label>
                     <input
                       value={activePricingScenario?.chamyaksaMarginRate || ""}
                       onChange={(event) => updatePricingScenario({ chamyaksaMarginRate: event.target.value })}
                       inputMode="decimal"
-                      placeholder="예: 20"
+                      placeholder="예: 60"
                       style={inputStyle}
                     />
                     {activePricingScenario?.chamyaksaMarginRate && !marginRateIsValid && (
-                      <div style={{ marginTop: 5, color: "#dc2626", fontSize: 11 }}>0 이상의 숫자를 입력해주세요.</div>
+                      <div style={{ marginTop: 5, color: "#dc2626", fontSize: 11 }}>0 이상 100 미만의 숫자를 입력해주세요.</div>
                     )}
+                    <div style={{ marginTop: 5, color: "#64748b", fontSize: 11 }}>
+                      목표 마진율 = 참약사 마진금액 ÷ 참약사 판매가
+                    </div>
                   </div>
                   <div className="calculated-cell">
                     <span>참약사 마진금액 (VAT 포함)</span>

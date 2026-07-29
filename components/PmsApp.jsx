@@ -79,6 +79,7 @@ const DASHBOARD_MARKET_TOTAL_FINANCE_COST_SEED_KEY = "pharmadev_dashboard_change
 const DASHBOARD_MARKET_YEARLY_PROFIT_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260728_26";
 const DASHBOARD_MARKET_ANNUAL_DATE_CALC_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_27";
 const DASHBOARD_MARKET_FORMULA_TOOLTIP_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_28";
+const DASHBOARD_DISTRIBUTION_MARGIN_FORMULA_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_29";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -5198,6 +5199,35 @@ export default function PmsApp() {
           changes: [
             "시장 규모 분석의 계산 결과 옆에 산식 참조 아이콘을 추가했습니다.",
             "시장 환산·성장률 전망·배치 및 금융비용·Year별 손익·완전 소진 총계의 계산식을 정보 아이콘에 마우스를 올려 확인할 수 있습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_DISTRIBUTION_MARGIN_FORMULA_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_DISTRIBUTION_MARGIN_FORMULA_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260729_distribution_margin_formula")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260729_distribution_margin_formula",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "참약사 마진 입력값을 원가 가산율이 아닌 판매가 기준 목표 마진율로 바로잡았습니다.",
+            "참약사 판매가는 최종 유통 원가 ÷ (1 - 목표 마진율)로 역산되며 시장 규모 분석과 CSV에도 동일한 산식을 적용합니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()
