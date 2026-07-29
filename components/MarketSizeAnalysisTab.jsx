@@ -519,6 +519,9 @@ export default function MarketSizeAnalysisTab({
                   <div style={{ marginTop: 3, color: "#475569", fontSize: 11, fontWeight: 700 }}>
                     포장단위: {item.packagingUnit || "미입력"}
                     {item.packagingForm ? ` · ${item.packagingForm}` : ""}
+                    {" · "}최소 주문: {item.minimumOrderBatchQuantity
+                      ? `${item.minimumOrderBatchQuantity}배치`
+                      : "미입력(계산 기본 1배치)"}
                   </div>
                   <div style={{ marginTop: 5, color: market.updatedAt ? "#047857" : "#94a3b8", fontSize: 11, fontWeight: 800 }}>
                     {market.updatedAt ? "시장 분석 설정됨" : "시장 분석 미설정"}
@@ -550,6 +553,9 @@ export default function MarketSizeAnalysisTab({
                     <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>
                       {selectedItem.manufacturer || "제조사 미입력"} · {categoryLabelById[selectedItem.category] || selectedItem.category}
                       {" · "}포장단위 {selectedItem.packagingUnit || "미입력"}
+                      {" · "}최소 주문 {selectedItem.minimumOrderBatchQuantity
+                        ? `${selectedItem.minimumOrderBatchQuantity}배치`
+                        : "미입력(계산 기본 1배치)"}
                     </div>
                   </div>
                   <div className="market-actions">
@@ -871,27 +877,35 @@ export default function MarketSizeAnalysisTab({
                   </div>
                   <div className="metric-grid metric-grid-compact">
                     <Metric
-                      label="최소 주문 반영 공급수량"
-                      value={formatCount(planningBatchFinance.orderQuantity)}
-                      subtext={`배치당 ${formatCount(calculations.batchQuantity)} · 최소 ${calculations.minimumOrderBatches}배치`}
-                      formula="max(올림(해당 연도 예상 소진수량 ÷ 배치당 공급수량), 최소 주문 배치 수) × 배치당 공급수량"
+                      label="공급단가 최소 주문 수량"
+                      value={formatCount(planningBatchFinance.minimumOrderQuantity)}
+                      subtext={`공급단가 입력값 · 배치당 ${formatCount(calculations.batchQuantity)} × 최소 ${calculations.minimumOrderBatches}배치`}
+                      formula="공급단가의 배치당 공급수량 × 공급단가의 최소 주문 배치 수"
                     />
                     <Metric
                       label="연간 필요 배치"
                       value={formatDecimal(planningBatchFinance.exactBatches, 2, "배치")}
-                      subtext={planningBatchFinance.orderBatchCount === null ? "" : `실제 발주 기준 ${planningBatchFinance.orderBatchCount}배치`}
+                      subtext={planningBatchFinance.orderBatchCount === null
+                        ? ""
+                        : `연간 소진 충족 조달 예상 ${planningBatchFinance.orderBatchCount}배치`}
                       formula="해당 연도 예상 소진수량 ÷ 배치당 공급수량"
+                    />
+                    <Metric
+                      label="연간 조달 예상수량"
+                      value={formatCount(planningBatchFinance.orderQuantity)}
+                      subtext={`필요 배치 올림과 최소 주문 조건 중 큰 값 · ${planningBatchFinance.orderBatchCount ?? "-"}배치`}
+                      formula="max(올림(연간 필요 배치), 공급단가 최소 주문 배치 수) × 배치당 공급수량"
                     />
                     <Metric
                       label="주문 수량 소진 예상기간"
                       value={formatDecimal(planningBatchFinance.depletionMonthsPerBatch, 1, "개월")}
                       tone={planningBatchFinance.depletionMonthsPerBatch > 12 ? "warning" : "default"}
-                      formula="최소 주문 반영 공급수량 ÷ 해당 연도 예상 소진수량 × 12개월"
+                      formula="연간 조달 예상수량 ÷ 해당 연도 예상 소진수량 × 12개월"
                     />
                     <Metric
-                      label="최소 주문 필요자금"
+                      label="연간 조달 필요자금"
                       value={formatCompactWon(planningBatchFinance.batchCapital)}
-                      formula="최소 주문 반영 공급수량 × 제조사 조정 공급원가"
+                      formula="연간 조달 예상수량 × 제조사 조정 공급원가"
                     />
                     <Metric
                       label="평균 재고자금"
@@ -911,7 +925,7 @@ export default function MarketSizeAnalysisTab({
                       subtext={`연간 필요 ${formatDecimal(planningBatchFinance.exactBatches, 2, "배치")} · 주문물량 연 ${formatDecimal(planningBatchFinance.annualDepletionRatePercent, 1, "%")} 소진 · 총 ${formatDecimal(planningBatchFinance.depletionMonthsPerBatch, 1, "개월")}`}
                       tone="warning"
                       className="total-finance-metric"
-                      formula="최소 주문 필요자금 × 연 금융비용 이자율 × (총 소진개월 ÷ 12) ÷ 2"
+                      formula="연간 조달 필요자금 × 연 금융비용 이자율 × (총 소진개월 ÷ 12) ÷ 2"
                     />
                   </div>
                 </section>
@@ -980,9 +994,9 @@ export default function MarketSizeAnalysisTab({
                     <Metric
                       label="총 매출총이익"
                       value={formatCompactWon(planningTotalExpectedGrossProfit)}
-                      subtext={`최초 주문 ${formatCount(planningBatchFinance.orderQuantity)} 완전 소진 기준`}
+                      subtext={`연간 조달 예상수량 ${formatCount(planningBatchFinance.orderQuantity)} 완전 소진 기준`}
                       tone="positive"
-                      formula="최소 주문 반영 공급수량 × 개당 예상 매출총이익"
+                      formula="연간 조달 예상수량 × 개당 예상 매출총이익"
                     />
                     <Metric
                       label="총 금융비용 차감 기댓값"

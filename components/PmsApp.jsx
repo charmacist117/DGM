@@ -81,6 +81,7 @@ const DASHBOARD_MARKET_ANNUAL_DATE_CALC_SEED_KEY = "pharmadev_dashboard_changelo
 const DASHBOARD_MARKET_FORMULA_TOOLTIP_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_28";
 const DASHBOARD_DISTRIBUTION_MARGIN_FORMULA_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_29";
 const DASHBOARD_DISTRIBUTION_ADOPTION_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_30";
+const DASHBOARD_DAILY_CHANGELOG_MARKET_ORDER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_31";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -535,7 +536,7 @@ function normalizeProjects(projects) {
 }
 
 function normalizeAdminLogs(logs) {
-  return (logs || [])
+  const normalizedLogs = (logs || [])
     .filter((log) => log && typeof log === "object")
     .map((log) => {
       const normalized = {
@@ -561,9 +562,57 @@ function normalizeAdminLogs(logs) {
         changeDate: String(log.changeDate || log.createdAt || "").slice(0, 10),
         changes,
         reason: changes.join("\n"),
-        updatedAt: String(log.updatedAt || "")
+        updatedAt: String(log.updatedAt || ""),
+        sourceIds: Array.isArray(log.sourceIds) ? log.sourceIds.filter(Boolean) : []
       };
     });
+  const regularLogs = normalizedLogs.filter((log) => log.type !== DASHBOARD_CHANGE_NOTICE_TYPE);
+  const dailyDashboardLogs = new Map();
+  normalizedLogs
+    .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+    .forEach((log) => {
+      const day = getDashboardChangeDay(log);
+      const key = day || `unknown_${log.id}`;
+      const current = dailyDashboardLogs.get(key);
+      if (!current) {
+        dailyDashboardLogs.set(key, {
+          ...log,
+          id: day ? `dashboard_change_day_${day}` : log.id,
+          changeDate: day,
+          sourceIds: [...new Set([...(log.sourceIds || []), log.id].filter(Boolean))]
+        });
+        return;
+      }
+      const currentTimestamp = String(current.changeDateTime || current.updatedAt || current.createdAt || "");
+      const incomingTimestamp = String(log.changeDateTime || log.updatedAt || log.createdAt || "");
+      const incomingIsLater = incomingTimestamp.localeCompare(currentTimestamp) >= 0;
+      const changes = [...current.changes];
+      (log.changes || []).forEach((change) => {
+        if (!changes.includes(change)) changes.push(change);
+      });
+      dailyDashboardLogs.set(key, {
+        ...(incomingIsLater ? current : log),
+        ...(incomingIsLater ? log : current),
+        id: day ? `dashboard_change_day_${day}` : current.id,
+        type: DASHBOARD_CHANGE_NOTICE_TYPE,
+        projectId: null,
+        projectName: "제품개발 대시보드",
+        revision: String(Math.max(
+          dashboardRevisionOrder(current.revision),
+          dashboardRevisionOrder(log.revision)
+        )),
+        changeDate: day,
+        changes,
+        reason: changes.join("\n"),
+        sourceIds: [...new Set([
+          ...(current.sourceIds || []),
+          ...(log.sourceIds || []),
+          current.id,
+          log.id
+        ].filter(Boolean))]
+      });
+    });
+  return [...regularLogs, ...dailyDashboardLogs.values()];
 }
 
 function upsertById(items = [], nextItem) {
@@ -3935,12 +3984,6 @@ function dashboardRevisionOrder(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatDashboardRevision(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return "회차 미입력";
-  return /회차$/i.test(raw) || /^v/i.test(raw) ? raw : `${raw}회차`;
-}
-
 function parseDashboardChanges(value) {
   return String(value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 }
@@ -3952,79 +3995,114 @@ function toDashboardDateTimeInput(value = new Date()) {
   return localDate.toISOString().slice(0, 16);
 }
 
-function formatDashboardChangeDateTime(entry) {
-  const value = entry?.changeDateTime || entry?.createdAt || entry?.changeDate;
-  const date = new Date(value || "");
-  if (Number.isNaN(date.getTime())) return "-";
+function getDashboardChangeDay(entry) {
+  const value = String(entry?.changeDate || entry?.changeDateTime || entry?.createdAt || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
   const twoDigits = (number) => String(number).padStart(2, "0");
-  return `${date.getFullYear()}.${twoDigits(date.getMonth() + 1)}.${twoDigits(date.getDate())} ${twoDigits(date.getHours())}:${twoDigits(date.getMinutes())}`;
+  return `${date.getFullYear()}-${twoDigits(date.getMonth() + 1)}-${twoDigits(date.getDate())}`;
+}
+
+function formatDashboardChangeDay(entry) {
+  const day = getDashboardChangeDay(entry);
+  return day ? day.replaceAll("-", ".") : "-";
 }
 
 function DashboardChangeLogSection({ entries, isAdmin, onAdd, onUpdate, onDelete }) {
-  const sortedEntries = useMemo(() => [...(entries || [])].sort((left, right) => {
-    const revisionDiff = dashboardRevisionOrder(right.revision) - dashboardRevisionOrder(left.revision);
-    if (revisionDiff !== 0) return revisionDiff;
-    return String(right.changeDateTime || right.createdAt || right.changeDate || "")
-      .localeCompare(String(left.changeDateTime || left.createdAt || left.changeDate || ""));
-  }), [entries]);
+  const sortedEntries = useMemo(() => {
+    const groupedByDay = new Map();
+    [...(entries || [])]
+      .sort((left, right) => String(left.changeDateTime || left.createdAt || left.changeDate || "")
+        .localeCompare(String(right.changeDateTime || right.createdAt || right.changeDate || "")))
+      .forEach((entry) => {
+        const day = getDashboardChangeDay(entry) || "date_unknown";
+        const current = groupedByDay.get(day) || {
+          ...entry,
+          id: entry.id,
+          sourceIds: [],
+          changeDate: day === "date_unknown" ? "" : day,
+          changes: []
+        };
+        current.id = entry.id;
+        current.revision = String(Math.max(
+          dashboardRevisionOrder(current.revision),
+          dashboardRevisionOrder(entry.revision)
+        ));
+        current.changeDateTime = entry.changeDateTime || entry.createdAt || entry.changeDate || current.changeDateTime;
+        current.sourceIds.push(entry.id);
+        (entry.changes || []).forEach((change) => {
+          if (!current.changes.includes(change)) current.changes.push(change);
+        });
+        groupedByDay.set(day, current);
+      });
+    return [...groupedByDay.values()].sort((left, right) => (
+      getDashboardChangeDay(right).localeCompare(getDashboardChangeDay(left))
+    ));
+  }, [entries]);
   const nextRevision = useMemo(() => (
-    sortedEntries.reduce((highest, entry) => Math.max(highest, Math.floor(dashboardRevisionOrder(entry.revision))), 0) + 1
-  ), [sortedEntries]);
+    (entries || []).reduce((highest, entry) => Math.max(highest, Math.floor(dashboardRevisionOrder(entry.revision))), 0) + 1
+  ), [entries]);
   const [isCreating, setIsCreating] = useState(false);
-  const [createDraft, setCreateDraft] = useState({ changeDateTime: toDashboardDateTimeInput(), revision: "", changes: "" });
+  const [createDraft, setCreateDraft] = useState({ changeDate: toDashboardDateTimeInput().slice(0, 10), changes: "" });
   const [editingId, setEditingId] = useState(null);
-  const [editDraft, setEditDraft] = useState({ changeDateTime: "", revision: "", changes: "" });
+  const [editDraft, setEditDraft] = useState({ changeDate: "", changes: "" });
 
   const openCreate = () => {
-    setCreateDraft({ changeDateTime: toDashboardDateTimeInput(), revision: String(nextRevision), changes: "" });
+    setCreateDraft({ changeDate: toDashboardDateTimeInput().slice(0, 10), changes: "" });
     setIsCreating(true);
   };
 
   const submitCreate = () => {
     const changes = parseDashboardChanges(createDraft.changes);
-    if (!createDraft.changeDateTime || !createDraft.revision.trim() || changes.length === 0) {
-      window.alert("변경일시, 수정회차, 변경사항을 모두 입력해주세요.");
+    if (!createDraft.changeDate || changes.length === 0) {
+      window.alert("변경일자와 변경사항을 모두 입력해주세요.");
       return;
     }
-    onAdd?.({ ...createDraft, changes });
+    onAdd?.({
+      changeDateTime: `${createDraft.changeDate}T23:59`,
+      revision: String(nextRevision),
+      changes
+    });
     setIsCreating(false);
-    setCreateDraft({ changeDateTime: toDashboardDateTimeInput(), revision: "", changes: "" });
+    setCreateDraft({ changeDate: toDashboardDateTimeInput().slice(0, 10), changes: "" });
   };
 
   const startEdit = (entry) => {
     setEditingId(entry.id);
     setEditDraft({
-      changeDateTime: entry.changeDateTime
-        || toDashboardDateTimeInput(entry.createdAt || entry.changeDate || new Date()),
-      revision: String(entry.revision || ""),
+      changeDate: getDashboardChangeDay(entry),
       changes: (entry.changes || []).join("\n")
     });
   };
 
-  const submitEdit = (entryId) => {
+  const submitEdit = (entry) => {
     const changes = parseDashboardChanges(editDraft.changes);
-    if (!editDraft.changeDateTime || !editDraft.revision.trim() || changes.length === 0) {
-      window.alert("변경일시, 수정회차, 변경사항을 모두 입력해주세요.");
+    if (!editDraft.changeDate || changes.length === 0) {
+      window.alert("변경일자와 변경사항을 모두 입력해주세요.");
       return;
     }
-    onUpdate?.(entryId, { ...editDraft, changes });
+    onUpdate?.(entry.id, {
+      changeDateTime: `${editDraft.changeDate}T23:59`,
+      revision: String(entry.revision || nextRevision),
+      changes
+    });
+    (entry.sourceIds || [])
+      .filter((sourceId) => String(sourceId) !== String(entry.id))
+      .forEach((sourceId) => onDelete?.(sourceId));
     setEditingId(null);
   };
 
   const formFields = (draft, setDraft) => (
-    <div style={{ display: "grid", gridTemplateColumns: "200px 170px minmax(0, 1fr)", gap: 10, alignItems: "start" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "180px minmax(0, 1fr)", gap: 10, alignItems: "start" }}>
       <div>
-        <label style={{ display: "block", marginBottom: 5, color: "#475569", fontSize: 12, fontWeight: 800 }}>변경일시</label>
+        <label style={{ display: "block", marginBottom: 5, color: "#475569", fontSize: 12, fontWeight: 800 }}>변경일자</label>
         <input
-          type="datetime-local"
-          value={draft.changeDateTime}
-          onChange={(event) => setDraft((previous) => ({ ...previous, changeDateTime: event.target.value }))}
+          type="date"
+          value={draft.changeDate}
+          onChange={(event) => setDraft((previous) => ({ ...previous, changeDate: event.target.value }))}
           style={inputStyle}
         />
-      </div>
-      <div>
-        <label style={{ display: "block", marginBottom: 5, color: "#475569", fontSize: 12, fontWeight: 800 }}>수정회차</label>
-        <input value={draft.revision} onChange={(event) => setDraft((previous) => ({ ...previous, revision: event.target.value }))} placeholder="예: 12 또는 v1.2" style={inputStyle} />
       </div>
       <div>
         <label style={{ display: "block", marginBottom: 5, color: "#475569", fontSize: 12, fontWeight: 800 }}>변경사항</label>
@@ -4044,7 +4122,7 @@ function DashboardChangeLogSection({ entries, isAdmin, onAdd, onUpdate, onDelete
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 15px", background: "#f8fafc", borderBottom: "1px solid #dbe3ee" }}>
         <div>
           <div style={{ color: "#0f172a", fontSize: 16, fontWeight: 900 }}>제품개발 대시보드 변경사항</div>
-          <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>일시와 수정회차별 업데이트 내용을 확인합니다.</div>
+          <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>같은 날짜의 업데이트 내용을 하루 한 건으로 모아 확인합니다.</div>
         </div>
         {isAdmin && !isCreating && (
           <button onClick={openCreate} style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#0f172a", cursor: "pointer", fontSize: 12, fontWeight: 800 }}>
@@ -4073,13 +4151,12 @@ function DashboardChangeLogSection({ entries, isAdmin, onAdd, onUpdate, onDelete
                   {formFields(editDraft, setEditDraft)}
                   <div style={{ display: "flex", justifyContent: "flex-end", gap: 7, marginTop: 10 }}>
                     <button onClick={() => setEditingId(null)} style={subtleButton}>취소</button>
-                    <button onClick={() => submitEdit(entry.id)} style={primaryButton}>수정 완료</button>
+                    <button onClick={() => submitEdit(entry)} style={primaryButton}>수정 완료</button>
                   </div>
                 </>
               ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "120px 150px minmax(0, 1fr) auto", gap: 14, alignItems: "start" }}>
-                  <div style={{ color: "#0f172a", fontSize: 13, fontWeight: 900 }}>{formatDashboardRevision(entry.revision)}</div>
-                  <div style={{ color: "#64748b", fontSize: 12, whiteSpace: "nowrap" }}>{formatDashboardChangeDateTime(entry)}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "130px minmax(0, 1fr) auto", gap: 14, alignItems: "start" }}>
+                  <div style={{ color: "#0f172a", fontSize: 13, fontWeight: 900, whiteSpace: "nowrap" }}>{formatDashboardChangeDay(entry)}</div>
                   <ul style={{ margin: 0, paddingLeft: 18, color: "#334155", fontSize: 13, lineHeight: 1.65 }}>
                     {(entry.changes || []).map((change, index) => <li key={`${entry.id}_${index}`}>{change}</li>)}
                   </ul>
@@ -4088,7 +4165,8 @@ function DashboardChangeLogSection({ entries, isAdmin, onAdd, onUpdate, onDelete
                       <button onClick={() => startEdit(entry)} style={subtleButton}>수정</button>
                       <button
                         onClick={() => {
-                          if (window.confirm("이 변경사항 기록을 삭제하시겠습니까?")) onDelete?.(entry.id);
+                          if (!window.confirm("이 날짜의 변경사항 기록을 모두 삭제하시겠습니까?")) return;
+                          (entry.sourceIds || [entry.id]).forEach((sourceId) => onDelete?.(sourceId));
                         }}
                         style={{ ...subtleButton, borderColor: "#fecaca", color: "#dc2626" }}
                       >
@@ -5258,6 +5336,34 @@ export default function PmsApp() {
           changes: [
             "유통 구조 설정 목록에 채택 예상 건만 보기 필터를 추가했습니다.",
             "필터는 카테고리와 성분명·제조사 검색 조건에 함께 적용됩니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_DAILY_CHANGELOG_MARKET_ORDER_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_DAILY_CHANGELOG_MARKET_ORDER_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260729_daily_changelog_market_order",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "대시보드 변경사항을 회차별 목록 대신 날짜별 한 건으로 통합하고 같은 날짜의 중복 기록을 방지했습니다.",
+            "시장 분석에서 공급단가 최소 주문 수량과 연간 조달 예상 배치를 분리해 공급단가 입력값과 계산 결과를 명확히 구분했습니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()
