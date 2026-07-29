@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import SegmentedDateInput from "@/components/SegmentedDateInput";
 import {
   applyMarketAnalysisDefaults,
   calculateBatchFinance,
@@ -9,6 +10,12 @@ import {
   normalizeMarketAnalysisDefaults,
   normalizeMarketSizeAnalysis
 } from "@/lib/pms/marketAnalysis";
+import {
+  MARKET_DECISION_OPTIONS,
+  marketDecisionBadgeStyle,
+  marketDecisionLabel,
+  normalizeMarketDecisionStatus
+} from "@/lib/pms/marketDecision";
 
 const panelStyle = {
   background: "#fff",
@@ -534,6 +541,11 @@ export default function MarketSizeAnalysisTab({
                   <div style={{ marginTop: 5, color: market.updatedAt ? "#047857" : "#94a3b8", fontSize: 11, fontWeight: 800 }}>
                     {market.updatedAt ? "시장 분석 설정됨" : "시장 분석 미설정"}
                   </div>
+                  <div style={{ marginTop: 6 }}>
+                    <span style={{ ...marketDecisionBadgeStyle(item.marketDecisionStatus), minHeight: 21, padding: "2px 7px", fontSize: 11 }}>
+                      최종 판단 · {marketDecisionLabel(item.marketDecisionStatus)}
+                    </span>
+                  </div>
                 </button>
               );
             })}
@@ -567,6 +579,27 @@ export default function MarketSizeAnalysisTab({
                     </div>
                   </div>
                   <div className="market-actions">
+                    <label className="market-decision-control">
+                      <span>최종 검토결과</span>
+                      <select
+                        value={normalizeMarketDecisionStatus(selectedItem.marketDecisionStatus)}
+                        onChange={(event) => onUpdateItem?.(selectedItem.id, {
+                          marketDecisionStatus: normalizeMarketDecisionStatus(event.target.value)
+                        })}
+                        style={{
+                          ...inputStyle,
+                          width: 122,
+                          minHeight: 34,
+                          padding: "6px 8px",
+                          color: marketDecisionBadgeStyle(selectedItem.marketDecisionStatus).color,
+                          fontWeight: 900
+                        }}
+                      >
+                        {MARKET_DECISION_OPTIONS.map((option) => (
+                          <option key={option.value || "undecided"} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
                     <button type="button" onClick={() => onOpenSupply?.(selectedItem.id)} style={secondaryButtonStyle}>공급단가 보기</button>
                     <button type="button" onClick={() => onOpenDistribution?.(selectedItem.id)} style={secondaryButtonStyle}>유통 구조 설정</button>
                     {!isEditing ? (
@@ -817,19 +850,11 @@ export default function MarketSizeAnalysisTab({
                       {yearOneMode === "annual" && (
                         <label className="annual-base-date-control">
                           <span>연간 기준 시작일</span>
-                          <input
-                            type="date"
+                          <SegmentedDateInput
                             aria-label="연간 기준 시작일"
                             value={annualForecastBaseDate}
-                            onInput={(event) => setAnnualForecastBaseDate(
-                              event.currentTarget.value || toDateInputValue(startOfYear)
-                            )}
-                            onChange={(event) => setAnnualForecastBaseDate(
-                              event.currentTarget.value || toDateInputValue(startOfYear)
-                            )}
-                            onBlur={(event) => setAnnualForecastBaseDate(
-                              event.currentTarget.value || toDateInputValue(startOfYear)
-                            )}
+                            onChange={(value) => setAnnualForecastBaseDate(value || toDateInputValue(startOfYear))}
+                            style={{ width: 170, minHeight: 30, padding: "4px 7px", fontSize: 12 }}
                           />
                         </label>
                       )}
@@ -1098,12 +1123,12 @@ export default function MarketSizeAnalysisTab({
         .market-distribution-filter input { width: 16px; height: 16px; margin: 0; accent-color: #2563eb; }
         .market-item-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; padding: 14px 15px; background: #e8f1fb; }
         .market-actions { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+        .market-decision-control { display: grid; gap: 3px; color: #475569; font-size: 11px; font-weight: 900; }
         .market-input-grid, .market-result-grid { display: grid; gap: 14px; }
         .market-input-grid { grid-template-columns: minmax(0, 1.25fr) minmax(340px, .75fr); }
         .market-result-grid { grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr); }
         .forecast-controls { display: flex; align-items: flex-end; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
         .annual-base-date-control { display: grid; gap: 3px; color: #475569; font-size: 11px; font-weight: 800; }
-        .annual-base-date-control input { width: 145px; min-height: 30px; padding: 4px 7px; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; color: #0f172a; box-sizing: border-box; font-size: 12px; }
         .section-title { min-height: 58px; padding: 11px 14px; border-bottom: 1px solid #dbe3ee; display: flex; align-items: center; justify-content: space-between; gap: 12px; box-sizing: border-box; background: #f8fafc; }
         .section-title > div { display: grid; gap: 3px; }
         .section-title strong { color: #0f172a; font-size: 15px; }

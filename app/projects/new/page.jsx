@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import SegmentedDateInput from "@/components/SegmentedDateInput";
 import {
   CATEGORIES,
   DRAFT_CHECKLIST_FIELDS,
@@ -237,7 +238,7 @@ export default function NewProjectPage() {
               </div>
               <div>
                 <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>시작일 *</label>
-                <input type="date" value={form.start} onChange={(e) => setForm((p) => ({ ...p, start: e.target.value }))} style={fieldStyle} />
+                <SegmentedDateInput value={form.start} onChange={(value) => setForm((p) => ({ ...p, start: value }))} aria-label="프로젝트 시작일" style={fieldStyle} />
               </div>
             </div>
 

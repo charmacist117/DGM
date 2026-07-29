@@ -6,6 +6,7 @@ import DistributionStructureTab from "@/components/DistributionStructureTab";
 import MarketSizeAnalysisTab from "@/components/MarketSizeAnalysisTab";
 import ProjectSidebar from "@/components/ProjectSidebar";
 import DesktopProjectPathControl from "@/components/DesktopProjectPathControl";
+import SegmentedDateInput from "@/components/SegmentedDateInput";
 import {
   CATEGORIES,
   DRAFT_CHECKLIST_FIELDS,
@@ -42,6 +43,11 @@ import {
   normalizeMarketAnalysisDefaults,
   normalizeMarketSizeAnalysis
 } from "@/lib/pms/marketAnalysis";
+import {
+  marketDecisionBadgeStyle,
+  marketDecisionLabel,
+  normalizeMarketDecisionStatus
+} from "@/lib/pms/marketDecision";
 
 const LOCAL_CACHE_KEY = "pharmadev_pms_cache_v2";
 const DEVELOP_TASK_ID = "develop";
@@ -84,6 +90,7 @@ const DASHBOARD_DISTRIBUTION_ADOPTION_FILTER_SEED_KEY = "pharmadev_dashboard_cha
 const DASHBOARD_DAILY_CHANGELOG_MARKET_ORDER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_31";
 const DASHBOARD_DISTRIBUTION_STRUCTURE_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_32";
 const DASHBOARD_DISTRIBUTION_EXPLICIT_COMPLETE_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_33";
+const DASHBOARD_MARKET_DECISION_DATE_INPUT_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_34";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -952,6 +959,9 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     quoteAdoptionExpected: normalizeSupplyCheckedValue(
       source.quoteAdoptionExpected ?? source.expectedAdoption ?? source.quoteExpectedToAdopt
     ),
+    marketDecisionStatus: normalizeMarketDecisionStatus(
+      source.marketDecisionStatus ?? source.finalDecisionStatus ?? source.marketAnalysisDecision
+    ),
     attachment: normalizeSupplyAttachment(source.attachment),
     distributionStructure: normalizeDistributionStructure(source.distributionStructure),
     marketSizeAnalysis: normalizeMarketSizeAnalysis(source.marketSizeAnalysis),
@@ -1212,11 +1222,11 @@ function TaskEditModal({ task, onClose, onSave }) {
           </div>
           <div>
             <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 4 }}>시작일 지정</label>
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={inputStyle} />
+            <SegmentedDateInput value={startDate} onChange={setStartDate} aria-label="시작일 지정" style={inputStyle} />
           </div>
           <div>
             <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 4 }}>완료일 지정</label>
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={inputStyle} />
+            <SegmentedDateInput value={endDate} onChange={setEndDate} aria-label="완료일 지정" style={inputStyle} />
           </div>
         </div>
 
@@ -1683,7 +1693,7 @@ function TasksTab({
               행 추가
             </button>
             <span style={{ fontSize: 12, color: "#64748b", fontWeight: 700 }}>프로젝트 시작일</span>
-            <input type="date" value={draftProjectStart} onChange={(e) => setDraftProjectStart(e.target.value)} style={{ ...inputStyle, width: 150, padding: "6px 8px", fontSize: 12 }} />
+            <SegmentedDateInput value={draftProjectStart} onChange={setDraftProjectStart} aria-label="프로젝트 시작일" style={{ ...inputStyle, width: 170, padding: "6px 8px", fontSize: 12 }} />
           </>}
           {!isEditing && <span style={{ fontSize: 12, color: "#64748b" }}>프로젝트 시작일 {fmt(project.start)}</span>}
           <button
@@ -1718,19 +1728,19 @@ function TasksTab({
             </div>
             <div>
               <label style={{ display: "block", fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4 }}>시작일</label>
-              <input
-                type="date"
+              <SegmentedDateInput
                 value={newTask.start}
-                onChange={(event) => setNewTask((prev) => ({ ...prev, start: event.target.value }))}
+                onChange={(value) => setNewTask((prev) => ({ ...prev, start: value }))}
+                aria-label="새 태스크 시작일"
                 style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }}
               />
             </div>
             <div>
               <label style={{ display: "block", fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4 }}>완료일</label>
-              <input
-                type="date"
+              <SegmentedDateInput
                 value={newTask.end}
-                onChange={(event) => setNewTask((prev) => ({ ...prev, end: event.target.value }))}
+                onChange={(value) => setNewTask((prev) => ({ ...prev, end: value }))}
+                aria-label="새 태스크 완료일"
                 style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }}
               />
             </div>
@@ -1874,22 +1884,22 @@ function TasksTab({
                 </td>
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>
                   {isEditing ? (
-                    <input
-                      type="date"
+                    <SegmentedDateInput
                       value={task.scheduledStart}
-                      onChange={(event) => updateDraftTaskDates(task.id, "scheduledStart", event.target.value)}
-                      style={{ ...inputStyle, width: 140, padding: "5px 8px", fontSize: 12 }}
+                      onChange={(value) => updateDraftTaskDates(task.id, "scheduledStart", value)}
+                      aria-label={`${task.name} 시작일`}
+                      style={{ ...inputStyle, width: 155, padding: "5px 8px", fontSize: 12 }}
                       disabled={!enabled}
                     />
                   ) : fmt(task.scheduledStart)}
                 </td>
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>
                   {isEditing ? (
-                    <input
-                      type="date"
+                    <SegmentedDateInput
                       value={task.scheduledEnd}
-                      onChange={(event) => updateDraftTaskDates(task.id, "scheduledEnd", event.target.value)}
-                      style={{ ...inputStyle, width: 140, padding: "5px 8px", fontSize: 12 }}
+                      onChange={(value) => updateDraftTaskDates(task.id, "scheduledEnd", value)}
+                      aria-label={`${task.name} 완료일`}
+                      style={{ ...inputStyle, width: 155, padding: "5px 8px", fontSize: 12 }}
                       disabled={!enabled}
                     />
                   ) : fmt(task.scheduledEnd)}
@@ -2176,7 +2186,7 @@ function SupplyPriceTab({
       "카테고리", "제조사", "허가사", "공급 성분", "함량/규격", "원료 원산지", "브랜드/공급처", "kg당 가격대",
       "포장단위", "포장형태", "수량", "최소 주문 배치 수량", "배치 당 공급단가", "VAT 포함", "배치 당 VAT 포함 가격",
       "총 금액", "VAT 포함 총금액", "허가사 수수료", "허가사 수수료율(%) / 상태", "수수료 포함 총금액",
-      "견적일자", "사용기한", "첨부파일", "비고", "견적 채택 예상"
+      "견적일자", "사용기한", "첨부파일", "비고", "견적 채택 예상", "시장 분석 최종 판단"
     ];
     const rows = exportItems.flatMap((item) => {
       const ingredients = item.ingredients?.length ? item.ingredients : [normalizeSupplyIngredient()];
@@ -2215,7 +2225,8 @@ function SupplyPriceTab({
         item.shelfLife,
         item.attachment?.name || "",
         item.memo,
-        item.quoteAdoptionExpected ? "채택 예상" : "채택 재고"
+        item.quoteAdoptionExpected ? "채택 예상" : "채택 재고",
+        marketDecisionLabel(item.marketDecisionStatus)
       ]);
     });
     const escapeCsvValue = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
@@ -2932,7 +2943,7 @@ function SupplyPriceTab({
                     <tr style={{ ...supplyDetailHeaderRowStyle, height: 38 }}>
                       {[
                         ...(supportsPermitCompanyFee ? ["허가사 수수료"] : []),
-                        "견적일자", "사용기한", "첨부파일", "비고", "견적 채택 예상"
+                        "견적일자", "사용기한", "첨부파일", "비고", "견적 채택 / 최종 판단"
                       ].map((header) => (
                         <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#3730a3", borderBottom: "1px solid #c7d2fe", whiteSpace: "nowrap" }}>
                           {header}
@@ -2984,7 +2995,12 @@ function SupplyPriceTab({
                       </td>}
                       <td style={{ padding: 8, width: 130 }}>
                         {isEditing ? (
-                          <input type="date" value={item.quoteDate} onChange={(event) => updateItem(item.id, { quoteDate: event.target.value })} style={supplyCompactInputStyle} />
+                          <SegmentedDateInput
+                            value={item.quoteDate}
+                            onChange={(value) => updateItem(item.id, { quoteDate: value })}
+                            aria-label="견적일자"
+                            style={supplyCompactInputStyle}
+                          />
                         ) : (
                           <div style={{ ...supplyTextCellStyle, display: "flex", alignItems: "center", gap: 7 }}>
                             <span>{item.quoteDate ? fmt(item.quoteDate) : "-"}</span>
@@ -3046,31 +3062,39 @@ function SupplyPriceTab({
                           <div style={supplyTextCellStyle}>{item.memo || "-"}</div>
                         )}
                       </td>
-                      <td style={{ padding: 8, width: 180 }}>
-                        {isEditing ? (
-                          <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 14, color: item.quoteAdoptionExpected ? "#047857" : "#b45309", fontWeight: 800, cursor: "pointer" }}>
-                            <input
-                              type="checkbox"
-                              checked={Boolean(item.quoteAdoptionExpected)}
-                              onChange={(event) => updateItem(item.id, { quoteAdoptionExpected: event.target.checked })}
-                            />
-                            {item.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
-                          </label>
-                        ) : (
+                      <td style={{ padding: 8, width: 190 }}>
+                        <div style={{ display: "grid", gap: 7, justifyItems: "start" }}>
+                          {isEditing ? (
+                            <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 14, color: item.quoteAdoptionExpected ? "#047857" : "#b45309", fontWeight: 800, cursor: "pointer" }}>
+                              <input
+                                type="checkbox"
+                                checked={Boolean(item.quoteAdoptionExpected)}
+                                onChange={(event) => updateItem(item.id, { quoteAdoptionExpected: event.target.checked })}
+                              />
+                              {item.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
+                            </label>
+                          ) : (
+                            <span style={{
+                              display: "inline-flex",
+                              padding: "4px 8px",
+                              borderRadius: 5,
+                              border: `1px solid ${item.quoteAdoptionExpected ? "#a7f3d0" : "#fde68a"}`,
+                              background: item.quoteAdoptionExpected ? "#ecfdf5" : "#fffbeb",
+                              color: item.quoteAdoptionExpected ? "#047857" : "#b45309",
+                              fontSize: 12,
+                              fontWeight: 900,
+                              whiteSpace: "nowrap"
+                            }}>
+                              {item.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
+                            </span>
+                          )}
                           <span style={{
-                            display: "inline-flex",
-                            padding: "4px 8px",
-                            borderRadius: 5,
-                            border: `1px solid ${item.quoteAdoptionExpected ? "#a7f3d0" : "#fde68a"}`,
-                            background: item.quoteAdoptionExpected ? "#ecfdf5" : "#fffbeb",
-                            color: item.quoteAdoptionExpected ? "#047857" : "#b45309",
-                            fontSize: 12,
-                            fontWeight: 900,
-                            whiteSpace: "nowrap"
+                            ...marketDecisionBadgeStyle(item.marketDecisionStatus),
+                            minWidth: 66
                           }}>
-                            {item.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
+                            {marketDecisionLabel(item.marketDecisionStatus)}
                           </span>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   </tbody>
@@ -3209,7 +3233,7 @@ function CommunicationTab({ project, onSaveLog }) {
         <div style={{ display: "grid", gap: 8 }}>
           <input placeholder="업체명*" value={form.company} onChange={(e) => setForm((prev) => ({ ...prev, company: e.target.value }))} style={inputStyle} />
           <input placeholder="담당자" value={form.contact} onChange={(e) => setForm((prev) => ({ ...prev, contact: e.target.value }))} style={inputStyle} />
-          <input type="date" value={form.date} onChange={(e) => setForm((prev) => ({ ...prev, date: e.target.value }))} style={inputStyle} />
+          <SegmentedDateInput value={form.date} onChange={(value) => setForm((prev) => ({ ...prev, date: value }))} aria-label="소통일자" style={inputStyle} />
           <select value={form.channel} onChange={(e) => setForm((prev) => ({ ...prev, channel: e.target.value }))} style={inputStyle}>
             {["전화", "이메일", "미팅", "메신저", "방문", "기타"].map((value) => <option key={value}>{value}</option>)}
           </select>
@@ -3338,7 +3362,7 @@ function DecisionTab({ project, onSaveLog }) {
         <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10 }}>{editingId ? "대표/부대표 의사결정 수정" : "대표/부대표 의사결정 기록"}</div>
         <div style={{ display: "grid", gap: 10 }}>
           <DecisionField label="결정일" helper="대표/부대표가 검토하거나 결정을 남긴 날짜입니다.">
-            <input type="date" value={form.date} onChange={(e) => setForm((prev) => ({ ...prev, date: e.target.value }))} style={inputStyle} />
+            <SegmentedDateInput value={form.date} onChange={(value) => setForm((prev) => ({ ...prev, date: value }))} aria-label="결정일" style={inputStyle} />
           </DecisionField>
           <DecisionField label="결정권자" helper="최종 판단 주체를 선택합니다.">
             <select value={form.decider} onChange={(e) => setForm((prev) => ({ ...prev, decider: e.target.value }))} style={inputStyle}>
@@ -3566,8 +3590,16 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, marketAnalysisDefaul
         if (!record) return item;
         matchedRecordIds.add(record);
         return normalizeSupplyPriceItem(isDistributionRestore
-          ? { ...item, distributionStructure: record.distributionStructure }
-          : { ...item, marketSizeAnalysis: record.marketSizeAnalysis });
+          ? {
+              ...item,
+              distributionStructure: record.distributionStructure,
+              marketDecisionStatus: record.marketDecisionStatus ?? item.marketDecisionStatus
+            }
+          : {
+              ...item,
+              marketSizeAnalysis: record.marketSizeAnalysis,
+              marketDecisionStatus: record.marketDecisionStatus ?? item.marketDecisionStatus
+            });
       });
       onRestore({
         supplyPriceItems: nextItems,
@@ -3801,7 +3833,7 @@ function BasicInfoTab({ project, onSave }) {
           </div>
           <div>
             <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>시작일</label>
-            <input type="date" value={form.start} onChange={(event) => setForm((prev) => ({ ...prev, start: event.target.value }))} style={inputStyle} />
+            <SegmentedDateInput value={form.start} onChange={(value) => setForm((prev) => ({ ...prev, start: value }))} aria-label="프로젝트 시작일" style={inputStyle} />
           </div>
         </div>
         <div style={{ marginTop: 10 }}>
@@ -4103,10 +4135,10 @@ function DashboardChangeLogSection({ entries, isAdmin, onAdd, onUpdate, onDelete
     <div style={{ display: "grid", gridTemplateColumns: "180px minmax(0, 1fr)", gap: 10, alignItems: "start" }}>
       <div>
         <label style={{ display: "block", marginBottom: 5, color: "#475569", fontSize: 12, fontWeight: 800 }}>변경일자</label>
-        <input
-          type="date"
+        <SegmentedDateInput
           value={draft.changeDate}
-          onChange={(event) => setDraft((previous) => ({ ...previous, changeDate: event.target.value }))}
+          onChange={(value) => setDraft((previous) => ({ ...previous, changeDate: value }))}
+          aria-label="변경일자"
           style={inputStyle}
         />
       </div>
@@ -5426,6 +5458,34 @@ export default function PmsApp() {
           changes: [
             "유통 구조 입력 중 자동 저장과 설정 완료 상태를 분리했습니다.",
             "미설정 품목은 값을 입력해도 목록에 유지되며 판매가 및 마진 설정의 설정 완료 버튼을 눌렀을 때만 설정됨으로 전환됩니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_MARKET_DECISION_DATE_INPUT_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_MARKET_DECISION_DATE_INPUT_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260729_market_decision_date_input",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "시장 규모 분석에서 최종 검토결과를 진행·추가검토·중단으로 선택하고 공급단가와 유통 구조 화면에서 함께 확인할 수 있게 했습니다.",
+            "날짜 입력은 연도 4자리와 월 2자리 입력 후 다음 칸으로 자동 이동하도록 개선했습니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()

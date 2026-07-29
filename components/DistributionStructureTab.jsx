@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import SegmentedDateInput from "@/components/SegmentedDateInput";
 import { calculateSellingPriceFromMarginRate } from "@/lib/pms/marketAnalysis";
+import {
+  marketDecisionBadgeStyle,
+  marketDecisionLabel
+} from "@/lib/pms/marketDecision";
 
 const panelStyle = {
   border: "1px solid #cbd5e1",
@@ -500,6 +505,11 @@ export default function DistributionStructureTab({
                       {item.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
                     </span>
                   </div>
+                  <div style={{ marginTop: 6 }}>
+                    <span style={{ ...marketDecisionBadgeStyle(item.marketDecisionStatus), minHeight: 21, padding: "2px 7px", fontSize: 11 }}>
+                      최종 판단 · {marketDecisionLabel(item.marketDecisionStatus)}
+                    </span>
+                  </div>
                 </button>
               );
             })}
@@ -538,6 +548,9 @@ export default function DistributionStructureTab({
                       fontWeight: 900
                     }}>
                       {selectedItem.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
+                    </span>
+                    <span style={marketDecisionBadgeStyle(selectedItem.marketDecisionStatus)}>
+                      최종 판단 · {marketDecisionLabel(selectedItem.marketDecisionStatus)}
                     </span>
                     <div style={{ display: "grid", gap: 6 }}>
                       <button
@@ -819,7 +832,12 @@ export default function DistributionStructureTab({
                         <tr key={competitor.id}>
                           <td style={{ padding: 7, borderBottom: "1px solid #edf2f7" }}>
                             {isEditing ? (
-                              <input type="date" value={competitor.date || ""} onChange={(event) => updateCompetitor(competitor.id, { date: event.target.value })} style={inputStyle} />
+                              <SegmentedDateInput
+                                value={competitor.date || ""}
+                                onChange={(value) => updateCompetitor(competitor.id, { date: value })}
+                                aria-label={`${competitor.productName || "경쟁제품"} 기준일`}
+                                style={inputStyle}
+                              />
                             ) : (
                               <div style={labelStyle}>{competitor.date || "-"}</div>
                             )}
