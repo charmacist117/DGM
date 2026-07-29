@@ -120,6 +120,13 @@ function formatPeriodDate(date) {
   return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function decimalYear(date) {
+  const year = date.getFullYear();
+  const start = new Date(year, 0, 1);
+  const end = new Date(year + 1, 0, 1);
+  return year + ((date.getTime() - start.getTime()) / (end.getTime() - start.getTime()));
+}
+
 function validateAnalysis(analysis) {
   const numericFields = [
     ["달러 환율", analysis.exchangeRate],
@@ -259,10 +266,15 @@ export default function MarketSizeAnalysisTab({
     ? Math.max(0, 1 + (selectedGrowthRate / 100))
     : 1;
   const annualDemandBase = calculations.annualDemandUnits;
-  const forecastBaseGrowthYears = yearOneMode === "ytd" ? elapsedYearRatio : 1;
   const annualPeriodStart = parseDateInput(annualForecastBaseDate, startOfYear);
+  const latestMarketYear = calculations.latestYear?.year ?? currentYear - 1;
+  const annualStartGrowthYears = Math.max(0, decimalYear(annualPeriodStart) - latestMarketYear);
+  const currentFullYearGrowthYears = Math.max(0, currentYear - latestMarketYear);
   const demandForecasts = [0, 1, 2].map((offset) => {
-    const growthYears = forecastBaseGrowthYears + offset;
+    const growthYears = yearOneMode === "annual"
+      ? annualStartGrowthYears + offset
+      : currentFullYearGrowthYears + offset;
+    const periodRatio = yearOneMode === "ytd" && offset === 0 ? elapsedYearRatio : 1;
     const periodStart = yearOneMode === "annual"
       ? addYears(annualPeriodStart, offset)
       : new Date(currentYear + offset, 0, 1);
@@ -276,7 +288,7 @@ export default function MarketSizeAnalysisTab({
       periodEnd,
       value: annualDemandBase === null
         ? null
-        : annualDemandBase * (growthMultiplier ** growthYears)
+        : annualDemandBase * (growthMultiplier ** growthYears) * periodRatio
     };
   });
   const scenarioForecasts = demandForecasts.map((forecast) => {
@@ -788,9 +800,9 @@ export default function MarketSizeAnalysisTab({
                         value={formatCount(forecast.value)}
                         subtext={yearOneMode === "ytd"
                           ? (index === 0
-                              ? `${forecast.year}년 현재 시점 · 성장률 ${forecast.growthYears.toFixed(2)}년 일할 반영`
-                              : `${forecast.year}년 1/1~12/31 · YTD 환산값 대비 성장률 ${index}년 누적`)
-                          : `${formatPeriodDate(forecast.periodStart)}~${formatPeriodDate(forecast.periodEnd)} · 12개월`}
+                              ? `${forecast.year}년 현재 시점 · 연간 전망의 ${formatDecimal(elapsedYearRatio * 100, 1, "%")} 일할 반영`
+                              : `${forecast.year}년 1/1~12/31 · 성장률 ${formatDecimal(forecast.growthYears, 2, "년")} 반영`)
+                          : `${formatPeriodDate(forecast.periodStart)}~${formatPeriodDate(forecast.periodEnd)} · 성장률 ${formatDecimal(forecast.growthYears, 2, "년")} 반영`}
                         tone="positive"
                       />
                     ))}

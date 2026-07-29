@@ -77,6 +77,7 @@ const DASHBOARD_MARKET_EXPECTED_MARGIN_RATE_SEED_KEY = "pharmadev_dashboard_chan
 const DASHBOARD_MARKET_SCENARIO_GRID_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260728_24";
 const DASHBOARD_MARKET_TOTAL_FINANCE_COST_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260728_25";
 const DASHBOARD_MARKET_YEARLY_PROFIT_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260728_26";
+const DASHBOARD_MARKET_ANNUAL_DATE_CALC_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_27";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -5137,6 +5138,36 @@ export default function PmsApp() {
             "총 금융 기회비용의 근거를 연간 필요배치와 실제 주문배치로 산출한 연간 소진율로 표시하도록 변경했습니다.",
             "조정 시나리오 기댓값에 Year 1·2·3별 기대 매출, 매출총이익, 연간 금융비용 차감값을 구분해 표시합니다.",
             "최초 주문물량 완전 소진 기준 총 매출총이익과 총 금융비용 차감 기댓값을 추가하고 CSV 백업에도 반영했습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_MARKET_ANNUAL_DATE_CALC_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_MARKET_ANNUAL_DATE_CALC_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      if ((previous || []).some((log) => log.id === "dashboard_change_20260729_market_annual_date_calc")) return previous;
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260729_market_annual_date_calc",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "연간 기준 시작일을 변경하면 최신 시장실적 연도부터 해당 날짜까지의 경과기간을 계산해 예상 소진수량에 성장률을 반영하도록 수정했습니다.",
+            "YTD Year 1은 현재 날짜까지 일할 계산하고 Year 2·3은 각 연도의 12개월 전망으로 계산하도록 정리했습니다.",
+            "변경된 예상 소진수량을 배치·금융비용과 Year별 기대 손익에도 함께 반영합니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()
