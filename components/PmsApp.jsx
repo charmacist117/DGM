@@ -82,6 +82,7 @@ const DASHBOARD_MARKET_FORMULA_TOOLTIP_SEED_KEY = "pharmadev_dashboard_changelog
 const DASHBOARD_DISTRIBUTION_MARGIN_FORMULA_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_29";
 const DASHBOARD_DISTRIBUTION_ADOPTION_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_30";
 const DASHBOARD_DAILY_CHANGELOG_MARKET_ORDER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_31";
+const DASHBOARD_DISTRIBUTION_STRUCTURE_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_32";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -5364,6 +5365,34 @@ export default function PmsApp() {
           changes: [
             "대시보드 변경사항을 회차별 목록 대신 날짜별 한 건으로 통합하고 같은 날짜의 중복 기록을 방지했습니다.",
             "시장 분석에서 공급단가 최소 주문 수량과 연간 조달 예상 배치를 분리해 공급단가 입력값과 계산 결과를 명확히 구분했습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_DISTRIBUTION_STRUCTURE_FILTER_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_DISTRIBUTION_STRUCTURE_FILTER_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260729_distribution_structure_filter",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "유통 구조 설정 검색 영역에 채택 전체·채택 예상·채택 재고 필터와 구조 전체·설정됨·미설정 필터를 추가했습니다.",
+            "채택 상태와 구조 상태를 카테고리·검색어 조건과 함께 조합할 수 있습니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()

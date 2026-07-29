@@ -186,7 +186,8 @@ export default function DistributionStructureTab({
   syncState
 }) {
   const [search, setSearch] = useState("");
-  const [onlyAdoptionExpected, setOnlyAdoptionExpected] = useState(false);
+  const [adoptionStatusFilter, setAdoptionStatusFilter] = useState("all");
+  const [structureStatusFilter, setStructureStatusFilter] = useState("all");
   const [editingItemId, setEditingItemId] = useState(null);
   const [activePricingScenarioId, setActivePricingScenarioId] = useState(null);
   const query = search.trim().toLowerCase();
@@ -194,11 +195,21 @@ export default function DistributionStructureTab({
     const categoryItems = selectedCategory === "all"
       ? items
       : items.filter((item) => item.category === selectedCategory);
-    const adoptionItems = onlyAdoptionExpected
-      ? categoryItems.filter((item) => item.quoteAdoptionExpected)
-      : categoryItems;
-    if (!query) return adoptionItems;
-    return adoptionItems.filter((item) => {
+    const adoptionItems = adoptionStatusFilter === "all"
+      ? categoryItems
+      : categoryItems.filter((item) => (
+          adoptionStatusFilter === "expected"
+            ? Boolean(item.quoteAdoptionExpected)
+            : !item.quoteAdoptionExpected
+        ));
+    const structureItems = structureStatusFilter === "all"
+      ? adoptionItems
+      : adoptionItems.filter((item) => {
+          const isConfigured = Boolean(getDistribution(item).updatedAt);
+          return structureStatusFilter === "configured" ? isConfigured : !isConfigured;
+        });
+    if (!query) return structureItems;
+    return structureItems.filter((item) => {
       const haystack = [
         item.manufacturer,
         item.packagingUnit,
@@ -206,7 +217,7 @@ export default function DistributionStructureTab({
       ].join(" ").toLowerCase();
       return haystack.includes(query);
     });
-  }, [items, onlyAdoptionExpected, query, selectedCategory]);
+  }, [adoptionStatusFilter, items, query, selectedCategory, structureStatusFilter]);
 
   useEffect(() => {
     if (visibleItems.length === 0) return;
@@ -356,29 +367,73 @@ export default function DistributionStructureTab({
       <div className="distribution-layout">
         <aside style={{ ...panelStyle, minWidth: 0, overflow: "hidden" }}>
           <div style={{ padding: 12, borderBottom: "1px solid #dbe3ee", background: "#f8fafc" }}>
-            <div style={{ marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <label htmlFor="distribution-search" style={{ ...labelStyle, marginBottom: 0 }}>공급단가 건 검색</label>
+            <label htmlFor="distribution-search" style={labelStyle}>공급단가 건 검색</label>
+            <div style={{ marginBottom: 7, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
               <label
                 htmlFor="distribution-adoption-filter"
                 style={{
-                  color: onlyAdoptionExpected ? "#047857" : "#475569",
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 5,
-                  cursor: "pointer",
+                  color: "#475569",
                   whiteSpace: "nowrap",
                   fontSize: 11,
                   fontWeight: 800
                 }}
               >
-                <input
+                채택
+                <select
                   id="distribution-adoption-filter"
-                  type="checkbox"
-                  checked={onlyAdoptionExpected}
-                  onChange={(event) => setOnlyAdoptionExpected(event.target.checked)}
-                  style={{ width: 15, height: 15, margin: 0, accentColor: "#059669" }}
-                />
-                채택 예상만
+                  value={adoptionStatusFilter}
+                  onChange={(event) => setAdoptionStatusFilter(event.target.value)}
+                  style={{
+                    minHeight: 30,
+                    padding: "4px 25px 4px 7px",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: 6,
+                    background: "#fff",
+                    color: "#334155",
+                    fontSize: 11,
+                    fontWeight: 800
+                  }}
+                >
+                  <option value="all">전체</option>
+                  <option value="expected">채택 예상</option>
+                  <option value="reconsider">채택 재고</option>
+                </select>
+              </label>
+              <label
+                htmlFor="distribution-structure-status-filter"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  color: "#475569",
+                  whiteSpace: "nowrap",
+                  fontSize: 11,
+                  fontWeight: 800
+                }}
+              >
+                구조
+                <select
+                  id="distribution-structure-status-filter"
+                  value={structureStatusFilter}
+                  onChange={(event) => setStructureStatusFilter(event.target.value)}
+                  style={{
+                    minHeight: 30,
+                    padding: "4px 25px 4px 7px",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: 6,
+                    background: "#fff",
+                    color: "#334155",
+                    fontSize: 11,
+                    fontWeight: 800
+                  }}
+                >
+                  <option value="all">전체</option>
+                  <option value="configured">설정됨</option>
+                  <option value="unconfigured">미설정</option>
+                </select>
               </label>
             </div>
             <input
