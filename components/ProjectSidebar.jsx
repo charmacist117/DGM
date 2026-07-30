@@ -174,7 +174,7 @@ export default function ProjectSidebar({
       ) : isTransferMode ? (
         <div style={{ flex: 1, minHeight: 0, border: "1px solid rgba(148, 163, 184, .28)", borderRadius: 8, background: "rgba(30, 41, 59, .62)", padding: 12 }}>
           <div style={{ fontSize: 12, fontWeight: 900, color: "#f8fafc", marginBottom: 6 }}>데이터 이전</div>
-          <div style={{ fontSize: 11, lineHeight: 1.6, color: "#94a3b8" }}>프로젝트, 이력, 공급단가와 첨부파일을 하나의 백업 파일로 관리합니다.</div>
+          <div style={{ fontSize: 11, lineHeight: 1.6, color: "#94a3b8" }}>프로젝트, 이력, 공급단가를 하나의 백업 파일로 관리합니다.</div>
         </div>
       ) : isStandaloneHomeMode ? (
         <div style={{ flex: 1, minHeight: 0, border: "1px solid rgba(148, 163, 184, .28)", borderRadius: 8, background: "rgba(30, 41, 59, .62)", padding: 12 }}>

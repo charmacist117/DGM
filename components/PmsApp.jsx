@@ -91,6 +91,7 @@ const DASHBOARD_DAILY_CHANGELOG_MARKET_ORDER_SEED_KEY = "pharmadev_dashboard_cha
 const DASHBOARD_DISTRIBUTION_STRUCTURE_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_32";
 const DASHBOARD_DISTRIBUTION_EXPLICIT_COMPLETE_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_33";
 const DASHBOARD_MARKET_DECISION_DATE_INPUT_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_34";
+const DASHBOARD_ATTACHMENT_REMOVAL_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260730_35";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -697,57 +698,6 @@ function summarizeDraftChecklistChanges(before = {}, after = {}) {
     .map((field) => `${field.label} 수정`);
 }
 
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error || new Error("파일을 읽지 못했습니다."));
-    reader.readAsDataURL(file);
-  });
-}
-
-const SAFE_ATTACHMENT_EXTENSIONS = new Set([
-  "pdf", "png", "jpg", "jpeg", "webp", "doc", "docx", "xls", "xlsx", "csv", "txt"
-]);
-const SAFE_ATTACHMENT_TYPES = new Set([
-  "",
-  "application/octet-stream",
-  "application/pdf",
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "text/csv",
-  "text/plain",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-]);
-
-function isSafeAttachmentFile(file) {
-  const extension = String(file?.name || "").split(".").pop().toLowerCase();
-  return SAFE_ATTACHMENT_EXTENSIONS.has(extension)
-    && SAFE_ATTACHMENT_TYPES.has(String(file?.type || "").toLowerCase());
-}
-
-function formatBytes(size = 0) {
-  const value = Number(size) || 0;
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function normalizeSupplyAttachment(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  return {
-    name: String(value.name || ""),
-    type: String(value.type || ""),
-    size: Number(value.size || 0),
-    dataUrl: String(value.dataUrl || ""),
-    uploadedAt: String(value.uploadedAt || "")
-  };
-}
-
 const SUPPLY_PRICE_CATEGORIES = [
   { id: "OTC", label: "OTC", color: "#0ea5e9" },
   { id: "건강기능식품", label: "건강기능식품", color: "#10b981" },
@@ -962,7 +912,6 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     marketDecisionStatus: normalizeMarketDecisionStatus(
       source.marketDecisionStatus ?? source.finalDecisionStatus ?? source.marketAnalysisDecision
     ),
-    attachment: normalizeSupplyAttachment(source.attachment),
     distributionStructure: normalizeDistributionStructure(source.distributionStructure),
     marketSizeAnalysis: normalizeMarketSizeAnalysis(source.marketSizeAnalysis),
     createdAt: String(source.createdAt || new Date().toISOString()),
@@ -997,8 +946,7 @@ function isSupplyPriceItemEmpty(item = {}) {
     item.permitCompanyFeeRate,
     item.quoteDate,
     item.shelfLife,
-    item.memo,
-    item.attachment?.name
+    item.memo
   ].some((value) => String(value || "").trim());
   return !ingredientHasValue
     && !fieldHasValue
@@ -2186,7 +2134,7 @@ function SupplyPriceTab({
       "카테고리", "제조사", "허가사", "공급 성분", "함량/규격", "원료 원산지", "브랜드/공급처", "kg당 가격대",
       "포장단위", "포장형태", "수량", "최소 주문 배치 수량", "배치 당 공급단가", "VAT 포함", "배치 당 VAT 포함 가격",
       "총 금액", "VAT 포함 총금액", "허가사 수수료", "허가사 수수료율(%) / 상태", "수수료 포함 총금액",
-      "견적일자", "사용기한", "첨부파일", "비고", "견적 채택 예상", "시장 분석 최종 판단"
+      "견적일자", "사용기한", "비고", "견적 채택 예상", "시장 분석 최종 판단"
     ];
     const rows = exportItems.flatMap((item) => {
       const ingredients = item.ingredients?.length ? item.ingredients : [normalizeSupplyIngredient()];
@@ -2223,7 +2171,6 @@ function SupplyPriceTab({
         permitFeeTotal,
         item.quoteDate,
         item.shelfLife,
-        item.attachment?.name || "",
         item.memo,
         item.quoteAdoptionExpected ? "채택 예상" : "채택 재고",
         marketDecisionLabel(item.marketDecisionStatus)
@@ -2285,7 +2232,6 @@ function SupplyPriceTab({
   const cloneSupplyItem = (item) => normalizeSupplyPriceItem({
     ...item,
     ingredients: (item.ingredients || []).map((ingredient) => ({ ...ingredient })),
-    attachment: item.attachment ? { ...item.attachment } : null,
     distributionStructure: {
       ...item.distributionStructure,
       pricingScenarios: (item.distributionStructure?.pricingScenarios || []).map((scenario) => ({ ...scenario })),
@@ -2455,36 +2401,6 @@ function SupplyPriceTab({
     updateItem(itemId, {
       ingredients: ingredients.length ? ingredients : [normalizeSupplyIngredient()]
     });
-  };
-
-  const handleAttachmentChange = async (itemId, event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    try {
-      const maxSize = 10 * 1024 * 1024;
-      if (file.size > maxSize) {
-        window.alert("첨부파일은 10MB 이하만 업로드할 수 있습니다.");
-        return;
-      }
-      if (!isSafeAttachmentFile(file)) {
-        window.alert("PDF, 이미지, Word, Excel, CSV, TXT 파일만 첨부할 수 있습니다.");
-        return;
-      }
-      const dataUrl = await readFileAsDataUrl(file);
-      updateItem(itemId, {
-        attachment: {
-          name: file.name,
-          type: file.type || "application/octet-stream",
-          size: file.size,
-          dataUrl,
-          uploadedAt: new Date().toISOString()
-        }
-      });
-    } catch (error) {
-      window.alert(`파일 업로드 실패: ${errorMessage(error, "파일을 읽지 못했습니다.")}`);
-    } finally {
-      event.target.value = "";
-    }
   };
 
   return (
@@ -2943,7 +2859,7 @@ function SupplyPriceTab({
                     <tr style={{ ...supplyDetailHeaderRowStyle, height: 38 }}>
                       {[
                         ...(supportsPermitCompanyFee ? ["허가사 수수료"] : []),
-                        "견적일자", "사용기한", "첨부파일", "비고", "견적 채택 / 최종 판단"
+                        "견적일자", "사용기한", "비고", "견적 채택 / 최종 판단"
                       ].map((header) => (
                         <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#3730a3", borderBottom: "1px solid #c7d2fe", whiteSpace: "nowrap" }}>
                           {header}
@@ -3026,33 +2942,6 @@ function SupplyPriceTab({
                           />
                         ) : (
                           <div style={supplyTextCellStyle}>{item.shelfLife || "-"}</div>
-                        )}
-                      </td>
-                      <td style={{ padding: 8, width: 300 }}>
-                        {isEditing && (
-                          <input
-                            type="file"
-                            accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg,.webp,application/pdf"
-                            onChange={(event) => handleAttachmentChange(item.id, event)}
-                            style={{ width: "100%", fontSize: 14, marginBottom: 5 }}
-                          />
-                        )}
-                        {item.attachment ? (
-                          <div style={{ display: "grid", gap: 4 }}>
-                            <span style={{ fontSize: 14, color: "#475569", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {item.attachment.name} ({formatBytes(item.attachment.size)})
-                            </span>
-                            <div style={{ display: "flex", gap: 6 }}>
-                              {item.attachment.dataUrl && (
-                                <a href={item.attachment.dataUrl} download={item.attachment.name} style={{ fontSize: 14, color: "#2563eb", fontWeight: 700, textDecoration: "none" }}>
-                                  다운로드
-                                </a>
-                              )}
-                              {isEditing && <button onClick={() => updateItem(item.id, { attachment: null })} style={{ ...supplySubtleButtonStyle, padding: "3px 6px", fontSize: 14 }}>삭제</button>}
-                            </div>
-                          </div>
-                        ) : (
-                          <div style={{ fontSize: 14, color: "#94a3b8" }}>첨부파일 없음</div>
                         )}
                       </td>
                       <td style={{ padding: 8, width: 300 }}>
@@ -3621,7 +3510,7 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, marketAnalysisDefaul
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
         <div style={{ fontWeight: 800, marginBottom: 8 }}>전체 데이터 이전</div>
         <div style={{ fontSize: 13, color: "#475569", marginBottom: 10 }}>
-          프로젝트, 이력, 공급단가, 첨부파일을 하나의 전체 백업 파일로 이전합니다.
+          프로젝트, 이력, 공급단가를 하나의 전체 백업 파일로 이전합니다.
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {isAdmin && <button onClick={downloadFullBackup} disabled={transferState.status === "working"} style={primaryButton}>전체 파일 데이터 다운로드</button>}
@@ -3654,7 +3543,7 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, marketAnalysisDefaul
         <div style={{ border: "1px solid #dbe3ee", borderRadius: 8, overflow: "hidden" }}>
           {[
             { id: "development", description: "모든 프로젝트, 태스크, 일정과 이력 기록" },
-            { id: "supply", description: "전체 공급단가, 견적 정보와 첨부파일" },
+            { id: "supply", description: "전체 공급단가와 견적 정보" },
             { id: "distribution", description: "물량별 가격대, 마진 설정과 경쟁제품 비교" },
             { id: "market", description: "5개년 시장 실적, 약국 침투율, 배치 소진과 금융비용" }
           ].map((module, index) => (
@@ -3713,7 +3602,7 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, marketAnalysisDefaul
             <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, display: "grid", gap: 4, fontSize: 12, marginBottom: 12 }}>
               <div><strong>파일:</strong> {pendingRestore.fileName} ({(pendingRestore.fileSize / 1024 / 1024).toFixed(2)}MB)</div>
               <div><strong>프로젝트:</strong> {pendingRestore.summary.projectCount}건 · <strong>이력:</strong> {pendingRestore.summary.adminLogCount}건</div>
-              <div><strong>공급단가:</strong> {pendingRestore.summary.supplyPriceItemCount}건 · <strong>첨부파일:</strong> {pendingRestore.summary.attachmentCount}개</div>
+              <div><strong>공급단가:</strong> {pendingRestore.summary.supplyPriceItemCount}건</div>
             </div>
             <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 800 }}>
               계속하려면 아래 입력창에 ‘전체 데이터를 교체합니다’를 입력하세요.
@@ -5486,6 +5375,34 @@ export default function PmsApp() {
           changes: [
             "시장 규모 분석에서 최종 검토결과를 진행·추가검토·중단으로 선택하고 공급단가와 유통 구조 화면에서 함께 확인할 수 있게 했습니다.",
             "날짜 입력은 연도 4자리와 월 2자리 입력 후 다음 칸으로 자동 이동하도록 개선했습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_ATTACHMENT_REMOVAL_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_ATTACHMENT_REMOVAL_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260730_attachment_removal",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "공급단가의 첨부파일 업로드·다운로드 기능을 제거했습니다.",
+            "기존 첨부파일 데이터는 온라인 DB와 PC 데이터 파일에서 제거되며 오래된 백업을 복원해도 다시 저장되지 않도록 정리했습니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()
