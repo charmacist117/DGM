@@ -4441,6 +4441,7 @@ export default function PmsApp() {
   const [selectedDistributionItemId, setSelectedDistributionItemId] = useState(null);
   const [selectedMarketItemId, setSelectedMarketItemId] = useState(null);
   const [focusedSupplyItemId, setFocusedSupplyItemId] = useState(null);
+  const [contractParentScope, setContractParentScope] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
   const [tab, setTab] = useState("overview");
   const initialUrlAppliedRef = useRef(false);
@@ -4451,6 +4452,14 @@ export default function PmsApp() {
   });
   const isAdmin = canManage(userRole);
   const roleLabel = isAdmin ? "ADMIN" : "MANAGER";
+
+  useEffect(() => {
+    if (contractParentScope === "all") return;
+    const parentExists = normalizeContractRecords(contractRecords).some((record) => (
+      record.recordType === "parent" && String(record.id) === String(contractParentScope)
+    ));
+    if (!parentExists) setContractParentScope("all");
+  }, [contractParentScope, contractRecords]);
 
   useEffect(() => {
     let disposed = false;
@@ -6033,6 +6042,9 @@ export default function PmsApp() {
         supplyCategory={supplyCategory}
         setSupplyCategory={setSupplyCategory}
         supplyCategoryCounts={supplyCategoryCounts}
+        contractRecords={contractRecords}
+        contractParentScope={contractParentScope}
+        setContractParentScope={setContractParentScope}
         reorderProject={reorderProject}
         selectedId={selectedId}
         openProject={openProject}
@@ -6113,6 +6125,8 @@ export default function PmsApp() {
             supplyPriceItems={normalizeSupplyPriceItems(supplyPriceItems)}
             syncState={syncState}
             isAdmin={isAdmin}
+            parentScope={contractParentScope}
+            onParentScopeChange={setContractParentScope}
           />
         ) : moduleTab === "transfer" ? (
           <>

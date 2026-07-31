@@ -1,7 +1,33 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { diff } from "@/lib/pms/date";
+import {
+  contractStatusLabel,
+  contractTypeLabel,
+  normalizeContractRecords
+} from "@/lib/pms/contracts";
+
+function contractSidebarStatusTone(status, active) {
+  if (status === "active") {
+    return active
+      ? { background: "#dcfce7", color: "#047857" }
+      : { background: "rgba(16, 185, 129, .16)", color: "#6ee7b7" };
+  }
+  if (status === "renewal") {
+    return active
+      ? { background: "#fef3c7", color: "#b45309" }
+      : { background: "rgba(245, 158, 11, .17)", color: "#fcd34d" };
+  }
+  if (status === "expired" || status === "terminated") {
+    return active
+      ? { background: "#fee2e2", color: "#b91c1c" }
+      : { background: "rgba(248, 113, 113, .16)", color: "#fca5a5" };
+  }
+  return active
+    ? { background: "#e2e8f0", color: "#475569" }
+    : { background: "rgba(148, 163, 184, .16)", color: "#cbd5e1" };
+}
 
 export default function ProjectSidebar({
   isHome,
@@ -18,6 +44,9 @@ export default function ProjectSidebar({
   supplyCategory = "all",
   setSupplyCategory,
   supplyCategoryCounts = {},
+  contractRecords = [],
+  contractParentScope = "all",
+  setContractParentScope,
   reorderProject,
   selectedId,
   openProject,
@@ -25,6 +54,7 @@ export default function ProjectSidebar({
   TODAY
 }) {
   const [dragOverTarget, setDragOverTarget] = useState(null);
+  const [contractParentSearch, setContractParentSearch] = useState("");
   const isDistributionMode = moduleTab === "distribution";
   const isMarketMode = moduleTab === "market";
   const isSupplyMode = moduleTab === "supply" || isDistributionMode || isMarketMode;
@@ -39,8 +69,41 @@ export default function ProjectSidebar({
       count: Number(supplyCategoryCounts?.[category.id] || 0)
     }))
   ];
+  const normalizedContractRecords = useMemo(
+    () => normalizeContractRecords(contractRecords),
+    [contractRecords]
+  );
+  const contractChildCounts = useMemo(() => {
+    const counts = new Map();
+    normalizedContractRecords
+      .filter((record) => record.recordType === "child")
+      .forEach((record) => {
+        const parentId = String(record.parentId || "");
+        counts.set(parentId, Number(counts.get(parentId) || 0) + 1);
+      });
+    return counts;
+  }, [normalizedContractRecords]);
+  const contractParentRecords = useMemo(() => {
+    const keyword = contractParentSearch.trim().toLowerCase();
+    return normalizedContractRecords
+      .filter((record) => record.recordType === "parent")
+      .filter((record) => !keyword || [
+        record.title,
+        record.contractNumber,
+        record.counterparty,
+        record.nasPath
+      ].some((value) => String(value || "").toLowerCase().includes(keyword)))
+      .sort((a, b) => {
+        const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime() || 0;
+        const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime() || 0;
+        return bTime - aTime;
+      });
+  }, [contractParentSearch, normalizedContractRecords]);
 
   const readDraggedProjectId = (event) => event.dataTransfer.getData("text/project-id");
+  const contractTitle = (record) => (
+    record.title || `${record.counterparty || "계약 상대방 미입력"} ${contractTypeLabel(record)}`
+  );
 
   return (
     <aside className="pms-project-sidebar" style={{
@@ -71,7 +134,7 @@ export default function ProjectSidebar({
                   : (isSupplyMode
                   ? "공급단가 카테고리"
                   : (isContractMode
-                      ? "모계약 및 하위 계약·문서"
+                      ? "모계약 탐색 및 계약 범위"
                       : (isTransferMode
                       ? "전체 백업 및 복원"
                       : (isStandaloneHomeMode ? "시스템 업데이트 안내" : "제품개발 통합관리")))))}
@@ -127,10 +190,111 @@ export default function ProjectSidebar({
       )}
 
       {isContractMode ? (
-        <div style={{ flex: 1, minHeight: 0, border: "1px solid rgba(148, 163, 184, .28)", borderRadius: 8, background: "rgba(30, 41, 59, .62)", padding: 12 }}>
-          <div style={{ fontSize: 12, fontWeight: 900, color: "#f8fafc", marginBottom: 6 }}>계약 관리</div>
-          <div style={{ fontSize: 11, lineHeight: 1.6, color: "#94a3b8" }}>
-            기본계약·포괄계약을 모계약으로 관리하고 개별계약, 부대합의서와 발주서를 연결합니다.
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 900, color: "#94a3b8", padding: "0 4px" }}>모계약</div>
+          <input
+            value={contractParentSearch}
+            onChange={(event) => setContractParentSearch(event.target.value)}
+            placeholder="모계약명, 상대방 검색"
+            aria-label="모계약 검색"
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              border: "1px solid rgba(148, 163, 184, .4)",
+              borderRadius: 7,
+              background: "#fff",
+              color: "#0f172a",
+              padding: "9px 10px",
+              fontSize: 12,
+              outline: "none"
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => setContractParentScope?.("all")}
+            style={{
+              width: "100%",
+              borderRadius: 8,
+              border: `1px solid ${contractParentScope === "all" ? "#e2e8f0" : "rgba(148, 163, 184, .28)"}`,
+              background: contractParentScope === "all" ? "#fff" : "rgba(30, 41, 59, .65)",
+              color: contractParentScope === "all" ? "#0f172a" : "#e2e8f0",
+              cursor: "pointer",
+              padding: "10px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              textAlign: "left",
+              fontSize: 12,
+              fontWeight: 900
+            }}
+          >
+            <span>전체 계약 보기</span>
+            <span style={{ color: contractParentScope === "all" ? "#475569" : "#94a3b8", fontSize: 11 }}>
+              {normalizedContractRecords.length}건
+            </span>
+          </button>
+          <div style={{
+            flex: 1,
+            minHeight: 0,
+            overflowY: "auto",
+            display: "grid",
+            gridAutoRows: "max-content",
+            alignContent: "start",
+            gap: 7,
+            paddingRight: 3
+          }}>
+            {contractParentRecords.map((record) => {
+              const active = String(contractParentScope) === String(record.id);
+              const childCount = Number(contractChildCounts.get(String(record.id)) || 0);
+              const statusTone = contractSidebarStatusTone(record.status, active);
+              return (
+                <button
+                  key={record.id}
+                  type="button"
+                  onClick={() => setContractParentScope?.(record.id)}
+                  style={{
+                    width: "100%",
+                    borderRadius: 8,
+                    border: `1px solid ${active ? "#e2e8f0" : "rgba(148, 163, 184, .28)"}`,
+                    background: active ? "#fff" : "rgba(30, 41, 59, .65)",
+                    color: active ? "#0f172a" : "#f8fafc",
+                    cursor: "pointer",
+                    padding: 10,
+                    textAlign: "left"
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 7 }}>
+                    <span style={{ minWidth: 0, fontSize: 12, lineHeight: 1.35, fontWeight: 900, overflowWrap: "anywhere" }}>
+                      {contractTitle(record)}
+                    </span>
+                    <span style={{
+                      flex: "0 0 auto",
+                      borderRadius: 999,
+                      padding: "2px 6px",
+                      background: statusTone.background,
+                      color: statusTone.color,
+                      fontSize: 10,
+                      fontWeight: 900
+                    }}>
+                      {contractStatusLabel(record.status)}
+                    </span>
+                  </div>
+                  <div style={{ marginTop: 5, color: active ? "#475569" : "#94a3b8", fontSize: 10, lineHeight: 1.4 }}>
+                    {contractTypeLabel(record)} · {record.counterparty || "상대방 미입력"}
+                  </div>
+                  <div style={{ marginTop: 5, display: "flex", justifyContent: "space-between", gap: 7, color: active ? "#334155" : "#cbd5e1", fontSize: 10, fontWeight: 800 }}>
+                    <span>{record.contractNumber || "계약번호 미입력"}</span>
+                    <span>하위 {childCount}건</span>
+                  </div>
+                </button>
+              );
+            })}
+            {contractParentRecords.length === 0 && (
+              <div style={{ padding: "14px 8px", border: "1px dashed rgba(148, 163, 184, .3)", borderRadius: 8, color: "#64748b", fontSize: 11, textAlign: "center" }}>
+                {contractParentSearch.trim() ? "검색된 모계약이 없습니다." : "등록된 모계약이 없습니다."}
+              </div>
+            )}
           </div>
         </div>
       ) : isSupplyMode ? (

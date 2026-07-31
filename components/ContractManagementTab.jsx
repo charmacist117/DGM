@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import SegmentedDateInput from "@/components/SegmentedDateInput";
 import {
   CHILD_CONTRACT_TYPES,
@@ -120,7 +120,9 @@ export default function ContractManagementTab({
   projects = [],
   supplyPriceItems = [],
   syncState,
-  isAdmin = false
+  isAdmin = false,
+  parentScope = "all",
+  onParentScopeChange
 }) {
   const normalizedRecords = useMemo(() => normalizeContractRecords(records), [records]);
   const parentRecords = useMemo(
@@ -130,11 +132,34 @@ export default function ContractManagementTab({
   const [selectedId, setSelectedId] = useState("");
   const [search, setSearch] = useState("");
   const [recordFilter, setRecordFilter] = useState("all");
+  const [childTypeFilter, setChildTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const previousParentScopeRef = useRef(parentScope);
+
+  useEffect(() => {
+    const previousScope = previousParentScopeRef.current;
+    if (String(previousScope) === String(parentScope)) return;
+    if (isEditing && !window.confirm("저장하지 않은 수정 내용을 취소하고 계약 범위를 변경하시겠습니까?")) {
+      onParentScopeChange?.(previousScope);
+      return;
+    }
+    if (isEditing) {
+      setIsEditing(false);
+      setDraft(null);
+    }
+    previousParentScopeRef.current = parentScope;
+    setSearch("");
+    setRecordFilter("all");
+    setChildTypeFilter("all");
+    if (parentScope !== "all") {
+      const parent = parentRecords.find((record) => String(record.id) === String(parentScope));
+      if (parent) setSelectedId(parent.id);
+    }
+  }, [isEditing, onParentScopeChange, parentRecords, parentScope]);
 
   useEffect(() => {
     if (selectedId && normalizedRecords.some((record) => String(record.id) === String(selectedId))) return;
@@ -160,7 +185,13 @@ export default function ContractManagementTab({
   const filteredRecords = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     return normalizedRecords
-      .filter((record) => recordFilter === "all" || record.recordType === recordFilter)
+      .filter((record) => (
+        parentScope === "all"
+          ? true
+          : record.recordType === "child" && String(record.parentId) === String(parentScope)
+      ))
+      .filter((record) => parentScope !== "all" || recordFilter === "all" || record.recordType === recordFilter)
+      .filter((record) => parentScope === "all" || childTypeFilter === "all" || record.childContractType === childTypeFilter)
       .filter((record) => statusFilter === "all" || record.status === statusFilter)
       .filter((record) => !keyword || [
         record.title,
@@ -173,7 +204,7 @@ export default function ContractManagementTab({
         if (a.recordType !== b.recordType) return a.recordType === "parent" ? -1 : 1;
         return toTimestamp(b.updatedAt || b.createdAt) - toTimestamp(a.updatedAt || a.createdAt);
       });
-  }, [normalizedRecords, projectsById, recordFilter, search, statusFilter]);
+  }, [childTypeFilter, normalizedRecords, parentScope, projectsById, recordFilter, search, statusFilter]);
 
   const expiringCount = normalizedRecords.filter((record) => {
     if (record.status !== "active" && record.status !== "renewal") return false;
@@ -187,7 +218,12 @@ export default function ContractManagementTab({
       window.alert("하위 계약·문서를 연결할 모계약을 먼저 등록해주세요.");
       return;
     }
-    const next = createContractRecord(recordType, recordType === "child" ? parentRecords[0]?.id : "");
+    const preferredParentId = parentScope !== "all"
+      ? parentScope
+      : (selectedRecord?.recordType === "parent"
+          ? selectedRecord.id
+          : (selectedRecord?.parentId || parentRecords[0]?.id || ""));
+    const next = createContractRecord(recordType, recordType === "child" ? preferredParentId : "");
     setDraft(next);
     setSelectedId(next.id);
     setIsEditing(true);
@@ -202,7 +238,9 @@ export default function ContractManagementTab({
   const cancelEdit = () => {
     setIsEditing(false);
     setDraft(null);
-    if (!selectedRecord) setSelectedId(normalizedRecords[0]?.id || "");
+    if (!selectedRecord) {
+      setSelectedId(parentScope !== "all" ? parentScope : (normalizedRecords[0]?.id || ""));
+    }
   };
 
   const saveDraft = () => {
@@ -224,6 +262,11 @@ export default function ContractManagementTab({
     onRecordsChange(exists
       ? normalizedRecords.map((record) => String(record.id) === String(next.id) ? next : record)
       : [next, ...normalizedRecords]);
+    if (next.recordType === "parent") {
+      onParentScopeChange?.(next.id);
+    } else if (parentScope !== "all" && String(next.parentId) !== String(parentScope)) {
+      onParentScopeChange?.(next.parentId);
+    }
     setSelectedId(next.id);
     setDraft(null);
     setIsEditing(false);
@@ -243,7 +286,12 @@ export default function ContractManagementTab({
     if (!isAdmin || !deleteTarget || deleteConfirmation !== "삭제합니다") return;
     const nextRecords = normalizedRecords.filter((record) => String(record.id) !== String(deleteTarget.id));
     onRecordsChange(nextRecords);
-    setSelectedId(nextRecords[0]?.id || "");
+    if (deleteTarget.recordType === "parent" && String(parentScope) === String(deleteTarget.id)) {
+      onParentScopeChange?.("all");
+      setSelectedId(nextRecords[0]?.id || "");
+    } else {
+      setSelectedId(parentScope !== "all" ? parentScope : (nextRecords[0]?.id || ""));
+    }
     setDeleteTarget(null);
     setDeleteConfirmation("");
     setDraft(null);
@@ -322,11 +370,11 @@ export default function ContractManagementTab({
           <span style={statusStyle(record.status)}>{contractStatusLabel(record.status)}</span>
         </div>
         <div style={{ marginTop: 5, fontSize: 11, color: "#64748b" }}>
-          {contractTypeLabel(record)} · {record.counterparty || "상대방 미입력"}
+          {record.recordType === "parent" ? "모계약" : "하위 계약·문서"} · {contractTypeLabel(record)} · {record.counterparty || "상대방 미입력"}
         </div>
         <div style={{ marginTop: 4, display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11, color: "#475569" }}>
           <span>{record.contractNumber || "계약번호 미입력"}</span>
-          <span>{record.recordType === "parent" ? `개별계약 ${childCount}건` : (linkedParent ? `모계약: ${contractDisplayTitle(linkedParent)}` : "모계약 미연결")}</span>
+          <span>{record.recordType === "parent" ? `하위 계약·문서 ${childCount}건` : (linkedParent ? `상위 모계약: ${contractDisplayTitle(linkedParent)}` : "상위 모계약 미연결")}</span>
         </div>
       </button>
     );
@@ -338,13 +386,16 @@ export default function ContractManagementTab({
   const linkedParent = activeForm?.recordType === "child"
     ? parentRecords.find((parent) => String(parent.id) === String(activeForm.parentId))
     : null;
+  const selectedScopeParent = parentScope === "all"
+    ? null
+    : parentRecords.find((parent) => String(parent.id) === String(parentScope));
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <div style={{ ...panelStyle, padding: 14, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
         <div>
           <div style={{ fontSize: 22, fontWeight: 900, color: "#0f172a" }}>계약 관리</div>
-          <div style={{ marginTop: 3, fontSize: 12, color: "#64748b" }}>기본계약·포괄계약을 모계약으로 두고 개별계약과 NAS 계약서 경로를 함께 관리합니다.</div>
+          <div style={{ marginTop: 3, fontSize: 12, color: "#64748b" }}>기본계약·포괄계약을 모계약으로 두고 하위 계약·문서와 NAS 계약서 경로를 함께 관리합니다.</div>
         </div>
         <div style={{ textAlign: "right", display: "grid", gap: 7, justifyItems: "end" }}>
           <div style={{ fontSize: 11, color: syncState?.status === "warning" ? "#b45309" : "#047857", fontWeight: 800 }}>{syncState?.message || ""}</div>
@@ -372,13 +423,38 @@ export default function ContractManagementTab({
       <div style={{ display: "grid", gridTemplateColumns: "360px minmax(0, 1fr)", gap: 12, alignItems: "start" }}>
         <div style={{ ...panelStyle, overflow: "hidden" }}>
           <div style={{ padding: 12, borderBottom: "1px solid #e2e8f0", background: "#f8fafc", display: "grid", gap: 8 }}>
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="계약명, 상대방, 계약번호, NAS 경로 검색" style={inputStyle} />
+            <div>
+              <div style={{ fontSize: 12, color: "#0f172a", fontWeight: 900 }}>
+                {selectedScopeParent ? "하위 계약·문서" : "전체 계약"}
+              </div>
+              <div style={{ marginTop: 3, color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
+                {selectedScopeParent
+                  ? `${contractDisplayTitle(selectedScopeParent)}에 연결된 문서만 표시합니다.`
+                  : "모계약과 모든 하위 계약·문서를 관계와 함께 표시합니다."}
+              </div>
+            </div>
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={selectedScopeParent
+                ? "하위 계약명, 상대방, 계약번호, NAS 경로 검색"
+                : "전체 계약명, 상대방, 계약번호, NAS 경로 검색"}
+              aria-label={selectedScopeParent ? "하위 계약 검색" : "전체 계약 검색"}
+              style={inputStyle}
+            />
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
-              <select value={recordFilter} onChange={(event) => setRecordFilter(event.target.value)} style={inputStyle}>
-                <option value="all">전체 계약</option>
-                <option value="parent">모계약</option>
-                <option value="child">하위 계약·문서</option>
-              </select>
+              {selectedScopeParent ? (
+                <select value={childTypeFilter} onChange={(event) => setChildTypeFilter(event.target.value)} style={inputStyle} aria-label="하위 문서 유형">
+                  <option value="all">전체 하위 문서 유형</option>
+                  {CHILD_CONTRACT_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                </select>
+              ) : (
+                <select value={recordFilter} onChange={(event) => setRecordFilter(event.target.value)} style={inputStyle} aria-label="계약 구조">
+                  <option value="all">전체 계약</option>
+                  <option value="parent">모계약</option>
+                  <option value="child">하위 계약·문서</option>
+                </select>
+              )}
               <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} style={inputStyle}>
                 <option value="all">전체 상태</option>
                 {CONTRACT_STATUSES.map((status) => <option key={status.id} value={status.id}>{status.label}</option>)}
@@ -387,7 +463,13 @@ export default function ContractManagementTab({
           </div>
           <div style={{ maxHeight: "calc(100vh - 330px)", overflowY: "auto", padding: 9, display: "grid", gap: 7 }}>
             {filteredRecords.map(renderRecordRow)}
-            {filteredRecords.length === 0 && <div style={{ padding: 24, textAlign: "center", color: "#94a3b8", fontSize: 12 }}>조건에 맞는 계약이 없습니다.</div>}
+            {filteredRecords.length === 0 && (
+              <div style={{ padding: 24, textAlign: "center", color: "#94a3b8", fontSize: 12, lineHeight: 1.55 }}>
+                {selectedScopeParent
+                  ? "선택한 모계약에 연결된 하위 계약·문서가 없거나 검색 조건과 일치하지 않습니다."
+                  : "조건에 맞는 계약이 없습니다."}
+              </div>
+            )}
           </div>
         </div>
 
@@ -399,7 +481,10 @@ export default function ContractManagementTab({
               <div style={{ padding: "12px 14px", borderBottom: "1px solid #e2e8f0", background: activeForm.recordType === "parent" ? "#e0f2fe" : "#eef2ff", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                 <div>
                   <div style={{ fontSize: 16, color: "#0f172a", fontWeight: 900 }}>{isEditing ? (selectedRecord ? "계약 수정" : "계약 등록") : contractDisplayTitle(activeForm)}</div>
-                  <div style={{ marginTop: 3, fontSize: 11, color: "#64748b" }}>{contractTypeLabel(activeForm)} · {contractStatusLabel(activeForm.status)}</div>
+                  <div style={{ marginTop: 3, fontSize: 11, color: "#64748b" }}>
+                    {activeForm.recordType === "parent" ? "모계약" : "하위 계약·문서"} · {contractTypeLabel(activeForm)} · {contractStatusLabel(activeForm.status)}
+                    {activeForm.recordType === "child" && linkedParent ? ` · 상위 모계약: ${contractDisplayTitle(linkedParent)}` : ""}
+                  </div>
                 </div>
                 <div style={{ display: "flex", gap: 7 }}>
                   {isEditing ? <>
@@ -563,22 +648,6 @@ export default function ContractManagementTab({
                     </div>
                   </div>
 
-                  {activeForm.recordType === "parent" && (
-                    <div style={{ ...panelStyle, overflow: "hidden" }}>
-                      <div style={{ padding: "9px 11px", background: "#f1f5f9", borderBottom: "1px solid #dbe3ee", fontSize: 12, fontWeight: 900 }}>
-                        연결된 하위 계약·문서 {(childrenByParent.get(String(activeForm.id)) || []).length}건
-                      </div>
-                      <div style={{ display: "grid" }}>
-                        {(childrenByParent.get(String(activeForm.id)) || []).map((child) => (
-                          <button key={child.id} type="button" onClick={() => setSelectedId(child.id)} style={{ border: 0, borderBottom: "1px solid #eef2f7", background: "#fff", padding: "9px 11px", textAlign: "left", cursor: "pointer", display: "flex", justifyContent: "space-between", gap: 10 }}>
-                            <span style={{ fontSize: 12, fontWeight: 800 }}>{contractDisplayTitle(child)}</span>
-                            <span style={{ fontSize: 11, color: "#64748b" }}>{contractTypeLabel(child)} · {contractStatusLabel(child.status)}</span>
-                          </button>
-                        ))}
-                        {(childrenByParent.get(String(activeForm.id)) || []).length === 0 && <div style={{ padding: 14, color: "#94a3b8", fontSize: 12 }}>연결된 하위 계약·문서가 없습니다.</div>}
-                      </div>
-                    </div>
-                  )}
                   <div style={{ color: "#94a3b8", fontSize: 11, textAlign: "right" }}>최근 수정 {activeForm.updatedAt ? new Date(activeForm.updatedAt).toLocaleString() : "-"}</div>
                 </div>
               )}
