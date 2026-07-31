@@ -32,6 +32,7 @@ export async function GET() {
       projects: stored.projects,
       adminLogs: stored.adminLogs,
       supplyPriceItems: stored.supplyPriceItems,
+      contractRecords: stored.contractRecords,
       marketAnalysisDefaults: stored.marketAnalysisDefaults
     }, { source: stored.source || "online-database" });
 
@@ -62,7 +63,8 @@ export async function POST(request) {
       parsed.data.projects,
       parsed.data.adminLogs,
       parsed.data.supplyPriceItems,
-      parsed.data.marketAnalysisDefaults
+      parsed.data.marketAnalysisDefaults,
+      parsed.data.contractRecords
     );
 
     return secureJson({ ok: true, updatedAt: saved.updatedAt, summary: parsed.summary, legacy: parsed.legacy });

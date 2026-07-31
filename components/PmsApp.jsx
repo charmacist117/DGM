@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import DistributionStructureTab from "@/components/DistributionStructureTab";
 import MarketSizeAnalysisTab from "@/components/MarketSizeAnalysisTab";
+import ContractManagementTab from "@/components/ContractManagementTab";
 import ProjectSidebar from "@/components/ProjectSidebar";
 import DesktopProjectPathControl from "@/components/DesktopProjectPathControl";
 import SegmentedDateInput from "@/components/SegmentedDateInput";
@@ -21,7 +22,7 @@ import {
   isOtcEtcCategory,
   normalizeDraftChecklist,
   normalizeExclusivityType,
-  normalizeRegulatoryDirection
+  normalizeRegulatoryDirections
 } from "@/lib/pms/defaults";
 import { TODAY, addDays, diff, fmt, toStr } from "@/lib/pms/date";
 import { parseFullBackup } from "@/lib/pms/fullBackup";
@@ -32,11 +33,13 @@ import {
   supplyItemIdentityKey
 } from "@/lib/pms/moduleBackup";
 import {
+  contractModuleToCsv,
   developmentModuleToCsv,
   distributionModuleToCsv,
   marketModuleToCsv,
   supplyModuleToCsv
 } from "@/lib/pms/moduleCsv";
+import { normalizeContractRecords } from "@/lib/pms/contracts";
 import { calcSchedule } from "@/lib/pms/schedule";
 import { downloadFile } from "@/lib/pms/exporters";
 import {
@@ -92,6 +95,10 @@ const DASHBOARD_DISTRIBUTION_STRUCTURE_FILTER_SEED_KEY = "pharmadev_dashboard_ch
 const DASHBOARD_DISTRIBUTION_EXPLICIT_COMPLETE_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_33";
 const DASHBOARD_MARKET_DECISION_DATE_INPUT_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260729_34";
 const DASHBOARD_ATTACHMENT_REMOVAL_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260730_35";
+const DASHBOARD_PRODUCTION_TIMELINE_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260730_36";
+const DASHBOARD_SCHEDULE_HISTORY_GROUP_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260730_37";
+const DASHBOARD_CONTRACT_MANAGEMENT_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260730_38";
+const DASHBOARD_REGULATORY_DIRECTION_CHECK_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260730_39";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -272,6 +279,25 @@ function getScheduleVersionHistory(project) {
   }];
 }
 
+function groupScheduleVersionHistory(history = []) {
+  return [...history].reverse().reduce((groups, entry) => {
+    const { major, minor } = parseScheduleVersion(entry.version);
+    const rangeStart = Math.floor(minor / 10) * 10;
+    const key = `${major}_${rangeStart}`;
+    const currentGroup = groups[groups.length - 1];
+    if (currentGroup?.key === key) {
+      currentGroup.entries.push(entry);
+      return groups;
+    }
+    groups.push({
+      key,
+      label: `v${major}.${String(rangeStart).padStart(2, "0")} ~ v${major}.${String(Math.min(99, rangeStart + 9)).padStart(2, "0")}`,
+      entries: [entry]
+    });
+    return groups;
+  }, []);
+}
+
 function withScheduleVersionUpdate(project, nextProject, { changeCount, reason, changes = [] }) {
   const count = Math.max(1, Number(changeCount) || 1);
   const previousVersion = formatScheduleVersion(project.scheduleVersion);
@@ -427,13 +453,31 @@ function clampSubTimelineItem(item, developDuration) {
 
 function normalizeDevelopSubTimeline(rawTimeline, developDuration) {
   const defaults = getDefaultDevelopSubTimeline();
-  const rawMap = new Map((rawTimeline || []).map((item) => [item.id, item]));
+  const rawItems = Array.isArray(rawTimeline) ? rawTimeline : [];
+  const rawMap = new Map(rawItems.map((item) => [item.id, item]));
+  const total = Math.max(1, toPositiveInt(developDuration, 1));
+  const productionStartOffset = Math.min(
+    total - 1,
+    defaults
+      .filter((item) => item.id !== "dev_production")
+      .reduce((latestEnd, base) => {
+        const item = rawMap.get(base.id) || base;
+        if (item.enabled === false) return latestEnd;
+        const startOffset = Math.max(0, Number(item.startOffset) || 0);
+        const duration = Math.max(1, Number(item.duration) || 1);
+        return Math.max(latestEnd, startOffset + duration + 1);
+      }, 0)
+  );
+  const productionDuration = Math.max(1, Math.min(30, total - productionStartOffset));
 
   return defaults.map((base) => {
     const raw = rawMap.get(base.id);
+    const fallback = base.id === "dev_production" && !raw
+      ? { ...base, startOffset: productionStartOffset, duration: productionDuration }
+      : base;
     return clampSubTimelineItem(
       {
-        ...base,
+        ...fallback,
         ...(raw || {}),
         id: base.id,
         name: base.name,
@@ -518,6 +562,13 @@ function normalizeProject(project) {
   delete projectCore.permitCompany;
   delete projectCore.manufacturer;
   const projectCategory = project.category || "건강기능식품";
+  const regulatoryDirections = isOtcEtcCategory(projectCategory)
+    ? normalizeRegulatoryDirections(
+        Array.isArray(project.regulatoryDirections) && project.regulatoryDirections.length > 0
+          ? project.regulatoryDirections
+          : project.regulatoryDirection
+      )
+    : [];
 
   return {
     ...projectCore,
@@ -525,7 +576,8 @@ function normalizeProject(project) {
     amName: (project.amName || "").trim(),
     manager: project.manager || [project.pmName, project.amName].filter(Boolean).join(" / ") || "미정",
     category: projectCategory,
-    regulatoryDirection: isOtcEtcCategory(projectCategory) ? normalizeRegulatoryDirection(project.regulatoryDirection) : "",
+    regulatoryDirection: regulatoryDirections[0] || "",
+    regulatoryDirections,
     exclusivityType: isOtcEtcCategory(projectCategory) ? normalizeExclusivityType(project.exclusivityType) : "",
     start: startDate,
     tasks: finalOrderedTasks,
@@ -649,13 +701,14 @@ function readLocalCacheState() {
       projects: [],
       adminLogs: [],
       supplyPriceItems: [],
+      contractRecords: [],
       marketAnalysisDefaults: normalizeMarketAnalysisDefaults(),
       hasData: false
     };
   }
   try {
     const cached = window.localStorage.getItem(LOCAL_CACHE_KEY);
-    if (!cached) return { projects: [], adminLogs: [], supplyPriceItems: [], hasData: false };
+    if (!cached) return { projects: [], adminLogs: [], supplyPriceItems: [], contractRecords: [], hasData: false };
     const parsed = JSON.parse(cached);
     const projects = Array.isArray(parsed)
       ? normalizeProjects(parsed)
@@ -666,6 +719,9 @@ function readLocalCacheState() {
     const supplyPriceItems = Array.isArray(parsed)
       ? []
       : normalizeSupplyPriceItems(Array.isArray(parsed?.supplyPriceItems) ? parsed.supplyPriceItems : []);
+    const contractRecords = Array.isArray(parsed)
+      ? []
+      : normalizeContractRecords(Array.isArray(parsed?.contractRecords) ? parsed.contractRecords : []);
     const marketAnalysisDefaults = Array.isArray(parsed)
       ? normalizeMarketAnalysisDefaults()
       : normalizeMarketAnalysisDefaults(parsed?.marketAnalysisDefaults);
@@ -673,10 +729,12 @@ function readLocalCacheState() {
       projects,
       adminLogs,
       supplyPriceItems,
+      contractRecords,
       marketAnalysisDefaults,
       hasData: projects.length > 0
         || adminLogs.length > 0
         || supplyPriceItems.length > 0
+        || contractRecords.length > 0
         || Boolean(parsed?.marketAnalysisDefaults)
     };
   } catch {
@@ -684,6 +742,7 @@ function readLocalCacheState() {
       projects: [],
       adminLogs: [],
       supplyPriceItems: [],
+      contractRecords: [],
       marketAnalysisDefaults: normalizeMarketAnalysisDefaults(),
       hasData: false
     };
@@ -975,6 +1034,10 @@ function useProjectsStore() {
     return readLocalCacheState().supplyPriceItems;
   });
 
+  const [contractRecords, setContractRecords] = useState(() => {
+    return readLocalCacheState().contractRecords;
+  });
+
   const [marketAnalysisDefaults, setMarketAnalysisDefaults] = useState(() => {
     return readLocalCacheState().marketAnalysisDefaults;
   });
@@ -1000,12 +1063,17 @@ function useProjectsStore() {
           const nextProjects = normalizeProjects(Array.isArray(payload.projects) ? payload.projects : []);
           const nextAdminLogs = normalizeAdminLogs(Array.isArray(payload.adminLogs) ? payload.adminLogs : []);
           const nextSupplyPriceItems = normalizeSupplyPriceItems(Array.isArray(payload.supplyPriceItems) ? payload.supplyPriceItems : []);
+          const nextContractRecords = normalizeContractRecords(Array.isArray(payload.contractRecords) ? payload.contractRecords : []);
           const nextMarketAnalysisDefaults = normalizeMarketAnalysisDefaults(payload.marketAnalysisDefaults);
-          const serverIsEmpty = nextProjects.length === 0 && nextAdminLogs.length === 0 && nextSupplyPriceItems.length === 0;
+          const serverIsEmpty = nextProjects.length === 0
+            && nextAdminLogs.length === 0
+            && nextSupplyPriceItems.length === 0
+            && nextContractRecords.length === 0;
           if (serverIsEmpty && localCache.hasData) {
             setProjects(localCache.projects);
             setAdminLogs(localCache.adminLogs);
             setSupplyPriceItems(localCache.supplyPriceItems);
+            setContractRecords(localCache.contractRecords);
             setMarketAnalysisDefaults(localCache.marketAnalysisDefaults);
             serverAvailableRef.current = true;
             setSyncState({
@@ -1018,6 +1086,7 @@ function useProjectsStore() {
           setProjects(nextProjects);
           setAdminLogs(nextAdminLogs);
           setSupplyPriceItems(nextSupplyPriceItems);
+          setContractRecords(nextContractRecords);
           setMarketAnalysisDefaults(nextMarketAnalysisDefaults);
           serverAvailableRef.current = true;
           setSyncState({
@@ -1033,6 +1102,7 @@ function useProjectsStore() {
           setProjects((prev) => (prev.length ? normalizeProjects(prev) : fallbackProjects));
           setAdminLogs((prev) => normalizeAdminLogs(prev));
           setSupplyPriceItems((prev) => normalizeSupplyPriceItems(prev));
+          setContractRecords((prev) => normalizeContractRecords(prev));
           setMarketAnalysisDefaults((prev) => normalizeMarketAnalysisDefaults(prev));
           serverAvailableRef.current = false;
           setSyncState({
@@ -1058,6 +1128,7 @@ function useProjectsStore() {
         projects,
         adminLogs,
         supplyPriceItems,
+        contractRecords,
         marketAnalysisDefaults,
         cachedAt: new Date().toISOString()
       }));
@@ -1074,7 +1145,7 @@ function useProjectsStore() {
         const response = await fetch("/api/projects", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projects, adminLogs, supplyPriceItems, marketAnalysisDefaults })
+          body: JSON.stringify({ projects, adminLogs, supplyPriceItems, contractRecords, marketAnalysisDefaults })
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.ok) {
@@ -1093,7 +1164,7 @@ function useProjectsStore() {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [projects, adminLogs, supplyPriceItems, marketAnalysisDefaults]);
+  }, [projects, adminLogs, supplyPriceItems, contractRecords, marketAnalysisDefaults]);
 
   return {
     projects,
@@ -1102,6 +1173,8 @@ function useProjectsStore() {
     setAdminLogs,
     supplyPriceItems,
     setSupplyPriceItems,
+    contractRecords,
+    setContractRecords,
     marketAnalysisDefaults,
     setMarketAnalysisDefaults,
     syncState
@@ -1622,6 +1695,7 @@ function TasksTab({
     if (isEditing) updateDraftTask(task.id, (currentTask) => ({ ...currentTask, taskStatus: value }));
   };
   const scheduleHistory = getScheduleVersionHistory(project);
+  const scheduleHistoryGroups = groupScheduleVersionHistory(scheduleHistory);
 
   return (
     <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
@@ -1965,26 +2039,44 @@ function TasksTab({
       </table>
 
       <div style={{ borderTop: "1px solid #e2e8f0", background: "#f8fafc", padding: 14 }}>
-        <div style={{ fontSize: 13, fontWeight: 800, color: "#0f172a", marginBottom: 8 }}>일정 버전 이력</div>
-        <div style={{ display: "grid", gap: 7 }}>
-          {[...scheduleHistory].reverse().map((entry, index) => (
-            <details key={entry.id} open={index === 0} style={{ border: "1px solid #dbe3ee", borderRadius: 8, background: "#fff", padding: "7px 10px" }}>
-              <summary style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#334155" }}>
-                <strong style={{ color: "#1d4ed8" }}>{entry.version}</strong>
-                <span>{entry.previousVersion ? `${entry.previousVersion} -> ${entry.version}` : "최초 일정"}</span>
-                <span style={{ color: "#64748b" }}>{entry.changeCount ? `변경 ${entry.changeCount}건` : "기준 일정"}</span>
-                <span style={{ color: "#64748b" }}>{fmt(entry.date)}</span>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>일정 버전 이력</div>
+          <div
+            title="태스크 상태 변경은 버전 산정에서 제외됩니다."
+            style={{ fontSize: 11, color: "#475569", fontWeight: 700, background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: 6, padding: "5px 8px" }}
+          >
+            변경 1~2건 +0.01 · 3~5건 +0.10 · 6건 이상 +1.00 · 상태 변경 제외
+          </div>
+        </div>
+        <div style={{ display: "grid", gap: 8 }}>
+          {scheduleHistoryGroups.map((group, groupIndex) => (
+            <details key={group.key} open={groupIndex === 0} style={{ border: "1px solid #cbd5e1", borderRadius: 8, background: "#eef2f7", overflow: "hidden" }}>
+              <summary style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", fontSize: 12, color: "#0f172a", fontWeight: 800 }}>
+                <span>{group.label}</span>
+                <span style={{ color: "#64748b", fontWeight: 700 }}>{group.entries.length}개 기록</span>
               </summary>
-              <div style={{ borderTop: "1px solid #eef2f7", marginTop: 7, paddingTop: 7, display: "grid", gap: 5 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>{entry.reason}</div>
-                {entry.changes.length > 0 && <div style={{ fontSize: 12, color: "#475569" }}>{entry.changes.join(" / ")}</div>}
-                <div style={{ display: "grid", gap: 3, marginTop: 2 }}>
-                  {entry.schedule.map((item) => (
-                    <div key={`${entry.id}_${item.id}`} style={{ fontSize: 11, color: item.isEnabled ? "#475569" : "#94a3b8" }}>
-                      {item.order}. {item.icon} {item.name} · {fmt(item.start)} ~ {fmt(item.end)} ({item.duration}일)
+              <div style={{ display: "grid", gap: 6, padding: "0 8px 8px" }}>
+                {group.entries.map((entry, entryIndex) => (
+                  <details key={entry.id} open={groupIndex === 0 && entryIndex === 0} style={{ border: "1px solid #dbe3ee", borderRadius: 7, background: "#fff", padding: "7px 10px" }}>
+                    <summary style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: "#334155" }}>
+                      <strong style={{ color: "#1d4ed8" }}>{entry.version}</strong>
+                      <span>{entry.previousVersion ? `${entry.previousVersion} -> ${entry.version}` : "최초 일정"}</span>
+                      <span style={{ color: "#64748b" }}>{entry.changeCount ? `변경 ${entry.changeCount}건` : "기준 일정"}</span>
+                      <span style={{ color: "#64748b" }}>{fmt(entry.date)}</span>
+                    </summary>
+                    <div style={{ borderTop: "1px solid #eef2f7", marginTop: 7, paddingTop: 7, display: "grid", gap: 5 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>{entry.reason}</div>
+                      {entry.changes.length > 0 && <div style={{ fontSize: 12, color: "#475569" }}>{entry.changes.join(" / ")}</div>}
+                      <div style={{ display: "grid", gap: 3, marginTop: 2 }}>
+                        {entry.schedule.map((item) => (
+                          <div key={`${entry.id}_${item.id}`} style={{ fontSize: 11, color: item.isEnabled ? "#475569" : "#94a3b8" }}>
+                            {item.order}. {item.icon} {item.name} · {fmt(item.start)} ~ {fmt(item.end)} ({item.duration}일)
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  ))}
-                </div>
+                  </details>
+                ))}
               </div>
             </details>
           ))}
@@ -3319,7 +3411,7 @@ function DecisionTab({ project, onSaveLog }) {
   );
 }
 
-function BackupTab({ projects, adminLogs, supplyPriceItems, marketAnalysisDefaults, onRestore, isAdmin }) {
+function BackupTab({ projects, adminLogs, supplyPriceItems, contractRecords, marketAnalysisDefaults, onRestore, isAdmin }) {
   const fullBackupInputRef = useRef(null);
   const moduleBackupInputRefs = useRef({});
   const [transferState, setTransferState] = useState({ status: "idle", message: "" });
@@ -3383,6 +3475,7 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, marketAnalysisDefaul
         projects: pendingRestore.data.projects,
         adminLogs: pendingRestore.data.adminLogs,
         supplyPriceItems: pendingRestore.data.supplyPriceItems,
+        contractRecords: pendingRestore.data.contractRecords,
         marketAnalysisDefaults: pendingRestore.data.marketAnalysisDefaults,
         selectedId: pendingRestore.data.projects[0]?.id || null
       });
@@ -3400,7 +3493,7 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, marketAnalysisDefaul
     if (!isAdmin) return;
     const backup = createModuleBackup(
       moduleType,
-      { projects, adminLogs, supplyPriceItems, marketAnalysisDefaults },
+      { projects, adminLogs, supplyPriceItems, contractRecords, marketAnalysisDefaults },
       { source: "data-transfer-tab" }
     );
     downloadFile(
@@ -3419,7 +3512,9 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, marketAnalysisDefaul
           ? supplyModuleToCsv(supplyPriceItems, categoryLabelById)
           : (moduleType === "distribution"
               ? distributionModuleToCsv(supplyPriceItems)
-              : marketModuleToCsv(supplyPriceItems, marketAnalysisDefaults)));
+              : (moduleType === "market"
+                  ? marketModuleToCsv(supplyPriceItems, marketAnalysisDefaults)
+                  : contractModuleToCsv(contractRecords, projects, supplyPriceItems))));
     downloadFile(
       `PB_${MODULE_BACKUP_TYPES[moduleType]}_${moduleFileStamp()}.csv`,
       `\uFEFF${csv}`,
@@ -3448,6 +3543,13 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, marketAnalysisDefaul
           selectedId: nextProjects[0]?.id || null
         });
         setTransferState({ status: "success", message: `제품개발 전체 데이터 ${nextProjects.length}건 복원이 완료되었습니다.` });
+        return;
+      }
+
+      if (moduleType === "contract") {
+        const nextContracts = normalizeContractRecords(parsed.data.contractRecords);
+        onRestore({ contractRecords: nextContracts });
+        setTransferState({ status: "success", message: `계약 관리 전체 데이터 ${nextContracts.length}건 복원이 완료되었습니다.` });
         return;
       }
 
@@ -3510,7 +3612,7 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, marketAnalysisDefaul
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
         <div style={{ fontWeight: 800, marginBottom: 8 }}>전체 데이터 이전</div>
         <div style={{ fontSize: 13, color: "#475569", marginBottom: 10 }}>
-          프로젝트, 이력, 공급단가를 하나의 전체 백업 파일로 이전합니다.
+          프로젝트, 이력, 공급단가와 계약 관리를 하나의 전체 백업 파일로 이전합니다.
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {isAdmin && <button onClick={downloadFullBackup} disabled={transferState.status === "working"} style={primaryButton}>전체 파일 데이터 다운로드</button>}
@@ -3545,7 +3647,8 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, marketAnalysisDefaul
             { id: "development", description: "모든 프로젝트, 태스크, 일정과 이력 기록" },
             { id: "supply", description: "전체 공급단가와 견적 정보" },
             { id: "distribution", description: "물량별 가격대, 마진 설정과 경쟁제품 비교" },
-            { id: "market", description: "5개년 시장 실적, 약국 침투율, 배치 소진과 금융비용" }
+            { id: "market", description: "5개년 시장 실적, 약국 침투율, 배치 소진과 금융비용" },
+            { id: "contract", description: "모계약, 하위 계약·문서와 NAS 계약서 경로" }
           ].map((module, index) => (
             <div
               key={module.id}
@@ -3556,7 +3659,7 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, marketAnalysisDefaul
                 alignItems: "center",
                 padding: "12px 13px",
                 background: index % 2 === 0 ? "#fff" : "#f8fafc",
-                borderBottom: index < 3 ? "1px solid #e2e8f0" : "none"
+                borderBottom: index < 4 ? "1px solid #e2e8f0" : "none"
               }}
             >
               <div style={{ color: "#0f172a", fontSize: 14, fontWeight: 900 }}>{MODULE_BACKUP_TYPES[module.id]}</div>
@@ -3603,6 +3706,7 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, marketAnalysisDefaul
               <div><strong>파일:</strong> {pendingRestore.fileName} ({(pendingRestore.fileSize / 1024 / 1024).toFixed(2)}MB)</div>
               <div><strong>프로젝트:</strong> {pendingRestore.summary.projectCount}건 · <strong>이력:</strong> {pendingRestore.summary.adminLogCount}건</div>
               <div><strong>공급단가:</strong> {pendingRestore.summary.supplyPriceItemCount}건</div>
+              <div><strong>계약 관리:</strong> {pendingRestore.summary.contractRecordCount || 0}건</div>
             </div>
             <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 800 }}>
               계속하려면 아래 입력창에 ‘전체 데이터를 교체합니다’를 입력하세요.
@@ -3626,7 +3730,7 @@ function BasicInfoTab({ project, onSave }) {
     pmName: project.pmName || "",
     amName: project.amName || "",
     category: project.category || CATEGORIES[0],
-    regulatoryDirection: project.regulatoryDirection || "",
+    regulatoryDirections: normalizeRegulatoryDirections(project.regulatoryDirections?.length ? project.regulatoryDirections : project.regulatoryDirection),
     exclusivityType: project.exclusivityType || "",
     start: project.start || TODAY,
     draftChecklist: normalizeDraftChecklist(project.draftChecklist)
@@ -3641,12 +3745,12 @@ function BasicInfoTab({ project, onSave }) {
       pmName: project.pmName || "",
       amName: project.amName || "",
       category: project.category || CATEGORIES[0],
-      regulatoryDirection: project.regulatoryDirection || "",
+      regulatoryDirections: normalizeRegulatoryDirections(project.regulatoryDirections?.length ? project.regulatoryDirections : project.regulatoryDirection),
       exclusivityType: project.exclusivityType || "",
       start: project.start || TODAY,
       draftChecklist: normalizeDraftChecklist(project.draftChecklist)
     });
-  }, [project.id, project.name, project.desc, project.pmName, project.amName, project.category, project.regulatoryDirection, project.exclusivityType, project.start, project.draftChecklist]);
+  }, [project.id, project.name, project.desc, project.pmName, project.amName, project.category, project.regulatoryDirection, project.regulatoryDirections, project.exclusivityType, project.start, project.draftChecklist]);
 
   const updateChecklist = (key, value) => {
     setForm((prev) => ({
@@ -3681,7 +3785,7 @@ function BasicInfoTab({ project, onSave }) {
                 setForm((prev) => ({
                   ...prev,
                   category,
-                  regulatoryDirection: isOtcEtcCategory(category) ? prev.regulatoryDirection : "",
+                  regulatoryDirections: isOtcEtcCategory(category) ? prev.regulatoryDirections : [],
                   exclusivityType: isOtcEtcCategory(category) ? prev.exclusivityType : ""
                 }));
               }}
@@ -3693,14 +3797,28 @@ function BasicInfoTab({ project, onSave }) {
             </select>
           </div>
           {showRegulatoryFields && <>
-            <div>
+            <div style={{ gridColumn: "span 2" }}>
               <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>허가/생산 방향성</label>
-              <select value={form.regulatoryDirection} onChange={(event) => setForm((prev) => ({ ...prev, regulatoryDirection: event.target.value }))} style={inputStyle}>
-                <option value="">선택</option>
-                {REGULATORY_DIRECTION_OPTIONS.map((option) => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
+              <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", padding: 9, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 7 }}>
+                {REGULATORY_DIRECTION_OPTIONS.map((option) => {
+                  const checked = form.regulatoryDirections.includes(option);
+                  return (
+                    <label key={option} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, color: "#334155", cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(event) => setForm((prev) => ({
+                          ...prev,
+                          regulatoryDirections: event.target.checked
+                            ? normalizeRegulatoryDirections([...prev.regulatoryDirections, option])
+                            : prev.regulatoryDirections.filter((item) => item !== option)
+                        }))}
+                      />
+                      {option}
+                    </label>
+                  );
+                })}
+              </div>
             </div>
             <div>
               <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>독점 구분</label>
@@ -3775,7 +3893,7 @@ function BasicInfoTab({ project, onSave }) {
                 pmName: nextPm,
                 amName: nextAm,
                 category: form.category,
-                regulatoryDirection: showRegulatoryFields ? form.regulatoryDirection : "",
+                regulatoryDirections: showRegulatoryFields ? normalizeRegulatoryDirections(form.regulatoryDirections) : [],
                 exclusivityType: showRegulatoryFields ? form.exclusivityType : "",
                 start: form.start || TODAY,
                 draftChecklist: normalizeDraftChecklist(form.draftChecklist)
@@ -4311,6 +4429,8 @@ export default function PmsApp() {
     setAdminLogs,
     supplyPriceItems,
     setSupplyPriceItems,
+    contractRecords,
+    setContractRecords,
     marketAnalysisDefaults,
     setMarketAnalysisDefaults,
     syncState
@@ -5411,6 +5531,119 @@ export default function PmsApp() {
     });
   }, [setAdminLogs, syncState.status]);
 
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_PRODUCTION_TIMELINE_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_PRODUCTION_TIMELINE_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260730_production_timeline",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "제품 개발 하단 타임라인에 제품 생산일정을 추가했습니다.",
+            "기존 프로젝트는 앞선 하위 일정 종료 후부터 생산일정을 자동 배치하며 수정 모드에서 기간과 위치를 조정할 수 있습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_SCHEDULE_HISTORY_GROUP_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_SCHEDULE_HISTORY_GROUP_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260730_schedule_history_group",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "일정 버전 이력에 변경 건수별 버전 상승 기준을 표시했습니다.",
+            "일정 변경 기록을 0.1 단위 버전 구간별 접이식 그룹으로 묶어 긴 이력을 간결하게 확인할 수 있도록 개선했습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_CONTRACT_MANAGEMENT_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_CONTRACT_MANAGEMENT_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260730_contract_management",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "기본계약·포괄계약을 모계약으로 관리하는 계약 관리 시트를 추가했습니다.",
+            "모계약 아래에 개별계약, 부대합의서, 발주서와 품목별 조건합의서를 연결하고 NAS 계약서 경로를 관리할 수 있습니다.",
+            "계약 관리 데이터도 서버·PC 저장과 전체·탭별 백업 및 CSV에 포함했습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_REGULATORY_DIRECTION_CHECK_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_REGULATORY_DIRECTION_CHECK_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260730_regulatory_direction_check",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "OTC·ETC 프로젝트의 허가/생산 방향성을 단일 드롭다운에서 복수 체크 방식으로 변경했습니다.",
+            "신규 기안과 프로젝트 기본정보 수정 화면에 동일하게 적용하고 기존 단일 선택 데이터도 자동 호환합니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
   const addDashboardChange = ({ changeDateTime, revision, changes }) => {
     if (!isAdmin) {
       window.alert("변경사항 기록은 ADMIN만 추가할 수 있습니다.");
@@ -5661,6 +5894,7 @@ export default function PmsApp() {
     projects: nextProjects,
     adminLogs: nextAdminLogs,
     supplyPriceItems: nextSupplyPriceItems,
+    contractRecords: nextContractRecords,
     marketAnalysisDefaults: nextMarketAnalysisDefaults,
     selectedId: nextSelectedId
   }) => {
@@ -5674,6 +5908,7 @@ export default function PmsApp() {
     }
     if (Array.isArray(nextAdminLogs)) setAdminLogs(normalizeAdminLogs(nextAdminLogs));
     if (Array.isArray(nextSupplyPriceItems)) setSupplyPriceItems(normalizeSupplyPriceItems(nextSupplyPriceItems));
+    if (Array.isArray(nextContractRecords)) setContractRecords(normalizeContractRecords(nextContractRecords));
     if (nextMarketAnalysisDefaults && typeof nextMarketAnalysisDefaults === "object") {
       setMarketAnalysisDefaults(normalizeMarketAnalysisDefaults(nextMarketAnalysisDefaults));
     }
@@ -5753,6 +5988,7 @@ export default function PmsApp() {
             ["supply", "공급단가"],
             ["distribution", "유통 구조 설정"],
             ["market", "시장 규모 분석"],
+            ["contract", "계약 관리"],
             ["transfer", "데이터 이전"]
           ].map(([id, label]) => (
             <button
@@ -5869,6 +6105,15 @@ export default function PmsApp() {
             onOpenDistribution={openDistributionStructure}
             syncState={syncState}
           />
+        ) : moduleTab === "contract" ? (
+          <ContractManagementTab
+            records={contractRecords}
+            onRecordsChange={(nextRecords) => setContractRecords(normalizeContractRecords(nextRecords))}
+            projects={projects}
+            supplyPriceItems={normalizeSupplyPriceItems(supplyPriceItems)}
+            syncState={syncState}
+            isAdmin={isAdmin}
+          />
         ) : moduleTab === "transfer" ? (
           <>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12 }}>
@@ -5885,6 +6130,7 @@ export default function PmsApp() {
               projects={projects}
               adminLogs={adminLogs}
               supplyPriceItems={supplyPriceItems}
+              contractRecords={contractRecords}
               marketAnalysisDefaults={marketAnalysisDefaults}
               isAdmin={isAdmin}
               onRestore={applyRestoredData}
@@ -6374,14 +6620,20 @@ export default function PmsApp() {
             {tab === "basic" && (
               <BasicInfoTab
                 project={selectedProject}
-                onSave={({ name, desc, pmName, amName, category, regulatoryDirection, exclusivityType, start, draftChecklist }) => {
+                onSave={({ name, desc, pmName, amName, category, regulatoryDirections, exclusivityType, start, draftChecklist }) => {
                   const historyParts = [];
+                  const nextRegulatoryDirections = isOtcEtcCategory(category) ? normalizeRegulatoryDirections(regulatoryDirections) : [];
+                  const previousRegulatoryDirections = normalizeRegulatoryDirections(
+                    selectedProject.regulatoryDirections?.length ? selectedProject.regulatoryDirections : selectedProject.regulatoryDirection
+                  );
                   if (selectedProject.name !== name) historyParts.push(`프로젝트명 ${selectedProject.name} -> ${name}`);
                   if ((selectedProject.desc || "") !== desc) historyParts.push("기안 요약 수정");
                   if ((selectedProject.pmName || "") !== pmName) historyParts.push(`PM: ${selectedProject.pmName || "-"} -> ${pmName || "-"}`);
                   if ((selectedProject.amName || "") !== amName) historyParts.push(`AM: ${selectedProject.amName || "-"} -> ${amName || "-"}`);
                   if (selectedProject.category !== category) historyParts.push(`카테고리: ${selectedProject.category} -> ${category}`);
-                  if ((selectedProject.regulatoryDirection || "") !== regulatoryDirection) historyParts.push(`허가/생산 방향성: ${selectedProject.regulatoryDirection || "-"} -> ${regulatoryDirection || "-"}`);
+                  if (previousRegulatoryDirections.join("|") !== nextRegulatoryDirections.join("|")) {
+                    historyParts.push(`허가/생산 방향성: ${previousRegulatoryDirections.join(", ") || "-"} -> ${nextRegulatoryDirections.join(", ") || "-"}`);
+                  }
                   if ((selectedProject.exclusivityType || "") !== exclusivityType) historyParts.push(`독점 구분: ${selectedProject.exclusivityType || "-"} -> ${exclusivityType || "-"}`);
                   if (selectedProject.start !== start) historyParts.push(`시작일 ${selectedProject.start} -> ${start}`);
                   historyParts.push(...summarizeDraftChecklistChanges(selectedProject.draftChecklist, draftChecklist));
@@ -6389,12 +6641,17 @@ export default function PmsApp() {
 
                   updateProject(selectedProject.id, (project) => {
                     const historyParts = [];
+                    const currentRegulatoryDirections = normalizeRegulatoryDirections(
+                      project.regulatoryDirections?.length ? project.regulatoryDirections : project.regulatoryDirection
+                    );
                     if (project.name !== name) historyParts.push(`프로젝트명 ${project.name} -> ${name}`);
                     if ((project.desc || "") !== desc) historyParts.push("기안 요약 수정");
                     if ((project.pmName || "") !== pmName) historyParts.push(`PM: ${project.pmName || "-"} -> ${pmName || "-"}`);
                     if ((project.amName || "") !== amName) historyParts.push(`AM: ${project.amName || "-"} -> ${amName || "-"}`);
                     if (project.category !== category) historyParts.push(`카테고리: ${project.category} -> ${category}`);
-                    if ((project.regulatoryDirection || "") !== regulatoryDirection) historyParts.push(`허가/생산 방향성: ${project.regulatoryDirection || "-"} -> ${regulatoryDirection || "-"}`);
+                    if (currentRegulatoryDirections.join("|") !== nextRegulatoryDirections.join("|")) {
+                      historyParts.push(`허가/생산 방향성: ${currentRegulatoryDirections.join(", ") || "-"} -> ${nextRegulatoryDirections.join(", ") || "-"}`);
+                    }
                     if ((project.exclusivityType || "") !== exclusivityType) historyParts.push(`독점 구분: ${project.exclusivityType || "-"} -> ${exclusivityType || "-"}`);
                     if (project.start !== start) historyParts.push(`시작일 ${project.start} -> ${start}`);
                     historyParts.push(...summarizeDraftChecklistChanges(project.draftChecklist, draftChecklist));
@@ -6409,7 +6666,8 @@ export default function PmsApp() {
                       amName,
                       manager,
                       category,
-                      regulatoryDirection: isOtcEtcCategory(category) ? normalizeRegulatoryDirection(regulatoryDirection) : "",
+                      regulatoryDirection: nextRegulatoryDirections[0] || "",
+                      regulatoryDirections: nextRegulatoryDirections,
                       exclusivityType: isOtcEtcCategory(category) ? normalizeExclusivityType(exclusivityType) : "",
                       start,
                       draftChecklist: normalizeDraftChecklist(draftChecklist),

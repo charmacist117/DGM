@@ -28,6 +28,7 @@ export default function ProjectSidebar({
   const isDistributionMode = moduleTab === "distribution";
   const isMarketMode = moduleTab === "market";
   const isSupplyMode = moduleTab === "supply" || isDistributionMode || isMarketMode;
+  const isContractMode = moduleTab === "contract";
   const isTransferMode = moduleTab === "transfer";
   const isStandaloneHomeMode = moduleTab === "home";
   const totalSupplyCount = Object.values(supplyCategoryCounts || {}).reduce((sum, count) => sum + Number(count || 0), 0);
@@ -69,9 +70,11 @@ export default function ProjectSidebar({
                   ? "시장 규모 분석 품목 목록"
                   : (isSupplyMode
                   ? "공급단가 카테고리"
-                  : (isTransferMode
+                  : (isContractMode
+                      ? "모계약 및 하위 계약·문서"
+                      : (isTransferMode
                       ? "전체 백업 및 복원"
-                      : (isStandaloneHomeMode ? "시스템 업데이트 안내" : "제품개발 통합관리"))))}
+                      : (isStandaloneHomeMode ? "시스템 업데이트 안내" : "제품개발 통합관리")))))}
           </div>
         </div>
         <button
@@ -106,7 +109,7 @@ export default function ProjectSidebar({
         </button>
       </div>
 
-      {!isSupplyMode && !isTransferMode && !isStandaloneHomeMode && isAdmin && (
+      {!isSupplyMode && !isContractMode && !isTransferMode && !isStandaloneHomeMode && isAdmin && (
         <button
           onClick={goToNewProjectPage}
           style={{ width: "100%", borderRadius: 8, padding: "9px 10px", border: "1px dashed rgba(148, 163, 184, .55)", background: "rgba(255, 255, 255, .04)", color: "#e2e8f0", cursor: "pointer", fontWeight: 800 }}
@@ -114,7 +117,7 @@ export default function ProjectSidebar({
           + 새 프로젝트
         </button>
       )}
-      {!isSupplyMode && !isTransferMode && !isStandaloneHomeMode && isAdmin && (
+      {!isSupplyMode && !isContractMode && !isTransferMode && !isStandaloneHomeMode && isAdmin && (
         <button
           onClick={goToProjectLogsPage}
           style={{ width: "100%", borderRadius: 8, padding: "9px 10px", border: "1px solid rgba(148, 163, 184, .28)", background: "rgba(30, 41, 59, .65)", color: "#e2e8f0", cursor: "pointer", fontWeight: 800, fontSize: 12 }}
@@ -123,7 +126,14 @@ export default function ProjectSidebar({
         </button>
       )}
 
-      {isSupplyMode ? (
+      {isContractMode ? (
+        <div style={{ flex: 1, minHeight: 0, border: "1px solid rgba(148, 163, 184, .28)", borderRadius: 8, background: "rgba(30, 41, 59, .62)", padding: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 900, color: "#f8fafc", marginBottom: 6 }}>계약 관리</div>
+          <div style={{ fontSize: 11, lineHeight: 1.6, color: "#94a3b8" }}>
+            기본계약·포괄계약을 모계약으로 관리하고 개별계약, 부대합의서와 발주서를 연결합니다.
+          </div>
+        </div>
+      ) : isSupplyMode ? (
         <div style={{
           flex: 1,
           minHeight: 0,

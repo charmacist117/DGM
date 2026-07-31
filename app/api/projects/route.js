@@ -23,6 +23,7 @@ export async function GET() {
       projects: result.projects,
       adminLogs: result.adminLogs,
       supplyPriceItems: result.supplyPriceItems,
+      contractRecords: result.contractRecords,
       marketAnalysisDefaults: result.marketAnalysisDefaults,
       updatedAt: result.updatedAt,
       source: result.source
@@ -47,17 +48,21 @@ export async function PUT(request) {
 
     let adminLogs = Array.isArray(body.adminLogs) ? body.adminLogs : null;
     let supplyPriceItems = Array.isArray(body.supplyPriceItems) ? body.supplyPriceItems : null;
+    let contractRecords = Array.isArray(body.contractRecords) ? body.contractRecords : null;
     let marketAnalysisDefaults = body.marketAnalysisDefaults && typeof body.marketAnalysisDefaults === "object"
       ? body.marketAnalysisDefaults
       : null;
     let current = null;
-    if (adminLogs === null || supplyPriceItems === null || marketAnalysisDefaults === null || session.role !== "admin") {
+    if (adminLogs === null || supplyPriceItems === null || contractRecords === null || marketAnalysisDefaults === null || session.role !== "admin") {
       current = await loadProjects();
       if (adminLogs === null) {
         adminLogs = Array.isArray(current.adminLogs) ? current.adminLogs : [];
       }
       if (supplyPriceItems === null) {
         supplyPriceItems = Array.isArray(current.supplyPriceItems) ? current.supplyPriceItems : [];
+      }
+      if (contractRecords === null || session.role !== "admin") {
+        contractRecords = Array.isArray(current.contractRecords) ? current.contractRecords : [];
       }
       if (marketAnalysisDefaults === null) {
         marketAnalysisDefaults = current.marketAnalysisDefaults;
@@ -82,13 +87,15 @@ export async function PUT(request) {
       projects: body.projects,
       adminLogs,
       supplyPriceItems,
+      contractRecords,
       marketAnalysisDefaults
     });
     const result = await saveProjects(
       validated.projects,
       validated.adminLogs,
       validated.supplyPriceItems,
-      validated.marketAnalysisDefaults
+      validated.marketAnalysisDefaults,
+      validated.contractRecords
     );
     return secureJson({ ok: true, updatedAt: result.updatedAt });
   } catch (error) {

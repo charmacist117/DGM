@@ -10,7 +10,8 @@ import {
   REGULATORY_DIRECTION_OPTIONS,
   createEmptyDraftChecklist,
   createProjectFromForm,
-  isOtcEtcCategory
+  isOtcEtcCategory,
+  normalizeRegulatoryDirections
 } from "@/lib/pms/defaults";
 import { TODAY } from "@/lib/pms/date";
 
@@ -60,7 +61,7 @@ export default function NewProjectPage() {
     pmName: "",
     amName: "",
     category: CATEGORIES[0],
-    regulatoryDirection: "",
+    regulatoryDirections: [],
     exclusivityType: "",
     start: TODAY,
     draftChecklist: createEmptyDraftChecklist()
@@ -90,7 +91,7 @@ export default function NewProjectPage() {
       setError("PM 또는 AM 중 최소 1명을 입력해주세요.");
       return;
     }
-    if (showRegulatoryFields && !form.regulatoryDirection) {
+    if (showRegulatoryFields && form.regulatoryDirections.length === 0) {
       setError("허가/생산 방향성을 선택해주세요.");
       return;
     }
@@ -120,7 +121,7 @@ export default function NewProjectPage() {
         pmName,
         amName,
         category: form.category,
-        regulatoryDirection: form.regulatoryDirection,
+        regulatoryDirections: form.regulatoryDirections,
         exclusivityType: form.exclusivityType,
         start: form.start || TODAY,
         draftChecklist: form.draftChecklist
@@ -183,7 +184,7 @@ export default function NewProjectPage() {
                     setForm((prev) => ({
                       ...prev,
                       category,
-                      regulatoryDirection: isOtcEtcCategory(category) ? prev.regulatoryDirection : "",
+                      regulatoryDirections: isOtcEtcCategory(category) ? prev.regulatoryDirections : [],
                       exclusivityType: isOtcEtcCategory(category) ? prev.exclusivityType : ""
                     }));
                   }}
@@ -200,16 +201,26 @@ export default function NewProjectPage() {
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12, marginTop: 12 }}>
                 <div>
                   <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>허가/생산 방향성 *</label>
-                  <select
-                    value={form.regulatoryDirection}
-                    onChange={(e) => setForm((prev) => ({ ...prev, regulatoryDirection: e.target.value }))}
-                    style={fieldStyle}
-                  >
-                    <option value="">선택</option>
-                    {REGULATORY_DIRECTION_OPTIONS.map((option) => (
-                      <option key={option} value={option}>{option}</option>
-                    ))}
-                  </select>
+                  <div style={{ ...fieldStyle, display: "grid", gap: 8 }}>
+                    {REGULATORY_DIRECTION_OPTIONS.map((option) => {
+                      const checked = form.regulatoryDirections.includes(option);
+                      return (
+                        <label key={option} style={{ display: "flex", alignItems: "center", gap: 8, color: "#334155", fontSize: 13, cursor: "pointer" }}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(event) => setForm((prev) => ({
+                              ...prev,
+                              regulatoryDirections: event.target.checked
+                                ? normalizeRegulatoryDirections([...prev.regulatoryDirections, option])
+                                : prev.regulatoryDirections.filter((item) => item !== option)
+                            }))}
+                          />
+                          {option}
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div>
                   <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 5 }}>독점 구분 *</label>
