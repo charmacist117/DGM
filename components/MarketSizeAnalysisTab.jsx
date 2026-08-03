@@ -912,8 +912,8 @@ export default function MarketSizeAnalysisTab({
                     <Metric
                       label="공급단가 최소 주문 수량"
                       value={formatCount(planningBatchFinance.minimumOrderQuantity)}
-                      subtext={`공급단가 입력값 · 배치당 ${formatCount(calculations.batchQuantity)} × 최소 ${calculations.minimumOrderBatches}배치`}
-                      formula="공급단가의 배치당 공급수량 × 공급단가의 최소 주문 배치 수"
+                      subtext={`공급단가 입력값 · 배치 당 포장단위 개수 ${formatCount(calculations.batchQuantity)} × 최소 ${calculations.minimumOrderBatches}배치`}
+                      formula="공급단가의 배치 당 포장단위 개수 × 공급단가의 최소 주문 배치 수"
                     />
                     <Metric
                       label="연간 필요 배치"
@@ -921,13 +921,13 @@ export default function MarketSizeAnalysisTab({
                       subtext={planningBatchFinance.orderBatchCount === null
                         ? ""
                         : `연간 소진 충족 조달 예상 ${planningBatchFinance.orderBatchCount}배치`}
-                      formula="해당 연도 예상 소진수량 ÷ 배치당 공급수량"
+                      formula="해당 연도 예상 소진수량 ÷ 배치 당 포장단위 개수"
                     />
                     <Metric
                       label="연간 조달 예상수량"
                       value={formatCount(planningBatchFinance.orderQuantity)}
                       subtext={`필요 배치 올림과 최소 주문 조건 중 큰 값 · ${planningBatchFinance.orderBatchCount ?? "-"}배치`}
-                      formula="max(올림(연간 필요 배치), 공급단가 최소 주문 배치 수) × 배치당 공급수량"
+                      formula="max(올림(연간 필요 배치), 공급단가 최소 주문 배치 수) × 배치 당 포장단위 개수"
                     />
                     <Metric
                       label="주문 수량 소진 예상기간"

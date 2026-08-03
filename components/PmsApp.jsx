@@ -51,6 +51,15 @@ import {
   marketDecisionLabel,
   normalizeMarketDecisionStatus
 } from "@/lib/pms/marketDecision";
+import {
+  SUPPLY_COST_TYPE_OPTIONS,
+  normalizeSupplyCostBreakdown,
+  normalizeSupplyCostItem,
+  supplyCostBreakdownCsvText,
+  supplyCostBreakdownPerPackage,
+  supplyCostBreakdownTotal,
+  supportsSupplyCostBreakdown
+} from "@/lib/pms/supplyCostBreakdown";
 
 const LOCAL_CACHE_KEY = "pharmadev_pms_cache_v2";
 const DEVELOP_TASK_ID = "develop";
@@ -99,6 +108,7 @@ const DASHBOARD_PRODUCTION_TIMELINE_SEED_KEY = "pharmadev_dashboard_changelog_se
 const DASHBOARD_SCHEDULE_HISTORY_GROUP_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260730_37";
 const DASHBOARD_CONTRACT_MANAGEMENT_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260730_38";
 const DASHBOARD_REGULATORY_DIRECTION_CHECK_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260730_39";
+const DASHBOARD_SUPPLY_COST_BREAKDOWN_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260803_40";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -823,6 +833,13 @@ function formatPermitFeeIncludedTotalPrice(value, quantity, rate) {
   return `${supplyPriceFormat.format(price * count * 1.1 * (1 + (percentage / 100)))}원`;
 }
 
+function formatSupplyCostAmount(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "-";
+  const amount = parseSupplyPriceNumber(raw);
+  return amount === null ? raw : `${supplyPriceFormat.format(amount)}원`;
+}
+
 function normalizeSupplyCheckedValue(value) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value === 1;
@@ -948,6 +965,9 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     packagingUnit: String(source.packagingUnit || source.packageUnit || ""),
     packagingForm: String(source.packagingForm || source.packageForm || ""),
     quantity: String(source.quantity || source.supplyQuantity || source.qty || ""),
+    costBreakdown: normalizeSupplyCostBreakdown(
+      source.costBreakdown || source.quoteCostBreakdown || source.costItems
+    ),
     minimumOrderBatchQuantity: String(
       source.minimumOrderBatchQuantity || source.minOrderBatchQuantity || source.minimumBatchQuantity || source.moq || ""
     ),
@@ -1007,8 +1027,12 @@ function isSupplyPriceItemEmpty(item = {}) {
     item.shelfLife,
     item.memo
   ].some((value) => String(value || "").trim());
+  const costBreakdownHasValue = normalizeSupplyCostBreakdown(item.costBreakdown).some((costItem) => (
+    costItem.detail.trim() || costItem.amount.trim() || costItem.memo.trim()
+  ));
   return !ingredientHasValue
     && !fieldHasValue
+    && !costBreakdownHasValue
     && !item.vatIncluded
     && !item.permitCompanyFee
     && !item.quoteAdoptionExpected;
@@ -2107,6 +2131,8 @@ function SupplyPriceTab({
   isAdmin = false
 }) {
   const [search, setSearch] = useState("");
+  const [ingredientComparisonMode, setIngredientComparisonMode] = useState(false);
+  const [ingredientComparisonSearch, setIngredientComparisonSearch] = useState("");
   const [fromMonth, setFromMonth] = useState("");
   const [toMonth, setToMonth] = useState("");
   const [quickQuoteDateFilter, setQuickQuoteDateFilter] = useState("all");
@@ -2129,6 +2155,7 @@ function SupplyPriceTab({
   const currentCategoryLabel = currentCategory === "all"
     ? "전체"
     : (SUPPLY_PRICE_CATEGORY_LABEL_BY_ID[currentCategory] || currentCategory);
+  const canUseIngredientComparison = currentCategory === "all" || supportsSupplyCostBreakdown(currentCategory);
   const quickQuoteDateRange = useMemo(() => {
     const months = quickQuoteDateFilter === "3m" ? 3 : quickQuoteDateFilter === "6m" ? 6 : 0;
     return months ? getRecentSupplyQuoteRange(months) : null;
@@ -2149,6 +2176,24 @@ function SupplyPriceTab({
       return true;
     });
   }, [categoryFilteredItems, editingIds, fromMonth, monthRangeActive, quickQuoteDateRange, toMonth]);
+  const ingredientComparisonQuery = useMemo(
+    () => ingredientComparisonSearch.trim().toLowerCase(),
+    [ingredientComparisonSearch]
+  );
+  const ingredientComparisonRows = useMemo(() => {
+    if (!ingredientComparisonQuery) return [];
+    return monthFilteredItems
+      .filter((item) => supportsSupplyCostBreakdown(item.category))
+      .flatMap((item) => (item.ingredients || []).map((ingredient, index) => ({ item, ingredient, index })))
+      .filter(({ ingredient }) => ingredient.name.trim().toLowerCase().includes(ingredientComparisonQuery))
+      .sort((left, right) => {
+        const nameOrder = left.ingredient.name.localeCompare(right.ingredient.name, "ko");
+        if (nameOrder !== 0) return nameOrder;
+        const dateOrder = String(right.item.quoteDate || "").localeCompare(String(left.item.quoteDate || ""));
+        if (dateOrder !== 0) return dateOrder;
+        return String(left.item.manufacturer || "").localeCompare(String(right.item.manufacturer || ""), "ko");
+      });
+  }, [ingredientComparisonQuery, monthFilteredItems]);
   const query = useMemo(() => search.trim().toLowerCase(), [search]);
   const filteredItems = useMemo(() => {
     const searchedItems = !query ? monthFilteredItems : monthFilteredItems.filter((item) => (
@@ -2176,11 +2221,17 @@ function SupplyPriceTab({
 
   useEffect(() => {
     if (!focusedItemId) return;
+    setIngredientComparisonMode(false);
     setSearch("");
     setQuickQuoteDateFilter("all");
     setFromMonth("");
     setToMonth("");
   }, [focusedItemId]);
+
+  useEffect(() => {
+    if (currentCategory === "all" || supportsSupplyCostBreakdown(currentCategory)) return;
+    setIngredientComparisonMode(false);
+  }, [currentCategory]);
 
   useEffect(() => {
     if (!focusedItemId) {
@@ -2217,6 +2268,12 @@ function SupplyPriceTab({
     setToMonth(range.to.slice(0, 7));
   };
 
+  const openIngredientComparisonItem = (row) => {
+    setIngredientComparisonMode(false);
+    setSearch(row.ingredient.name);
+    pendingCopiedItemScrollRef.current = String(row.item.id);
+  };
+
   const exportSupplyPriceCsv = (exportItems, fileLabel) => {
     if (exportItems.length === 0) {
       window.alert("다운로드할 공급단가 항목이 없습니다.");
@@ -2224,7 +2281,8 @@ function SupplyPriceTab({
     }
     const headers = [
       "카테고리", "제조사", "허가사", "공급 성분", "함량/규격", "원료 원산지", "브랜드/공급처", "kg당 가격대",
-      "포장단위", "포장형태", "수량", "최소 주문 배치 수량", "배치 당 공급단가", "VAT 포함", "배치 당 VAT 포함 가격",
+      "포장단위", "포장형태", "배치 당 포장단위 개수", "최소 주문 배치 수량", "견적 원가 구성", "원가 구성 합계(원)",
+      "포장단위당 원가 구성(원)", "배치 당 공급단가", "VAT 포함", "배치 당 VAT 포함 가격",
       "총 금액", "VAT 포함 총금액", "허가사 수수료", "허가사 수수료율(%) / 상태", "수수료 포함 총금액",
       "견적일자", "사용기한", "비고", "견적 채택 예상", "시장 분석 최종 판단"
     ];
@@ -2234,6 +2292,11 @@ function SupplyPriceTab({
       const vatUnitPrice = item.vatIncluded ? formatVatIncludedPrice(item.supplyUnitPrice) : "";
       const vatTotalPrice = item.vatIncluded ? formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1) : "";
       const supportsPermitCompanyFee = isPermitCompanyFeeCategory(item.category);
+      const costBreakdownText = supplyCostBreakdownCsvText(item.costBreakdown);
+      const costBreakdownTotal = costBreakdownText ? supplyCostBreakdownTotal(item.costBreakdown) : "";
+      const costBreakdownPerPackage = costBreakdownText
+        ? supplyCostBreakdownPerPackage(item.costBreakdown, item.quantity)
+        : null;
       const permitFeeRateUnknown = supportsPermitCompanyFee && item.permitCompanyFee && item.permitCompanyFeeRateUnknown;
       const permitFeeTotal = supportsPermitCompanyFee && item.permitCompanyFee
         ? (permitFeeRateUnknown
@@ -2253,6 +2316,9 @@ function SupplyPriceTab({
         item.packagingForm,
         item.quantity,
         item.minimumOrderBatchQuantity,
+        costBreakdownText,
+        costBreakdownTotal,
+        costBreakdownPerPackage ?? "",
         item.supplyUnitPrice,
         item.vatIncluded ? "포함" : "",
         vatUnitPrice,
@@ -2324,6 +2390,7 @@ function SupplyPriceTab({
   const cloneSupplyItem = (item) => normalizeSupplyPriceItem({
     ...item,
     ingredients: (item.ingredients || []).map((ingredient) => ({ ...ingredient })),
+    costBreakdown: normalizeSupplyCostBreakdown(item.costBreakdown).map((costItem) => ({ ...costItem })),
     distributionStructure: {
       ...item.distributionStructure,
       pricingScenarios: (item.distributionStructure?.pricingScenarios || []).map((scenario) => ({ ...scenario })),
@@ -2495,6 +2562,38 @@ function SupplyPriceTab({
     });
   };
 
+  const updateCostBreakdownItem = (itemId, index, patch) => {
+    const item = safeItems.find((candidate) => String(candidate.id) === String(itemId));
+    if (!item) return;
+    const costBreakdown = normalizeSupplyCostBreakdown(item.costBreakdown);
+    costBreakdown[index] = normalizeSupplyCostItem({ ...costBreakdown[index], ...patch }, costBreakdown[index]?.id);
+    updateItem(itemId, { costBreakdown });
+  };
+
+  const addCostBreakdownItem = (itemId) => {
+    const item = safeItems.find((candidate) => String(candidate.id) === String(itemId));
+    if (!item) return;
+    const costBreakdown = normalizeSupplyCostBreakdown(item.costBreakdown);
+    const suggestedType = SUPPLY_COST_TYPE_OPTIONS[Math.min(costBreakdown.length, SUPPLY_COST_TYPE_OPTIONS.length - 1)];
+    updateItem(itemId, {
+      costBreakdown: [
+        ...costBreakdown,
+        normalizeSupplyCostItem({
+          id: `cost_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          type: suggestedType
+        })
+      ]
+    });
+  };
+
+  const removeCostBreakdownItem = (itemId, index) => {
+    const item = safeItems.find((candidate) => String(candidate.id) === String(itemId));
+    if (!item) return;
+    updateItem(itemId, {
+      costBreakdown: normalizeSupplyCostBreakdown(item.costBreakdown).filter((_, currentIndex) => currentIndex !== index)
+    });
+  };
+
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <div style={{ ...supplyPanelStyle, padding: 14 }}>
@@ -2512,11 +2611,12 @@ function SupplyPriceTab({
             </button>
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 360px) minmax(360px, 460px) auto 1fr", gap: 8, alignItems: "end" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 360px) minmax(360px, 460px) auto auto 1fr", gap: 8, alignItems: "end" }}>
           <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="성분명 검색"
+            value={ingredientComparisonMode ? ingredientComparisonSearch : search}
+            onChange={(event) => ingredientComparisonMode ? setIngredientComparisonSearch(event.target.value) : setSearch(event.target.value)}
+            placeholder={ingredientComparisonMode ? "비교할 특정 원료명 검색" : "성분명 검색"}
+            aria-label={ingredientComparisonMode ? "특정 원료로 검색" : "성분명 검색"}
             style={{ ...inputStyle, fontSize: 15 }}
           />
           <div style={{ display: "grid", gap: 6 }}>
@@ -2564,17 +2664,116 @@ function SupplyPriceTab({
             </div>
           </div>
           <button onClick={addItem} style={supplyPrimaryButtonStyle}>+ 공급단가 건 추가</button>
+          <button
+            type="button"
+            disabled={!canUseIngredientComparison}
+            onClick={() => setIngredientComparisonMode((previous) => !previous)}
+            title={canUseIngredientComparison ? "비의약품 견적의 원료 정보를 한 표에서 비교합니다." : "의약품 외 카테고리에서 사용할 수 있습니다."}
+            style={{
+              ...supplySubtleButtonStyle,
+              minHeight: 38,
+              borderColor: ingredientComparisonMode ? "#10b981" : "#cbd5e1",
+              background: ingredientComparisonMode ? "#ecfdf5" : "#fff",
+              color: ingredientComparisonMode ? "#047857" : (canUseIngredientComparison ? "#334155" : "#94a3b8"),
+              cursor: canUseIngredientComparison ? "pointer" : "not-allowed"
+            }}
+          >
+            {ingredientComparisonMode ? "원료 비교 닫기" : "특정 원료로 검색"}
+          </button>
           <div style={{ fontSize: 15, color: "#64748b", textAlign: "right" }}>
-            전체 {safeItems.length}건 · 현재 {categoryFilteredItems.length}건{monthRangeActive ? ` · 기간 ${monthFilteredItems.length}건` : ""} · 표시 {filteredItems.length}건
+            {ingredientComparisonMode
+              ? `비교 결과 ${ingredientComparisonRows.length}건`
+              : `전체 ${safeItems.length}건 · 현재 ${categoryFilteredItems.length}건${monthRangeActive ? ` · 기간 ${monthFilteredItems.length}건` : ""} · 표시 ${filteredItems.length}건`}
           </div>
         </div>
       </div>
 
+      {ingredientComparisonMode && (
+        <div style={{ ...supplyPanelStyle, overflow: "hidden" }}>
+          <div style={{ padding: "12px 14px", background: "#f0fdf4", borderBottom: "1px solid #bbf7d0" }}>
+            <div style={{ color: "#166534", fontSize: 17, fontWeight: 900 }}>특정 원료 비교</div>
+            <div style={{ marginTop: 3, color: "#64748b", fontSize: 13 }}>
+              동일 원료가 포함된 비의약품 견적을 제조사·원산지·규격·kg당 가격대 기준으로 비교합니다. 현재 카테고리와 견적 기간 조건이 함께 적용됩니다.
+            </div>
+          </div>
+          {!ingredientComparisonQuery ? (
+            <div style={{ padding: 24, color: "#64748b", fontSize: 14, textAlign: "center" }}>
+              위 검색창에 비교할 원료명을 입력해주세요.
+            </div>
+          ) : ingredientComparisonRows.length === 0 ? (
+            <div style={{ padding: 24, color: "#94a3b8", fontSize: 14, textAlign: "center" }}>
+              입력한 원료와 일치하는 비의약품 견적이 없습니다.
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", minWidth: 1380, borderCollapse: "collapse", tableLayout: "fixed" }}>
+                <colgroup>
+                  <col style={{ width: 170 }} />
+                  <col style={{ width: 120 }} />
+                  <col style={{ width: 160 }} />
+                  <col style={{ width: 130 }} />
+                  <col style={{ width: 190 }} />
+                  <col style={{ width: 170 }} />
+                  <col style={{ width: 190 }} />
+                  <col style={{ width: 130 }} />
+                  <col style={{ width: 140 }} />
+                  <col style={{ width: 100 }} />
+                </colgroup>
+                <thead>
+                  <tr style={{ background: "#f8fafc" }}>
+                    {["원료명", "카테고리", "제조사", "원산지", "브랜드 / 공급처", "규격 / 함량", "kg당 가격대", "견적일자", "포장단위", "관리"].map((header) => (
+                      <th key={header} style={{ padding: "9px 10px", textAlign: "left", color: "#475569", fontSize: 13, borderBottom: "1px solid #e2e8f0" }}>{header}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {ingredientComparisonRows.map((row) => (
+                    <tr key={`${row.item.id}_${row.index}`}>
+                      <td style={{ padding: "10px", borderBottom: "1px solid #eef2f7", color: "#0f172a", fontSize: 14, fontWeight: 900 }}>{row.ingredient.name || "-"}</td>
+                      <td style={{ padding: "10px", borderBottom: "1px solid #eef2f7", fontSize: 13 }}>{SUPPLY_PRICE_CATEGORY_LABEL_BY_ID[row.item.category] || row.item.category}</td>
+                      <td style={{ padding: "10px", borderBottom: "1px solid #eef2f7", fontSize: 13 }}>{row.item.manufacturer || "-"}</td>
+                      <td style={{ padding: "10px", borderBottom: "1px solid #eef2f7", fontSize: 13 }}>{row.ingredient.origin || "-"}</td>
+                      <td style={{ padding: "10px", borderBottom: "1px solid #eef2f7", fontSize: 13 }}>{row.ingredient.brand || "-"}</td>
+                      <td style={{ padding: "10px", borderBottom: "1px solid #eef2f7", fontSize: 13 }}>{row.ingredient.content || "-"}</td>
+                      <td style={{ padding: "10px", borderBottom: "1px solid #eef2f7", color: "#047857", fontSize: 13, fontWeight: 900 }}>{row.ingredient.kilogramPriceRange || "-"}</td>
+                      <td style={{ padding: "10px", borderBottom: "1px solid #eef2f7", fontSize: 13 }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          {row.item.quoteDate ? fmt(row.item.quoteDate) : "-"}
+                          {isSupplyQuoteOlderThanMonths(row.item.quoteDate, 6) && (
+                            <span title="현재 기준으로 견적 수령일로부터 6개월이 초과하였으니 견적 내용을 재확인해주세요." style={{ color: "#dc2626", fontWeight: 900, cursor: "help" }}>!</span>
+                          )}
+                        </span>
+                      </td>
+                      <td style={{ padding: "10px", borderBottom: "1px solid #eef2f7", fontSize: 13 }}>
+                        {row.item.packagingUnit || "-"}{row.item.packagingForm ? ` · ${row.item.packagingForm}` : ""}
+                      </td>
+                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef2f7" }}>
+                        <button type="button" onClick={() => openIngredientComparisonItem(row)} style={{ ...supplySubtleButtonStyle, padding: "6px 9px", color: "#1d4ed8", borderColor: "#bfdbfe" }}>
+                          견적 보기
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       <div style={{ display: "grid", gap: 16 }}>
-        {filteredItems.map((item) => {
+        {!ingredientComparisonMode && filteredItems.map((item) => {
           const isEditing = editingIds.has(String(item.id));
           const ingredients = item.ingredients || [normalizeSupplyIngredient()];
           const isRawMaterialCategory = isRawMaterialSupplyCategory(item.category);
+          const showsCostBreakdown = supportsSupplyCostBreakdown(item.category);
+          const costBreakdown = normalizeSupplyCostBreakdown(item.costBreakdown);
+          const hasCostBreakdown = costBreakdown.some((costItem) => (
+            costItem.detail.trim() || costItem.amount.trim() || costItem.memo.trim()
+          ));
+          const hasNumericCostBreakdown = costBreakdown.some((costItem) => parseSupplyPriceNumber(costItem.amount) !== null);
+          const costBreakdownAmount = supplyCostBreakdownTotal(costBreakdown);
+          const costBreakdownUnitAmount = supplyCostBreakdownPerPackage(costBreakdown, item.quantity);
           const supportsPermitCompanyFee = isPermitCompanyFeeCategory(item.category);
           const totalPrice = formatTotalPrice(item.supplyUnitPrice, item.quantity);
           const vatIncludedPrice = item.vatIncluded ? formatVatIncludedPrice(item.supplyUnitPrice) : "";
@@ -2629,7 +2828,8 @@ function SupplyPriceTab({
                                 permitCompanyFee: isPermitCompanyFeeCategory(category) ? item.permitCompanyFee : false,
                                 permitCompanyFeeRate: isPermitCompanyFeeCategory(category) ? item.permitCompanyFeeRate : "",
                                 permitCompanyFeeRateUnknown: isPermitCompanyFeeCategory(category) ? item.permitCompanyFeeRateUnknown : false,
-                                permitCompany: isPermitCompanyFeeCategory(category) ? item.permitCompany : ""
+                                permitCompany: isPermitCompanyFeeCategory(category) ? item.permitCompany : "",
+                                costBreakdown: supportsSupplyCostBreakdown(category) ? item.costBreakdown : []
                               });
                             }}
                             style={supplyCompactInputStyle}
@@ -2685,25 +2885,25 @@ function SupplyPriceTab({
                         {isEditing ? (
                           <div style={{ display: "grid", gap: 6 }}>
                             {ingredients.map((ingredient, index) => (
-                              <div key={`${item.id}_ingredient_${index}`} style={{ display: "grid", gridTemplateColumns: isRawMaterialCategory ? "1fr 1fr 1fr 1fr 1fr auto" : "1fr 1fr auto", gap: 6, alignItems: "end" }}>
+                              <div key={`${item.id}_ingredient_${index}`} style={{ display: "grid", gridTemplateColumns: showsCostBreakdown ? "1fr 1fr 1fr 1fr 1fr auto" : "1fr 1fr auto", gap: 6, alignItems: "end" }}>
                                 <div>
                                   <label style={supplyFieldLabelStyle}>공급 성분</label>
                                   <input value={ingredient.name} onChange={(event) => updateIngredient(item.id, index, { name: event.target.value })} placeholder="성분명" style={supplyCompactInputStyle} />
                                 </div>
                                 <div>
-                                  <label style={supplyFieldLabelStyle}>{isRawMaterialCategory ? "규격 / 함량" : "함량"}</label>
-                                  <input value={ingredient.content} onChange={(event) => updateIngredient(item.id, index, { content: event.target.value })} placeholder={isRawMaterialCategory ? "예: 분말, 98%" : "예: 500mg/정"} style={supplyCompactInputStyle} />
+                                  <label style={supplyFieldLabelStyle}>{showsCostBreakdown ? "규격 / 함량" : "함량"}</label>
+                                  <input value={ingredient.content} onChange={(event) => updateIngredient(item.id, index, { content: event.target.value })} placeholder={showsCostBreakdown ? "예: 분말, 98%" : "예: 500mg/정"} style={supplyCompactInputStyle} />
                                 </div>
-                                {isRawMaterialCategory && <div>
+                                {showsCostBreakdown && <div>
                                   <label style={supplyFieldLabelStyle}>원료 원산지</label>
                                   <input value={ingredient.origin} onChange={(event) => updateIngredient(item.id, index, { origin: event.target.value })} placeholder="예: 인도" style={supplyCompactInputStyle} />
                                 </div>}
-                                {isRawMaterialCategory && <div>
+                                {showsCostBreakdown && <div>
                                   <label style={supplyFieldLabelStyle}>브랜드 / 공급처</label>
                                   <input value={ingredient.brand} onChange={(event) => updateIngredient(item.id, index, { brand: event.target.value })} placeholder="브랜드 또는 공급처" style={supplyCompactInputStyle} />
                                 </div>}
-                                {isRawMaterialCategory && <div>
-                                  <label style={supplyFieldLabelStyle}>kg당 가격대 *</label>
+                                {showsCostBreakdown && <div>
+                                  <label style={supplyFieldLabelStyle}>kg당 가격대{isRawMaterialCategory ? " *" : ""}</label>
                                   <input value={ingredient.kilogramPriceRange} onChange={(event) => updateIngredient(item.id, index, { kilogramPriceRange: event.target.value })} placeholder="예: 12,000 ~ 15,000원" style={supplyCompactInputStyle} />
                                 </div>}
                                 <button onClick={() => removeIngredient(item.id, index)} style={{ ...supplySubtleButtonStyle, padding: "5px 7px", fontSize: 14 }}>삭제</button>
@@ -2732,11 +2932,11 @@ function SupplyPriceTab({
                                 />
                               </div>
                               <div>
-                                <label style={supplyFieldLabelStyle}>수량</label>
+                                <label style={supplyFieldLabelStyle}>배치 당 포장단위 개수</label>
                                 <input
                                   value={item.quantity}
                                   onChange={(event) => updateItem(item.id, { quantity: event.target.value })}
-                                  placeholder="수량"
+                                  placeholder="배치 당 포장단위 개수"
                                   style={supplyCompactInputStyle}
                                 />
                               </div>
@@ -2759,9 +2959,9 @@ function SupplyPriceTab({
                             {ingredients.some((ingredient) => ingredient.name || ingredient.content || ingredient.origin || ingredient.brand || ingredient.kilogramPriceRange) ? ingredients.map((ingredient, index) => (
                               <div key={`${item.id}_ingredient_view_${index}`} style={supplyTextCellStyle}>
                                 {ingredient.name || "-"}{ingredient.content ? ` / ${ingredient.content}` : ""}
-                                {isRawMaterialCategory && ingredient.origin ? ` · 원산지: ${ingredient.origin}` : ""}
-                                {isRawMaterialCategory && ingredient.brand ? ` · 브랜드/공급처: ${ingredient.brand}` : ""}
-                                {isRawMaterialCategory && ingredient.kilogramPriceRange ? ` · kg당: ${ingredient.kilogramPriceRange}` : ""}
+                                {showsCostBreakdown && ingredient.origin ? ` · 원산지: ${ingredient.origin}` : ""}
+                                {showsCostBreakdown && ingredient.brand ? ` · 브랜드/공급처: ${ingredient.brand}` : ""}
+                                {showsCostBreakdown && ingredient.kilogramPriceRange ? ` · kg당: ${ingredient.kilogramPriceRange}` : ""}
                               </div>
                             )) : <div style={supplyTextCellStyle}>-</div>}
                             {(item.packagingUnit || item.packagingForm || item.quantity || item.minimumOrderBatchQuantity) && (
@@ -2770,7 +2970,7 @@ function SupplyPriceTab({
                                 {item.packagingUnit && (item.packagingForm || item.quantity || item.minimumOrderBatchQuantity) ? " · " : ""}
                                 {item.packagingForm ? `포장형태: ${item.packagingForm}` : ""}
                                 {item.packagingForm && (item.quantity || item.minimumOrderBatchQuantity) ? " · " : ""}
-                                {item.quantity ? `수량: ${item.quantity}` : ""}
+                                {item.quantity ? `배치 당 포장단위 개수: ${item.quantity}` : ""}
                                 {item.quantity && item.minimumOrderBatchQuantity ? " · " : ""}
                                 {item.minimumOrderBatchQuantity ? `최소 주문 배치 수량: ${item.minimumOrderBatchQuantity}` : ""}
                               </div>
@@ -2790,7 +2990,7 @@ function SupplyPriceTab({
                               <input
                                 value={totalPrice}
                                 readOnly
-                                placeholder="수량 입력 시 자동계산"
+                                placeholder="배치 당 포장단위 개수 입력 시 자동계산"
                                 style={{ ...supplyCompactInputStyle, background: "#f8fafc", color: totalPrice ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
                               />
                             </div>
@@ -2945,6 +3145,118 @@ function SupplyPriceTab({
                 </table>
               </div>
 
+              {showsCostBreakdown && (
+                <div style={{ borderTop: "1px solid #cbd5e1", background: "#fff" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, padding: "10px 12px", background: "#f0fdf4", borderBottom: "1px solid #bbf7d0" }}>
+                    <div>
+                      <div style={{ color: "#166534", fontSize: 14, fontWeight: 900 }}>견적 원가 구성 (VAT 별도)</div>
+                      <div style={{ marginTop: 2, color: "#64748b", fontSize: 12 }}>
+                        부자재비·부재료비·가공비·노무비·제조비·일반경비·기업이윤 등을 견적서 기준으로 기록합니다.
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 14, color: "#334155", fontSize: 13, whiteSpace: "nowrap" }}>
+                      <span>원가 구성 합계 <b style={{ color: "#0f172a" }}>{hasNumericCostBreakdown ? `${supplyPriceFormat.format(costBreakdownAmount)}원` : "-"}</b></span>
+                      <span>포장단위당 <b style={{ color: "#0f172a" }}>{hasNumericCostBreakdown && costBreakdownUnitAmount !== null ? `${supplyPriceFormat.format(costBreakdownUnitAmount)}원` : "-"}</b></span>
+                    </div>
+                  </div>
+                  {isEditing ? (
+                    <div style={{ padding: 10, overflowX: "auto" }}>
+                      <div style={{ minWidth: 1160, display: "grid", gap: 7 }}>
+                        {costBreakdown.map((costItem, index) => {
+                          const amount = parseSupplyPriceNumber(costItem.amount);
+                          const packageCount = parseSupplyPriceNumber(item.quantity);
+                          const perPackageAmount = amount !== null && packageCount !== null && packageCount > 0
+                            ? amount / packageCount
+                            : null;
+                          return (
+                            <div key={costItem.id || `${item.id}_cost_${index}`} style={{ display: "grid", gridTemplateColumns: "140px minmax(210px, 1.2fr) 220px 170px minmax(210px, 1fr) auto", gap: 7, alignItems: "end" }}>
+                              <div>
+                                <label style={supplyFieldLabelStyle}>비용 구분</label>
+                                <select value={costItem.type} onChange={(event) => updateCostBreakdownItem(item.id, index, { type: event.target.value })} style={supplyCompactInputStyle}>
+                                  {SUPPLY_COST_TYPE_OPTIONS.map((type) => <option key={type} value={type}>{type}</option>)}
+                                </select>
+                              </div>
+                              <div>
+                                <label style={supplyFieldLabelStyle}>세부 항목</label>
+                                <input value={costItem.detail} onChange={(event) => updateCostBreakdownItem(item.id, index, { detail: event.target.value })} placeholder="예: 스티커, 혼합·코팅 공정" style={supplyCompactInputStyle} />
+                              </div>
+                              <div>
+                                <label style={supplyFieldLabelStyle}>배치 금액</label>
+                                <input value={costItem.amount} inputMode="decimal" onChange={(event) => updateCostBreakdownItem(item.id, index, { amount: event.target.value })} placeholder="예: 5,885,050 또는 별도청구" style={supplyCompactInputStyle} />
+                              </div>
+                              <div>
+                                <label style={supplyFieldLabelStyle}>포장단위당</label>
+                                <div style={{ ...supplyCompactInputStyle, display: "flex", alignItems: "center", background: "#f8fafc", color: perPackageAmount === null ? "#94a3b8" : "#0f172a", fontWeight: 800 }}>
+                                  {perPackageAmount === null ? "자동계산" : `${supplyPriceFormat.format(perPackageAmount)}원`}
+                                </div>
+                              </div>
+                              <div>
+                                <label style={supplyFieldLabelStyle}>비고</label>
+                                <input value={costItem.memo} onChange={(event) => updateCostBreakdownItem(item.id, index, { memo: event.target.value })} placeholder="산출 기준 또는 별도 조건" style={supplyCompactInputStyle} />
+                              </div>
+                              <button type="button" onClick={() => removeCostBreakdownItem(item.id, index)} style={{ ...supplySubtleButtonStyle, padding: "6px 9px", color: "#dc2626", borderColor: "#fecaca" }}>삭제</button>
+                            </div>
+                          );
+                        })}
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                          <button type="button" onClick={() => addCostBreakdownItem(item.id)} style={{ ...supplySubtleButtonStyle, width: 148, borderColor: "#86efac", color: "#047857" }}>
+                            + 원가 항목 추가
+                          </button>
+                          <span style={{ color: "#64748b", fontSize: 12 }}>합계에는 숫자로 입력된 배치 금액만 반영됩니다.</span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : hasCostBreakdown ? (
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", minWidth: 1000, borderCollapse: "collapse", tableLayout: "fixed" }}>
+                        <colgroup>
+                          <col style={{ width: 150 }} />
+                          <col style={{ width: 330 }} />
+                          <col style={{ width: 190 }} />
+                          <col style={{ width: 190 }} />
+                          <col />
+                        </colgroup>
+                        <thead>
+                          <tr style={{ background: "#f8fafc" }}>
+                            {["비용 구분", "세부 항목", "배치 금액", "포장단위당", "비고"].map((header) => (
+                              <th key={header} style={{ padding: "8px 10px", textAlign: "left", color: "#475569", fontSize: 12, borderBottom: "1px solid #e2e8f0" }}>{header}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {costBreakdown.filter((costItem) => costItem.detail.trim() || costItem.amount.trim() || costItem.memo.trim()).map((costItem, index) => {
+                            const amount = parseSupplyPriceNumber(costItem.amount);
+                            const packageCount = parseSupplyPriceNumber(item.quantity);
+                            const perPackageAmount = amount !== null && packageCount !== null && packageCount > 0
+                              ? amount / packageCount
+                              : null;
+                            return (
+                              <tr key={costItem.id || `${item.id}_cost_view_${index}`}>
+                                <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef2f7", fontSize: 13, fontWeight: 800 }}>{costItem.type}</td>
+                                <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef2f7", fontSize: 13 }}>{costItem.detail || "-"}</td>
+                                <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef2f7", fontSize: 13, fontWeight: 800 }}>{formatSupplyCostAmount(costItem.amount)}</td>
+                                <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef2f7", fontSize: 13 }}>{perPackageAmount === null ? "-" : `${supplyPriceFormat.format(perPackageAmount)}원`}</td>
+                                <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef2f7", color: "#64748b", fontSize: 13 }}>{costItem.memo || "-"}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr style={{ background: "#f0fdf4" }}>
+                            <td colSpan={2} style={{ padding: "9px 10px", color: "#166534", fontSize: 13, fontWeight: 900 }}>원가 구성 합계</td>
+                            <td style={{ padding: "9px 10px", color: "#0f172a", fontSize: 13, fontWeight: 900 }}>{hasNumericCostBreakdown ? `${supplyPriceFormat.format(costBreakdownAmount)}원` : "-"}</td>
+                            <td style={{ padding: "9px 10px", color: "#0f172a", fontSize: 13, fontWeight: 900 }}>{hasNumericCostBreakdown && costBreakdownUnitAmount !== null ? `${supplyPriceFormat.format(costBreakdownUnitAmount)}원` : "-"}</td>
+                            <td style={{ padding: "9px 10px", color: "#64748b", fontSize: 12 }}>숫자 금액 기준 자동 합산</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  ) : (
+                    <div style={{ padding: "12px", color: "#94a3b8", fontSize: 13 }}>등록된 견적 원가 구성이 없습니다.</div>
+                  )}
+                </div>
+              )}
+
               <div style={{ borderTop: "1px solid #cbd5e1", overflowX: "auto" }}>
                 <table style={{ width: "100%", minWidth: 1460, borderCollapse: "collapse" }}>
                   <tbody>
@@ -3084,7 +3396,7 @@ function SupplyPriceTab({
             </div>
           );
         })}
-        {filteredItems.length === 0 && (
+        {!ingredientComparisonMode && filteredItems.length === 0 && (
           <div style={{ ...supplyPanelStyle, padding: 24, fontSize: 15, color: "#94a3b8", textAlign: "center" }}>
             {safeItems.length === 0 ? "아직 등록된 공급단가가 없습니다." : "현재 카테고리에서 표시할 공급단가가 없습니다."}
           </div>
@@ -5645,6 +5957,35 @@ export default function PmsApp() {
           changes: [
             "OTC·ETC 프로젝트의 허가/생산 방향성을 단일 드롭다운에서 복수 체크 방식으로 변경했습니다.",
             "신규 기안과 프로젝트 기본정보 수정 화면에 동일하게 적용하고 기존 단일 선택 데이터도 자동 호환합니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_SUPPLY_COST_BREAKDOWN_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_SUPPLY_COST_BREAKDOWN_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260803_supply_cost_breakdown",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "공급단가의 수량 명칭을 배치 당 포장단위 개수로 명확하게 정리했습니다.",
+            "비의약품 견적에 부자재비·가공비·노무비·제조비·일반경비·기업이윤 등을 행별로 기록하는 원가 구성표를 추가했습니다.",
+            "특정 원료를 검색해 제조사·원산지·규격·kg당 가격대와 견적일자를 한 표에서 비교할 수 있게 했습니다."
           ],
           actor: "시스템",
           createdAt: new Date().toISOString()

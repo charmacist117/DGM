@@ -595,7 +595,7 @@ export default function DistributionStructureTab({
                 <div className="base-grid">
                   {[
                     ["포장단위", selectedItem.packagingUnit || "-", selectedItem.packagingForm ? `포장형태: ${selectedItem.packagingForm}` : ""],
-                    ["수량", selectedItem.quantity || "-", ""],
+                    ["배치 당 포장단위 개수", selectedItem.quantity || "-", ""],
                     ["배치 당 공급단가", formatWon(baseAmounts.unitPrice), `총 금액: ${formatWon(baseAmounts.supplyTotal)}`],
                     ["배치 당 VAT 포함 가격", formatWon(baseAmounts.vatUnitPrice), `VAT 포함 총금액: ${formatWon(baseAmounts.vatTotal)}`],
                     [
