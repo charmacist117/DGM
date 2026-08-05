@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import DistributionStructureTab from "@/components/DistributionStructureTab";
 import MarketSizeAnalysisTab from "@/components/MarketSizeAnalysisTab";
 import ContractManagementTab from "@/components/ContractManagementTab";
+import ProjectPromotionTab from "@/components/ProjectPromotionTab";
 import ProjectSidebar from "@/components/ProjectSidebar";
 import DesktopProjectPathControl from "@/components/DesktopProjectPathControl";
 import SegmentedDateInput from "@/components/SegmentedDateInput";
@@ -37,6 +38,7 @@ import {
   developmentModuleToCsv,
   distributionModuleToCsv,
   marketModuleToCsv,
+  projectPromotionModuleToCsv,
   supplyModuleToCsv
 } from "@/lib/pms/moduleCsv";
 import { normalizeContractRecords } from "@/lib/pms/contracts";
@@ -60,6 +62,7 @@ import {
   supplyCostBreakdownTotal,
   supportsSupplyCostBreakdown
 } from "@/lib/pms/supplyCostBreakdown";
+import { normalizeProjectPromotion, projectPromotionTotalExpectedCost } from "@/lib/pms/projectPromotion";
 
 const LOCAL_CACHE_KEY = "pharmadev_pms_cache_v2";
 const DEVELOP_TASK_ID = "develop";
@@ -109,6 +112,7 @@ const DASHBOARD_SCHEDULE_HISTORY_GROUP_SEED_KEY = "pharmadev_dashboard_changelog
 const DASHBOARD_CONTRACT_MANAGEMENT_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260730_38";
 const DASHBOARD_REGULATORY_DIRECTION_CHECK_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260730_39";
 const DASHBOARD_SUPPLY_COST_BREAKDOWN_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260803_40";
+const DASHBOARD_PROJECT_PROMOTION_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260805_41";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -993,6 +997,7 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     ),
     distributionStructure: normalizeDistributionStructure(source.distributionStructure),
     marketSizeAnalysis: normalizeMarketSizeAnalysis(source.marketSizeAnalysis),
+    projectPromotion: normalizeProjectPromotion(source.projectPromotion),
     createdAt: String(source.createdAt || new Date().toISOString()),
     updatedAt: String(source.updatedAt || "")
   };
@@ -2431,6 +2436,7 @@ function SupplyPriceTab({
       id: `supply_price_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       distributionStructure: {},
       marketSizeAnalysis: {},
+      projectPromotion: {},
       createdAt: now,
       updatedAt: ""
     });
@@ -3820,13 +3826,15 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, contractRecords, mar
     const categoryLabelById = Object.fromEntries(SUPPLY_PRICE_CATEGORIES.map((category) => [category.id, category.label]));
     const csv = moduleType === "development"
       ? developmentModuleToCsv(projects, adminLogs)
-      : (moduleType === "supply"
-          ? supplyModuleToCsv(supplyPriceItems, categoryLabelById)
-          : (moduleType === "distribution"
-              ? distributionModuleToCsv(supplyPriceItems)
-              : (moduleType === "market"
-                  ? marketModuleToCsv(supplyPriceItems, marketAnalysisDefaults)
-                  : contractModuleToCsv(contractRecords, projects, supplyPriceItems))));
+      : moduleType === "supply"
+        ? supplyModuleToCsv(supplyPriceItems, categoryLabelById)
+        : moduleType === "distribution"
+          ? distributionModuleToCsv(supplyPriceItems)
+          : moduleType === "market"
+            ? marketModuleToCsv(supplyPriceItems, marketAnalysisDefaults)
+            : moduleType === "promotion"
+              ? projectPromotionModuleToCsv(supplyPriceItems, projects)
+              : contractModuleToCsv(contractRecords, projects, supplyPriceItems);
     downloadFile(
       `PB_${MODULE_BACKUP_TYPES[moduleType]}_${moduleFileStamp()}.csv`,
       `\uFEFF${csv}`,
@@ -3875,7 +3883,8 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, contractRecords, mar
           return normalizeSupplyPriceItem({
             ...item,
             distributionStructure: current?.distributionStructure || item.distributionStructure,
-            marketSizeAnalysis: current?.marketSizeAnalysis || item.marketSizeAnalysis
+            marketSizeAnalysis: current?.marketSizeAnalysis || item.marketSizeAnalysis,
+            projectPromotion: current?.projectPromotion || item.projectPromotion
           });
         });
         onRestore({ supplyPriceItems: nextItems });
@@ -3884,7 +3893,10 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, contractRecords, mar
       }
 
       const isDistributionRestore = moduleType === "distribution";
-      const linkedRecords = isDistributionRestore ? parsed.data.distributionItems : parsed.data.marketItems;
+      const isPromotionRestore = moduleType === "promotion";
+      const linkedRecords = isDistributionRestore
+        ? parsed.data.distributionItems
+        : (isPromotionRestore ? parsed.data.promotionItems : parsed.data.marketItems);
       const recordsById = new Map(linkedRecords.map((record) => [String(record.supplyItemId), record]));
       const recordsByIdentity = new Map(linkedRecords.map((record) => [String(record.identityKey || ""), record]));
       const matchedRecordIds = new Set();
@@ -3898,7 +3910,12 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, contractRecords, mar
               distributionStructure: record.distributionStructure,
               marketDecisionStatus: record.marketDecisionStatus ?? item.marketDecisionStatus
             }
-          : {
+          : isPromotionRestore
+            ? {
+                ...item,
+                projectPromotion: record.projectPromotion
+              }
+            : {
               ...item,
               marketSizeAnalysis: record.marketSizeAnalysis,
               marketDecisionStatus: record.marketDecisionStatus ?? item.marketDecisionStatus
@@ -3906,10 +3923,10 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, contractRecords, mar
       });
       onRestore({
         supplyPriceItems: nextItems,
-        ...(isDistributionRestore ? {} : { marketAnalysisDefaults: parsed.data.marketAnalysisDefaults })
+        ...(!isDistributionRestore && !isPromotionRestore ? { marketAnalysisDefaults: parsed.data.marketAnalysisDefaults } : {})
       });
       const unmatchedCount = linkedRecords.length - matchedRecordIds.size;
-      const restoreLabel = isDistributionRestore ? "유통 구조" : "시장 규모 분석";
+      const restoreLabel = isDistributionRestore ? "유통 구조" : (isPromotionRestore ? "프로젝트 추진" : "시장 규모 분석");
       setTransferState({
         status: unmatchedCount > 0 ? "warning" : "success",
         message: `${restoreLabel} ${matchedRecordIds.size}건 복원이 완료되었습니다.${unmatchedCount > 0 ? ` 연결할 공급단가가 없는 ${unmatchedCount}건은 제외했습니다. 공급단가 데이터를 먼저 복원해주세요.` : ""}`
@@ -3960,6 +3977,7 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, contractRecords, mar
             { id: "supply", description: "전체 공급단가와 견적 정보" },
             { id: "distribution", description: "물량별 가격대, 마진 설정과 경쟁제품 비교" },
             { id: "market", description: "5개년 시장 실적, 약국 침투율, 배치 소진과 금융비용" },
+            { id: "promotion", description: "추진 준비상태, 예상 출시일·비용과 제품개발 연결" },
             { id: "contract", description: "모계약, 하위 계약·문서와 NAS 계약서 경로" }
           ].map((module, index) => (
             <div
@@ -3971,7 +3989,7 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, contractRecords, mar
                 alignItems: "center",
                 padding: "12px 13px",
                 background: index % 2 === 0 ? "#fff" : "#f8fafc",
-                borderBottom: index < 4 ? "1px solid #e2e8f0" : "none"
+                borderBottom: index < 5 ? "1px solid #e2e8f0" : "none"
               }}
             >
               <div style={{ color: "#0f172a", fontSize: 14, fontWeight: 900 }}>{MODULE_BACKUP_TYPES[module.id]}</div>
@@ -5994,6 +6012,36 @@ export default function PmsApp() {
     });
   }, [setAdminLogs, syncState.status]);
 
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_PROJECT_PROMOTION_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_PROJECT_PROMOTION_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      const nextRevision = (previous || [])
+        .filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([
+        ...(previous || []),
+        {
+          id: "dashboard_change_20260805_project_promotion",
+          type: DASHBOARD_CHANGE_NOTICE_TYPE,
+          projectName: "제품개발 대시보드",
+          revision: String(nextRevision),
+          changeDate: TODAY,
+          changeDateTime: toDashboardDateTimeInput(),
+          changes: [
+            "시장 규모 분석과 계약 관리 사이에 프로젝트 추진 탭을 추가했습니다.",
+            "공급단가·유통 구조·시장 분석 완료 건을 추진 임박으로 모아 제조사·허가사·예상 출시일과 비용을 확인할 수 있습니다.",
+            "추진 임박 자료를 새 제품개발 프로젝트 기안으로 전환하고 원본 공급단가 건과 연결할 수 있습니다.",
+            "견적 수집부터 출시·운영까지 전 주기 흐름과 프로젝트 추진 전용 JSON·CSV 백업을 추가했습니다."
+          ],
+          actor: "시스템",
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
   const addDashboardChange = ({ changeDateTime, revision, changes }) => {
     if (!isAdmin) {
       window.alert("변경사항 기록은 ADMIN만 추가할 수 있습니다.");
@@ -6052,6 +6100,40 @@ export default function PmsApp() {
 
   const goToNewProjectPage = () => {
     router.push("/projects/new");
+  };
+
+  const createProjectDraftFromSupply = (item) => {
+    if (typeof window === "undefined") return;
+    const ingredientLabel = (item.ingredients || [])
+      .map((ingredient) => [ingredient?.name, ingredient?.content].filter(Boolean).join(" / "))
+      .filter(Boolean)
+      .join(", ");
+    const promotion = normalizeProjectPromotion(item.projectPromotion);
+    const expectedCost = projectPromotionTotalExpectedCost(item);
+    const category = item.category === "일반식품" ? "식품" : item.category;
+    const permitCompany = item.category === "OTC" ? (item.permitCompany || "미정") : "해당 없음";
+    const prefill = {
+      sourceSupplyItemId: item.id,
+      name: ingredientLabel || "신규 제품 개발",
+      category,
+      desc: [
+        `공급단가·유통 구조·시장 규모 분석을 완료한 추진 임박 건에서 생성`,
+        `제조사: ${item.manufacturer || "미정"}`,
+        `허가사: ${permitCompany}`,
+        `예상 출시일: ${promotion.expectedLaunchDate || "미정"}`,
+        `총 예상비용: ${Number.isFinite(expectedCost) ? `${Math.round(expectedCost).toLocaleString("ko-KR")}원` : "미정"}`
+      ].join("\n"),
+      draftChecklist: {
+        selectionProcess: `공급단가·유통 구조·시장 규모 분석 완료\n최종 검토결과: ${marketDecisionLabel(item.marketDecisionStatus)}`,
+        salesProcess: `유통 구조 설정 완료\n예상 출시일: ${promotion.expectedLaunchDate || "미정"}`,
+        approvalDuration: `허가사: ${permitCompany}`,
+        expectedVolume: `배치 당 포장단위 개수: ${item.quantity || "미정"}\n최소 주문 배치 수량: ${item.minimumOrderBatchQuantity || "1"}`,
+        productionMethod: `제조사: ${item.manufacturer || "미정"}\n포장단위: ${item.packagingUnit || "미정"}\n포장형태: ${item.packagingForm || "미정"}`,
+        draftMemo: `추가 예상비용: ${promotion.additionalExpectedCost || "미입력"}\n비용 메모: ${promotion.costMemo || "-"}`
+      }
+    };
+    window.sessionStorage.setItem("pms_project_promotion_prefill", JSON.stringify(prefill));
+    router.push("/projects/new?source=promotion");
   };
 
   const goToProjectLogsPage = () => {
@@ -6338,6 +6420,7 @@ export default function PmsApp() {
             ["supply", "공급단가"],
             ["distribution", "유통 구조 설정"],
             ["market", "시장 규모 분석"],
+            ["promotion", "프로젝트 추진"],
             ["contract", "계약 관리"],
             ["transfer", "데이터 이전"]
           ].map(([id, label]) => (
@@ -6456,6 +6539,18 @@ export default function PmsApp() {
             }}
             onOpenSupply={openSupplyPriceItem}
             onOpenDistribution={openDistributionStructure}
+            syncState={syncState}
+          />
+        ) : moduleTab === "promotion" ? (
+          <ProjectPromotionTab
+            items={normalizeSupplyPriceItems(supplyPriceItems)}
+            projects={projects}
+            onUpdateItem={updateSupplyPriceItem}
+            onOpenSupply={openSupplyPriceItem}
+            onOpenDistribution={openDistributionStructure}
+            onOpenMarket={openMarketSizeAnalysis}
+            onCreateProjectDraft={createProjectDraftFromSupply}
+            onOpenProject={openProject}
             syncState={syncState}
           />
         ) : moduleTab === "contract" ? (

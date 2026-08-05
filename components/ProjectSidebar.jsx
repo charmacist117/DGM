@@ -57,6 +57,7 @@ export default function ProjectSidebar({
   const [contractParentSearch, setContractParentSearch] = useState("");
   const isDistributionMode = moduleTab === "distribution";
   const isMarketMode = moduleTab === "market";
+  const isPromotionMode = moduleTab === "promotion";
   const isSupplyMode = moduleTab === "supply" || isDistributionMode || isMarketMode;
   const isContractMode = moduleTab === "contract";
   const isTransferMode = moduleTab === "transfer";
@@ -131,13 +132,15 @@ export default function ProjectSidebar({
               ? "유통 구조 공급단가 목록"
               : (isMarketMode
                   ? "시장 규모 분석 품목 목록"
+                  : (isPromotionMode
+                  ? "추진 임박 프로젝트 관리"
                   : (isSupplyMode
                   ? "공급단가 카테고리"
                   : (isContractMode
                       ? "모계약 탐색 및 계약 범위"
                       : (isTransferMode
                       ? "전체 백업 및 복원"
-                      : (isStandaloneHomeMode ? "시스템 업데이트 안내" : "제품개발 통합관리")))))}
+                      : (isStandaloneHomeMode ? "시스템 업데이트 안내" : "제품개발 통합관리"))))))}
           </div>
         </div>
         <button
@@ -172,7 +175,7 @@ export default function ProjectSidebar({
         </button>
       </div>
 
-      {!isSupplyMode && !isContractMode && !isTransferMode && !isStandaloneHomeMode && isAdmin && (
+      {!isSupplyMode && !isPromotionMode && !isContractMode && !isTransferMode && !isStandaloneHomeMode && isAdmin && (
         <button
           onClick={goToNewProjectPage}
           style={{ width: "100%", borderRadius: 8, padding: "9px 10px", border: "1px dashed rgba(148, 163, 184, .55)", background: "rgba(255, 255, 255, .04)", color: "#e2e8f0", cursor: "pointer", fontWeight: 800 }}
@@ -180,7 +183,7 @@ export default function ProjectSidebar({
           + 새 프로젝트
         </button>
       )}
-      {!isSupplyMode && !isContractMode && !isTransferMode && !isStandaloneHomeMode && isAdmin && (
+      {!isSupplyMode && !isPromotionMode && !isContractMode && !isTransferMode && !isStandaloneHomeMode && isAdmin && (
         <button
           onClick={goToProjectLogsPage}
           style={{ width: "100%", borderRadius: 8, padding: "9px 10px", border: "1px solid rgba(148, 163, 184, .28)", background: "rgba(30, 41, 59, .65)", color: "#e2e8f0", cursor: "pointer", fontWeight: 800, fontSize: 12 }}
@@ -189,7 +192,16 @@ export default function ProjectSidebar({
         </button>
       )}
 
-      {isContractMode ? (
+      {isPromotionMode ? (
+        <div style={{ flex: 1, minHeight: 0, display: "grid", alignContent: "start", gap: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 900, color: "#94a3b8", padding: "0 4px" }}>전 주기 연결</div>
+          {["공급단가 확인", "유통 구조 설정", "시장 규모 분석", "추진 일정·비용", "제품개발 프로젝트", "계약·생산", "출시·운영"].map((label, index) => (
+            <div key={label} style={{ padding: "9px 10px", border: "1px solid rgba(148, 163, 184, .28)", borderRadius: 7, background: index < 4 ? "rgba(14, 165, 233, .12)" : "rgba(30, 41, 59, .65)", color: index < 4 ? "#bae6fd" : "#cbd5e1", fontSize: 12, fontWeight: 800 }}>
+              {index + 1}. {label}
+            </div>
+          ))}
+        </div>
+      ) : isContractMode ? (
         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ fontSize: 11, fontWeight: 900, color: "#94a3b8", padding: "0 4px" }}>모계약</div>
           <input

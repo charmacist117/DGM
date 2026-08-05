@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import SegmentedDateInput from "@/components/SegmentedDateInput";
 import {
@@ -55,6 +55,7 @@ export default function NewProjectPage() {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [sourceSupplyItemId, setSourceSupplyItemId] = useState("");
   const [form, setForm] = useState({
     name: "",
     desc: "",
@@ -67,6 +68,28 @@ export default function NewProjectPage() {
     draftChecklist: createEmptyDraftChecklist()
   });
   const showRegulatoryFields = isOtcEtcCategory(form.category);
+
+  useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem("pms_project_promotion_prefill");
+      if (!raw) return;
+      const prefill = JSON.parse(raw);
+      window.sessionStorage.removeItem("pms_project_promotion_prefill");
+      setSourceSupplyItemId(prefill.sourceSupplyItemId ?? "");
+      setForm((previous) => ({
+        ...previous,
+        name: String(prefill.name || previous.name),
+        desc: String(prefill.desc || previous.desc),
+        category: CATEGORIES.includes(prefill.category) ? prefill.category : previous.category,
+        draftChecklist: {
+          ...previous.draftChecklist,
+          ...(prefill.draftChecklist && typeof prefill.draftChecklist === "object" ? prefill.draftChecklist : {})
+        }
+      }));
+    } catch {
+      window.sessionStorage.removeItem("pms_project_promotion_prefill");
+    }
+  }, []);
 
   const updateChecklist = (key, value) => {
     setForm((prev) => ({
@@ -112,6 +135,7 @@ export default function NewProjectPage() {
 
       const currentProjects = Array.isArray(getPayload.projects) ? getPayload.projects : [];
       const currentAdminLogs = Array.isArray(getPayload.adminLogs) ? getPayload.adminLogs : [];
+      const currentSupplyPriceItems = Array.isArray(getPayload.supplyPriceItems) ? getPayload.supplyPriceItems : [];
 
       const id = Date.now();
       const newProject = createProjectFromForm({
@@ -126,6 +150,20 @@ export default function NewProjectPage() {
         start: form.start || TODAY,
         draftChecklist: form.draftChecklist
       });
+      newProject.sourceSupplyItemId = sourceSupplyItemId;
+
+      const nextSupplyPriceItems = currentSupplyPriceItems.map((item) => (
+        sourceSupplyItemId && String(item.id) === String(sourceSupplyItemId)
+          ? {
+              ...item,
+              projectPromotion: {
+                ...(item.projectPromotion || {}),
+                linkedProjectId: id,
+                updatedAt: new Date().toISOString()
+              }
+            }
+          : item
+      ));
 
       const createLog = {
         id: Date.now() + 1,
@@ -142,7 +180,8 @@ export default function NewProjectPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projects: [...currentProjects, newProject],
-          adminLogs: [...currentAdminLogs, createLog]
+          adminLogs: [...currentAdminLogs, createLog],
+          supplyPriceItems: nextSupplyPriceItems
         })
       });
       const putPayload = await putResp.json().catch(() => ({}));
@@ -165,6 +204,7 @@ export default function NewProjectPage() {
           <div style={{ fontSize: 12, color: "#64748b", marginTop: 3 }}>
             프로젝트 시작 전 기본정보와 선정/판매/허가/물량/생산 체크리스트를 먼저 작성합니다.
           </div>
+          {sourceSupplyItemId && <div style={{ marginTop: 8, display: "inline-flex", padding: "4px 8px", borderRadius: 999, background: "#ecfdf5", color: "#047857", fontSize: 11, fontWeight: 800 }}>프로젝트 추진 자료에서 연결됨</div>}
         </div>
 
         <div style={{ padding: 18, display: "grid", gap: 14 }}>
