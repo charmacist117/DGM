@@ -239,6 +239,7 @@ export default function MarketSizeAnalysisTab({
   syncState
 }) {
   const [search, setSearch] = useState("");
+  const [decisionFilter, setDecisionFilter] = useState("all");
   const [showConfiguredDistributionOnly, setShowConfiguredDistributionOnly] = useState(false);
   const [editingItemId, setEditingItemId] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -258,13 +259,16 @@ export default function MarketSizeAnalysisTab({
     const distributionItems = showConfiguredDistributionOnly
       ? categoryItems.filter(isDistributionConfigured)
       : categoryItems;
-    if (!query) return distributionItems;
-    return distributionItems.filter((item) => [
+    const decisionItems = decisionFilter === "all"
+      ? distributionItems
+      : distributionItems.filter((item) => normalizeMarketDecisionStatus(item.marketDecisionStatus) === decisionFilter);
+    if (!query) return decisionItems;
+    return decisionItems.filter((item) => [
       item.manufacturer,
       item.packagingUnit,
       ...(item.ingredients || []).flatMap((ingredient) => [ingredient.name, ingredient.content])
     ].join(" ").toLowerCase().includes(query));
-  }, [items, query, selectedCategory, showConfiguredDistributionOnly]);
+  }, [decisionFilter, items, query, selectedCategory, showConfiguredDistributionOnly]);
 
   const normalizedDefaults = useMemo(
     () => normalizeMarketAnalysisDefaults(marketAnalysisDefaults),
@@ -490,6 +494,10 @@ export default function MarketSizeAnalysisTab({
               <span>유통 구조 설정 건만 보기</span>
             </label>
             <label htmlFor="market-search" style={labelStyle}>공급단가 건 검색</label>
+            <select value={decisionFilter} onChange={(event) => setDecisionFilter(event.target.value)} style={{ ...inputStyle, marginBottom: 8 }} aria-label="시장 검토결과 필터">
+              <option value="all">검토결과 전체</option>
+              {MARKET_DECISION_OPTIONS.map((option) => <option key={option.value || "undecided"} value={option.value}>{option.label}</option>)}
+            </select>
             <input
               id="market-search"
               value={search}
@@ -543,7 +551,7 @@ export default function MarketSizeAnalysisTab({
                   </div>
                   <div style={{ marginTop: 6 }}>
                     <span style={{ ...marketDecisionBadgeStyle(item.marketDecisionStatus), minHeight: 21, padding: "2px 7px", fontSize: 11 }}>
-                      최종 판단 · {marketDecisionLabel(item.marketDecisionStatus)}
+                      검토결과 · {marketDecisionLabel(item.marketDecisionStatus)}
                     </span>
                   </div>
                 </button>
@@ -580,7 +588,7 @@ export default function MarketSizeAnalysisTab({
                   </div>
                   <div className="market-actions">
                     <label className="market-decision-control">
-                      <span>최종 검토결과</span>
+                      <span>검토결과</span>
                       <select
                         value={normalizeMarketDecisionStatus(selectedItem.marketDecisionStatus)}
                         onChange={(event) => onUpdateItem?.(selectedItem.id, {

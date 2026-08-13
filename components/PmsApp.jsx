@@ -113,6 +113,7 @@ const DASHBOARD_CONTRACT_MANAGEMENT_SEED_KEY = "pharmadev_dashboard_changelog_se
 const DASHBOARD_REGULATORY_DIRECTION_CHECK_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260730_39";
 const DASHBOARD_SUPPLY_COST_BREAKDOWN_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260803_40";
 const DASHBOARD_PROJECT_PROMOTION_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260805_41";
+const DASHBOARD_REVIEW_PROMOTION_WORKFLOW_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260813_42";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -2289,7 +2290,7 @@ function SupplyPriceTab({
       "포장단위", "포장형태", "배치 당 포장단위 개수", "최소 주문 배치 수량", "견적 원가 구성", "원가 구성 합계(원)",
       "포장단위당 원가 구성(원)", "배치 당 공급단가", "VAT 포함", "배치 당 VAT 포함 가격",
       "총 금액", "VAT 포함 총금액", "허가사 수수료", "허가사 수수료율(%) / 상태", "수수료 포함 총금액",
-      "견적일자", "사용기한", "비고", "견적 채택 예상", "시장 분석 최종 판단"
+      "견적일자", "사용기한", "비고", "견적 채택 예상", "시장 분석 검토결과"
     ];
     const rows = exportItems.flatMap((item) => {
       const ingredients = item.ingredients?.length ? item.ingredients : [normalizeSupplyIngredient()];
@@ -3269,7 +3270,7 @@ function SupplyPriceTab({
                     <tr style={{ ...supplyDetailHeaderRowStyle, height: 38 }}>
                       {[
                         ...(supportsPermitCompanyFee ? ["허가사 수수료"] : []),
-                        "견적일자", "사용기한", "비고", "견적 채택 / 최종 판단"
+                        "견적일자", "사용기한", "비고", "견적 채택 / 검토결과"
                       ].map((header) => (
                         <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#3730a3", borderBottom: "1px solid #c7d2fe", whiteSpace: "nowrap" }}>
                           {header}
@@ -6042,6 +6043,32 @@ export default function PmsApp() {
     });
   }, [setAdminLogs, syncState.status]);
 
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_REVIEW_PROMOTION_WORKFLOW_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_REVIEW_PROMOTION_WORKFLOW_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      const nextRevision = (previous || []).filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([...(previous || []), {
+        id: "dashboard_change_20260813_review_promotion_workflow",
+        type: DASHBOARD_CHANGE_NOTICE_TYPE,
+        projectName: "제품개발 대시보드",
+        revision: String(nextRevision),
+        changeDate: TODAY,
+        changeDateTime: toDashboardDateTimeInput(),
+        changes: [
+          "시장 규모 분석 검토결과를 마진 설정 부족·시장 규모 미흡·추가 검토·진행 추진으로 재구성하고 결과별 필터를 추가했습니다.",
+          "진행 추진으로 검토된 품목만 프로젝트 추진 대상으로 연결되도록 정리했습니다.",
+          "프로젝트 추진에 경영진 보고·내용 보완·진행 보류·중단 최종 진행 상태와 상태별 필터를 추가했습니다.",
+          "프로젝트 추진을 품목별 페이지로 개편해 공급단가·유통 구조·시장 규모 분석을 한 화면에서 확인할 수 있게 했습니다."
+        ],
+        actor: "시스템",
+        createdAt: new Date().toISOString()
+      }]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
   const addDashboardChange = ({ changeDateTime, revision, changes }) => {
     if (!isAdmin) {
       window.alert("변경사항 기록은 ADMIN만 추가할 수 있습니다.");
@@ -6124,7 +6151,7 @@ export default function PmsApp() {
         `총 예상비용: ${Number.isFinite(expectedCost) ? `${Math.round(expectedCost).toLocaleString("ko-KR")}원` : "미정"}`
       ].join("\n"),
       draftChecklist: {
-        selectionProcess: `공급단가·유통 구조·시장 규모 분석 완료\n최종 검토결과: ${marketDecisionLabel(item.marketDecisionStatus)}`,
+        selectionProcess: `공급단가·유통 구조·시장 규모 분석 완료\n검토결과: ${marketDecisionLabel(item.marketDecisionStatus)}`,
         salesProcess: `유통 구조 설정 완료\n예상 출시일: ${promotion.expectedLaunchDate || "미정"}`,
         approvalDuration: `허가사: ${permitCompany}`,
         expectedVolume: `배치 당 포장단위 개수: ${item.quantity || "미정"}\n최소 주문 배치 수량: ${item.minimumOrderBatchQuantity || "1"}`,
@@ -6545,6 +6572,7 @@ export default function PmsApp() {
           <ProjectPromotionTab
             items={normalizeSupplyPriceItems(supplyPriceItems)}
             projects={projects}
+            marketAnalysisDefaults={marketAnalysisDefaults}
             onUpdateItem={updateSupplyPriceItem}
             onOpenSupply={openSupplyPriceItem}
             onOpenDistribution={openDistributionStructure}

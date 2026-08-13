@@ -507,7 +507,7 @@ export default function DistributionStructureTab({
                   </div>
                   <div style={{ marginTop: 6 }}>
                     <span style={{ ...marketDecisionBadgeStyle(item.marketDecisionStatus), minHeight: 21, padding: "2px 7px", fontSize: 11 }}>
-                      최종 판단 · {marketDecisionLabel(item.marketDecisionStatus)}
+                      검토결과 · {marketDecisionLabel(item.marketDecisionStatus)}
                     </span>
                   </div>
                 </button>
@@ -550,7 +550,7 @@ export default function DistributionStructureTab({
                       {selectedItem.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
                     </span>
                     <span style={marketDecisionBadgeStyle(selectedItem.marketDecisionStatus)}>
-                      최종 판단 · {marketDecisionLabel(selectedItem.marketDecisionStatus)}
+                      검토결과 · {marketDecisionLabel(selectedItem.marketDecisionStatus)}
                     </span>
                     <div style={{ display: "grid", gap: 6 }}>
                       <button
