@@ -10,6 +10,7 @@ import {
   normalizeProjectPromotion,
   projectPromotionReadiness,
   projectPromotionTotalExpectedCost,
+  promotionFinalDecisionLabel,
   promotionProgressBadgeStyle,
   promotionProgressLabel
 } from "@/lib/pms/projectPromotion";
@@ -79,8 +80,33 @@ export default function ProjectPromotionTab({ items = [], projects = [], marketA
 
   const savePlan = () => {
     if (!selectedItem) return;
-    onUpdateItem?.(selectedItem.id, { projectPromotion: { ...normalizeProjectPromotion(draft), updatedAt: new Date().toISOString() } });
+    const now = new Date().toISOString();
+    const normalized = normalizeProjectPromotion(draft);
+    const shouldLogFollowUp = ["supplement", "hold", "stop"].includes(normalized.progressDecision);
+    const followUps = shouldLogFollowUp
+      ? [...normalized.followUps, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, status: normalized.progressDecision, note: String(draft.followUpNote || "").trim(), createdAt: now }]
+      : normalized.followUps;
+    onUpdateItem?.(selectedItem.id, { projectPromotion: {
+      ...normalized,
+      finalDecision: normalized.progressDecision === "executive_report" ? normalized.finalDecision : "",
+      finalDecisionAt: normalized.progressDecision === "executive_report" ? normalized.finalDecisionAt : "",
+      followUps,
+      followUpNote: "",
+      updatedAt: now
+    } });
     setEditing(false);
+  };
+
+  const saveFinalDecision = (finalDecision) => {
+    if (!selectedItem || promotion.progressDecision !== "executive_report") return;
+    const now = new Date().toISOString();
+    onUpdateItem?.(selectedItem.id, { projectPromotion: { ...promotion, finalDecision, finalDecisionAt: now, updatedAt: now } });
+  };
+
+  const formatDateTime = (value) => {
+    if (!value) return "-";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(date);
   };
 
   const promotion = normalizeProjectPromotion(selectedItem?.projectPromotion);
@@ -108,11 +134,15 @@ export default function ProjectPromotionTab({ items = [], projects = [], marketA
       </aside>
 
       <main style={{ minWidth: 0 }}>{!selectedItem ? <section style={{ ...panelStyle, padding: 32, textAlign: "center", color: "#64748b" }}>시장 검토결과가 ‘진행 추진’인 품목이 없습니다.</section> : <div style={{ display: "grid", gap: 12 }}>
-        <section style={panelStyle}><div style={{ padding: 14, background: "#ecfdf5", borderBottom: "1px solid #cbd5e1", display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}><div><div style={{ fontSize: 18, fontWeight: 900 }}>{itemLabel(selectedItem)}</div><div style={{ marginTop: 4, color: "#475569", fontSize: 12 }}>{selectedItem.manufacturer || "제조사 미입력"} · {selectedItem.category} · 허가사 {selectedItem.category === "OTC" ? (selectedItem.permitCompany || "미입력") : "해당 없음"}</div></div><div style={{ display: "flex", gap: 7, alignItems: "center" }}><span style={marketDecisionBadgeStyle(selectedItem.marketDecisionStatus)}>시장 검토 · {marketDecisionLabel(selectedItem.marketDecisionStatus)}</span><span style={promotionProgressBadgeStyle(promotion.progressDecision)}>최종 진행 · {promotionProgressLabel(promotion.progressDecision)}</span><button type="button" onClick={() => { setDraft(promotion); setEditing(true); }} style={buttonStyle}>추진 계획 수정</button></div></div>
+        <section style={panelStyle}><div style={{ padding: 14, background: "#ecfdf5", borderBottom: "1px solid #cbd5e1", display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}><div><div style={{ fontSize: 18, fontWeight: 900 }}>{itemLabel(selectedItem)}</div><div style={{ marginTop: 4, color: "#475569", fontSize: 12 }}>{selectedItem.manufacturer || "제조사 미입력"} · {selectedItem.category} · 허가사 {selectedItem.category === "OTC" ? (selectedItem.permitCompany || "미입력") : "해당 없음"}</div></div><div style={{ display: "flex", gap: 7, alignItems: "center" }}><span style={marketDecisionBadgeStyle(selectedItem.marketDecisionStatus)}>시장 검토 · {marketDecisionLabel(selectedItem.marketDecisionStatus)}</span><span style={promotionProgressBadgeStyle(promotion.progressDecision)}>최종 진행 · {promotionProgressLabel(promotion.progressDecision)}</span><button type="button" onClick={() => { setDraft(promotion); setEditing(true); }} style={buttonStyle}>추진 계획 설정</button></div></div>
           <div className="promotion-summary-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}><SummaryCell label="제조사" value={selectedItem.manufacturer || "미입력"} /><SummaryCell label="허가사" value={selectedItem.category === "OTC" ? (selectedItem.permitCompany || "미입력") : "해당 없음"} /><SummaryCell label="예상 출시일" value={promotion.expectedLaunchDate || "미입력"} /><SummaryCell label="총 예상비용" value={formatWon(totalCost)} /></div>
         </section>
 
-        {editing && <section style={{ ...panelStyle, padding: 13, background: "#f8fafc" }}><div className="promotion-edit-grid" style={{ display: "grid", gridTemplateColumns: "190px 210px 210px minmax(220px, 1fr) auto", gap: 9, alignItems: "end" }}><label><b style={{ display: "block", marginBottom: 5, fontSize: 12 }}>최종 진행</b><select value={draft.progressDecision} onChange={(event) => setDraft((prev) => ({ ...prev, progressDecision: event.target.value }))} style={inputStyle}>{PROMOTION_PROGRESS_OPTIONS.map((option) => <option key={option.value || "undecided"} value={option.value}>{option.label}</option>)}</select></label><label><b style={{ display: "block", marginBottom: 5, fontSize: 12 }}>예상 출시일</b><SegmentedDateInput value={draft.expectedLaunchDate} onChange={(value) => setDraft((prev) => ({ ...prev, expectedLaunchDate: value }))} /></label><label><b style={{ display: "block", marginBottom: 5, fontSize: 12 }}>추가 예상비용(원)</b><input value={draft.additionalExpectedCost} onChange={(event) => setDraft((prev) => ({ ...prev, additionalExpectedCost: event.target.value }))} style={inputStyle} inputMode="numeric" /></label><label><b style={{ display: "block", marginBottom: 5, fontSize: 12 }}>비용 메모</b><input value={draft.costMemo} onChange={(event) => setDraft((prev) => ({ ...prev, costMemo: event.target.value }))} style={inputStyle} /></label><div style={{ display: "flex", gap: 6 }}><button type="button" onClick={savePlan} style={{ ...buttonStyle, background: "#0f172a", color: "#fff" }}>저장</button><button type="button" onClick={() => setEditing(false)} style={buttonStyle}>취소</button></div></div></section>}
+        {editing && <section style={{ ...panelStyle, padding: 13, background: "#f8fafc" }}><div className="promotion-edit-grid" style={{ display: "grid", gridTemplateColumns: "190px 210px 210px minmax(220px, 1fr) auto", gap: 9, alignItems: "end" }}><label><b style={{ display: "block", marginBottom: 5, fontSize: 12 }}>최종 진행</b><select value={draft.progressDecision} onChange={(event) => setDraft((prev) => ({ ...prev, progressDecision: event.target.value, followUpNote: "" }))} style={inputStyle}>{PROMOTION_PROGRESS_OPTIONS.map((option) => <option key={option.value || "undecided"} value={option.value}>{option.label}</option>)}</select></label><label><b style={{ display: "block", marginBottom: 5, fontSize: 12 }}>예상 출시일</b><SegmentedDateInput value={draft.expectedLaunchDate} onChange={(value) => setDraft((prev) => ({ ...prev, expectedLaunchDate: value }))} /></label><label><b style={{ display: "block", marginBottom: 5, fontSize: 12 }}>추가 예상비용(원)</b><input value={draft.additionalExpectedCost} onChange={(event) => setDraft((prev) => ({ ...prev, additionalExpectedCost: event.target.value }))} style={inputStyle} inputMode="numeric" /></label><label><b style={{ display: "block", marginBottom: 5, fontSize: 12 }}>비용 메모</b><input value={draft.costMemo} onChange={(event) => setDraft((prev) => ({ ...prev, costMemo: event.target.value }))} style={inputStyle} /></label><div style={{ display: "flex", gap: 6 }}><button type="button" onClick={savePlan} style={{ ...buttonStyle, background: "#0f172a", color: "#fff" }}>저장</button><button type="button" onClick={() => setEditing(false)} style={buttonStyle}>취소</button></div></div>{["supplement", "hold", "stop"].includes(draft.progressDecision) && <label style={{ display: "block", marginTop: 10 }}><b style={{ display: "block", marginBottom: 5, fontSize: 12 }}>후속 진행 F/U 내용</b><textarea value={draft.followUpNote || ""} onChange={(event) => setDraft((prev) => ({ ...prev, followUpNote: event.target.value }))} placeholder="후속 확인사항, 보완 요청 또는 중단 사유를 입력하세요." style={{ ...inputStyle, minHeight: 70, resize: "vertical" }} /></label>}</section>}
+
+        {promotion.progressDecision === "executive_report" && <section style={{ ...panelStyle, padding: 13, background: "#eff6ff", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}><div><b style={{ fontSize: 14 }}>경영진 보고 후 최종 결정</b><div style={{ marginTop: 4, color: "#64748b", fontSize: 12 }}>현재 결정: {promotionFinalDecisionLabel(promotion.finalDecision)}{promotion.finalDecisionAt ? ` · ${formatDateTime(promotion.finalDecisionAt)}` : ""}</div></div><div style={{ display: "flex", gap: 7 }}><button type="button" onClick={() => saveFinalDecision("proceed")} style={{ ...buttonStyle, borderColor: "#16a34a", background: promotion.finalDecision === "proceed" ? "#16a34a" : "#fff", color: promotion.finalDecision === "proceed" ? "#fff" : "#15803d" }}>최종 진행</button><button type="button" onClick={() => saveFinalDecision("hold")} style={{ ...buttonStyle, borderColor: "#f59e0b", background: promotion.finalDecision === "hold" ? "#f59e0b" : "#fff", color: promotion.finalDecision === "hold" ? "#fff" : "#b45309" }}>보류</button></div></section>}
+
+        {promotion.followUps.length > 0 && <section style={panelStyle}><div style={{ padding: "10px 13px", background: "#f1f5f9", borderBottom: "1px solid #cbd5e1", fontWeight: 900 }}>후속 진행 F/U 이력</div><div style={{ display: "grid" }}>{[...promotion.followUps].reverse().map((entry) => <div key={entry.id || `${entry.createdAt}-${entry.status}`} style={{ display: "grid", gridTemplateColumns: "110px 170px minmax(0, 1fr)", gap: 12, padding: "10px 13px", borderBottom: "1px solid #e2e8f0", alignItems: "start" }}><span style={promotionProgressBadgeStyle(entry.status)}>{promotionProgressLabel(entry.status)}</span><time style={{ color: "#64748b", fontSize: 12 }}>{formatDateTime(entry.createdAt)}</time><div style={{ color: "#334155", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{entry.note || "별도 F/U 내용 없음"}</div></div>)}</div></section>}
 
         <section style={panelStyle}><div style={{ padding: "10px 13px", background: "#dbeafe", borderBottom: "1px solid #bfdbfe", fontWeight: 900 }}>공급단가</div><div className="promotion-data-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}><SummaryCell label="배치 당 공급단가" value={formatWon(numberValue(selectedItem.supplyUnitPrice))} /><SummaryCell label="배치 당 포장단위 개수" value={selectedItem.quantity ? `${Number(selectedItem.quantity).toLocaleString("ko-KR")}개` : "-"} /><SummaryCell label="최소 주문 배치" value={`${cost.minimumOrderBatches || "-"}배치`} /><SummaryCell label="최소 주문 기준 생산비" value={formatWon(cost.initialProductionCost)} subtext="VAT·허가사 수수료 반영" /></div><div style={{ padding: "9px 13px", borderTop: "1px solid #e2e8f0" }}><button onClick={() => onOpenSupply?.(selectedItem.id)} style={buttonStyle}>공급단가 원문 보기</button></div></section>
 
