@@ -6580,6 +6580,7 @@ export default function PmsApp() {
             onCreateProjectDraft={createProjectDraftFromSupply}
             onOpenProject={openProject}
             syncState={syncState}
+            isAdmin={isAdmin}
           />
         ) : moduleTab === "contract" ? (
           <ContractManagementTab
