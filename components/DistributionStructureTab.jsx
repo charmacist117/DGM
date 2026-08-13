@@ -465,6 +465,7 @@ export default function DistributionStructureTab({
             {visibleItems.map((item) => {
               const active = selectedItem && String(item.id) === String(selectedItem.id);
               const structure = getDistribution(item);
+              const fullLabel = getItemLabel(item);
               return (
                 <button
                   key={item.id}
@@ -472,6 +473,9 @@ export default function DistributionStructureTab({
                   onClick={() => onSelectedItemChange?.(item.id)}
                   style={{
                     width: "100%",
+                    minWidth: 0,
+                    maxWidth: "100%",
+                    overflow: "hidden",
                     marginBottom: 7,
                     padding: "11px 10px",
                     border: `1px solid ${active ? "#2563eb" : "#dbe3ee"}`,
@@ -482,9 +486,9 @@ export default function DistributionStructureTab({
                     textAlign: "left"
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                    <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 14 }}>
-                      {getItemLabel(item)}
+                  <div style={{ width: "100%", minWidth: 0, display: "flex", justifyContent: "space-between", gap: 8, overflow: "hidden" }}>
+                    <strong title={fullLabel} aria-label={fullLabel} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 14 }}>
+                      {fullLabel}
                     </strong>
                     <span style={{ flex: "0 0 auto", color: "#64748b", fontSize: 11 }}>
                       {categoryLabelById[item.category] || item.category}
