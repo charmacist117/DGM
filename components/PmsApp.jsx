@@ -67,6 +67,7 @@ const DistributionStructureTab = dynamic(() => import("@/components/Distribution
 const MarketSizeAnalysisTab = dynamic(() => import("@/components/MarketSizeAnalysisTab"), { loading: tabLoading });
 const ContractManagementTab = dynamic(() => import("@/components/ContractManagementTab"), { loading: tabLoading });
 const ProjectPromotionTab = dynamic(() => import("@/components/ProjectPromotionTab"), { loading: tabLoading });
+const ProductDevelopmentOverviewTab = dynamic(() => import("@/components/ProductDevelopmentOverviewTab"), { loading: tabLoading });
 
 const LOCAL_CACHE_KEY = "pharmadev_pms_cache_v2";
 const DEVELOP_TASK_ID = "develop";
@@ -118,6 +119,7 @@ const DASHBOARD_REGULATORY_DIRECTION_CHECK_SEED_KEY = "pharmadev_dashboard_chang
 const DASHBOARD_SUPPLY_COST_BREAKDOWN_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260803_40";
 const DASHBOARD_PROJECT_PROMOTION_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260805_41";
 const DASHBOARD_REVIEW_PROMOTION_WORKFLOW_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260813_42";
+const DASHBOARD_DEVELOPMENT_OVERVIEW_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260814_43";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -4788,6 +4790,7 @@ export default function PmsApp() {
   const [supplyCategory, setSupplyCategory] = useState("all");
   const [selectedDistributionItemId, setSelectedDistributionItemId] = useState(null);
   const [selectedMarketItemId, setSelectedMarketItemId] = useState(null);
+  const [selectedPromotionItemId, setSelectedPromotionItemId] = useState(null);
   const [focusedSupplyItemId, setFocusedSupplyItemId] = useState(null);
   const [contractParentScope, setContractParentScope] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
@@ -4846,6 +4849,7 @@ export default function PmsApp() {
     if (Number.isFinite(requestedId) && projects.some((project) => project.id === requestedId)) {
       setSelectedId(requestedId);
       setIsHome(false);
+      setModuleTab("schedule");
     }
     initialUrlAppliedRef.current = true;
   }, [projects]);
@@ -6090,6 +6094,30 @@ export default function PmsApp() {
     });
   }, [setAdminLogs, syncState.status]);
 
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_DEVELOPMENT_OVERVIEW_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_DEVELOPMENT_OVERVIEW_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      const nextRevision = (previous || []).filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([...(previous || []), {
+        id: "dashboard_change_20260814_development_overview",
+        type: DASHBOARD_CHANGE_NOTICE_TYPE,
+        projectName: "제품개발 대시보드",
+        revision: String(nextRevision),
+        changeDate: TODAY,
+        changeDateTime: toDashboardDateTimeInput(),
+        changes: [
+          "기존 제품개발 프로젝트 화면을 제품일정관리 및 간트차트로 분리해 프로젝트 추진 오른편으로 이동했습니다.",
+          "공급 성분·함량 조합별 공급단가·유통 구조·시장 분석·프로젝트 추진·제품 일정의 완료 상태와 전체 진척도를 확인하는 제품개발 현황판을 추가했습니다."
+        ],
+        actor: "시스템",
+        createdAt: new Date().toISOString()
+      }]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
   const addDashboardChange = ({ changeDateTime, revision, changes }) => {
     if (!isAdmin) {
       window.alert("변경사항 기록은 ADMIN만 추가할 수 있습니다.");
@@ -6189,7 +6217,7 @@ export default function PmsApp() {
   };
 
   const openProject = (projectId) => {
-    setModuleTab("development");
+    setModuleTab("schedule");
     setSelectedId(projectId);
     setIsHome(false);
     if (typeof window !== "undefined") {
@@ -6427,6 +6455,19 @@ export default function PmsApp() {
     setModuleTab("supply");
   };
 
+  const openProjectPromotion = (itemId) => {
+    setSelectedPromotionItemId(itemId);
+    setModuleTab("promotion");
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, left: 0 });
+  };
+
+  const openScheduleDashboard = () => {
+    setModuleTab("schedule");
+    setIsHome(true);
+    setTab("overview");
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, left: 0 });
+  };
+
   return (
     <div style={{
       minHeight: "100vh",
@@ -6469,6 +6510,7 @@ export default function PmsApp() {
             ["distribution", "유통 구조 설정"],
             ["market", "시장 규모 분석"],
             ["promotion", "프로젝트 추진"],
+            ["schedule", "제품일정관리 및 간트차트"],
             ["contract", "계약 관리"],
             ["transfer", "데이터 이전"]
           ].map(([id, label]) => (
@@ -6476,7 +6518,7 @@ export default function PmsApp() {
               key={id}
               onClick={() => {
                 setModuleTab(id);
-                if (id === "home" || id === "development") {
+                if (id === "home" || id === "development" || id === "schedule") {
                   setIsHome(true);
                   setTab("overview");
                   if (typeof window !== "undefined") {
@@ -6489,7 +6531,10 @@ export default function PmsApp() {
               }}
               style={id === "home"
                 ? homeModuleTabButtonStyle(moduleTab === id)
-                : moduleTabButtonStyle(moduleTab === id)}
+                : {
+                    ...moduleTabButtonStyle(moduleTab === id),
+                    ...(id === "schedule" ? { minWidth: 250, whiteSpace: "nowrap" } : {})
+                  }}
             >
               {label}
             </button>
@@ -6551,6 +6596,18 @@ export default function PmsApp() {
               onDelete={deleteDashboardChange}
             />
           </>
+        ) : moduleTab === "development" ? (
+          <ProductDevelopmentOverviewTab
+            items={normalizedSupplyPriceItems}
+            projects={projects}
+            syncState={syncState}
+            onOpenSupply={openSupplyPriceItem}
+            onOpenDistribution={openDistributionStructure}
+            onOpenMarket={openMarketSizeAnalysis}
+            onOpenPromotion={openProjectPromotion}
+            onOpenSchedule={openProject}
+            onOpenScheduleHome={openScheduleDashboard}
+          />
         ) : moduleTab === "supply" ? (
           <SupplyPriceTab
             items={supplyPriceItems}
@@ -6593,6 +6650,8 @@ export default function PmsApp() {
           <ProjectPromotionTab
             items={normalizedSupplyPriceItems}
             projects={projects}
+            selectedItemId={selectedPromotionItemId}
+            onSelectedItemChange={setSelectedPromotionItemId}
             marketAnalysisDefaults={marketAnalysisDefaults}
             onUpdateItem={updateSupplyPriceItem}
             onOpenSupply={openSupplyPriceItem}
@@ -6640,8 +6699,8 @@ export default function PmsApp() {
           <>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12 }}>
               <div>
-                <div style={{ fontSize: 22, fontWeight: 900 }}>제품개발 대시보드</div>
-                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>모든 제품개발 프로젝트의 현재 진행 상태를 한눈에 확인합니다.</div>
+                <div style={{ fontSize: 22, fontWeight: 900 }}>제품일정관리 및 간트차트</div>
+                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>제품개발 프로젝트의 일정, 현재 단계와 간트차트를 관리합니다.</div>
               </div>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
                 <SyncBadge syncState={syncState} />

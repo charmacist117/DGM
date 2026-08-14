@@ -47,7 +47,7 @@ function SummaryCell({ label, value, subtext }) {
   return <div style={{ padding: 12, minHeight: 70, borderRight: "1px solid #e2e8f0" }}><div style={{ color: "#64748b", fontSize: 11, fontWeight: 800 }}>{label}</div><strong style={{ display: "block", marginTop: 6, color: "#0f172a", fontSize: 15, overflowWrap: "anywhere" }}>{value}</strong>{subtext && <small style={{ display: "block", marginTop: 3, color: "#64748b" }}>{subtext}</small>}</div>;
 }
 
-export default function ProjectPromotionTab({ items = [], projects = [], marketAnalysisDefaults = {}, onUpdateItem, onOpenSupply, onOpenDistribution, onOpenMarket, onCreateProjectDraft, onOpenProject, syncState, isAdmin = false }) {
+export default function ProjectPromotionTab({ items = [], projects = [], marketAnalysisDefaults = {}, selectedItemId: controlledSelectedItemId = null, onSelectedItemChange, onUpdateItem, onOpenSupply, onOpenDistribution, onOpenMarket, onCreateProjectDraft, onOpenProject, syncState, isAdmin = false }) {
   const [progressFilter, setProgressFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [selectedItemId, setSelectedItemId] = useState(null);
@@ -69,7 +69,16 @@ export default function ProjectPromotionTab({ items = [], projects = [], marketA
   const selectedItem = visibleItems.find((item) => String(item.id) === String(selectedItemId)) || visibleItems[0] || null;
 
   useEffect(() => {
-    if (selectedItem && String(selectedItem.id) !== String(selectedItemId)) setSelectedItemId(selectedItem.id);
+    if (controlledSelectedItemId !== null && controlledSelectedItemId !== undefined) {
+      setSelectedItemId(controlledSelectedItemId);
+    }
+  }, [controlledSelectedItemId]);
+
+  useEffect(() => {
+    if (selectedItem && String(selectedItem.id) !== String(selectedItemId)) {
+      setSelectedItemId(selectedItem.id);
+      onSelectedItemChange?.(selectedItem.id);
+    }
     if (!selectedItem) setSelectedItemId(null);
   }, [selectedItem, selectedItemId]);
 

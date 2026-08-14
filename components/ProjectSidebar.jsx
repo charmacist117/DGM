@@ -62,6 +62,8 @@ export default function ProjectSidebar({
   const isContractMode = moduleTab === "contract";
   const isTransferMode = moduleTab === "transfer";
   const isStandaloneHomeMode = moduleTab === "home";
+  const isDevelopmentOverviewMode = moduleTab === "development";
+  const isScheduleMode = moduleTab === "schedule";
   const totalSupplyCount = Object.values(supplyCategoryCounts || {}).reduce((sum, count) => sum + Number(count || 0), 0);
   const supplyCategoryOptions = [
     { id: "all", label: "전체", color: "#e2e8f0", count: totalSupplyCount },
@@ -140,7 +142,9 @@ export default function ProjectSidebar({
                       ? "모계약 탐색 및 계약 범위"
                       : (isTransferMode
                       ? "전체 백업 및 복원"
-                      : (isStandaloneHomeMode ? "시스템 업데이트 안내" : "제품개발 통합관리"))))))}
+                      : (isStandaloneHomeMode
+                        ? "시스템 업데이트 안내"
+                        : (isDevelopmentOverviewMode ? "전 과정 진척 현황" : "제품일정 및 간트 관리")))))))}
           </div>
         </div>
         <button
@@ -175,7 +179,7 @@ export default function ProjectSidebar({
         </button>
       </div>
 
-      {!isSupplyMode && !isPromotionMode && !isContractMode && !isTransferMode && !isStandaloneHomeMode && isAdmin && (
+      {isScheduleMode && isAdmin && (
         <button
           onClick={goToNewProjectPage}
           style={{ width: "100%", borderRadius: 8, padding: "9px 10px", border: "1px dashed rgba(148, 163, 184, .55)", background: "rgba(255, 255, 255, .04)", color: "#e2e8f0", cursor: "pointer", fontWeight: 800 }}
@@ -183,7 +187,7 @@ export default function ProjectSidebar({
           + 새 프로젝트
         </button>
       )}
-      {!isSupplyMode && !isPromotionMode && !isContractMode && !isTransferMode && !isStandaloneHomeMode && isAdmin && (
+      {isScheduleMode && isAdmin && (
         <button
           onClick={goToProjectLogsPage}
           style={{ width: "100%", borderRadius: 8, padding: "9px 10px", border: "1px solid rgba(148, 163, 184, .28)", background: "rgba(30, 41, 59, .65)", color: "#e2e8f0", cursor: "pointer", fontWeight: 800, fontSize: 12 }}
@@ -366,6 +370,11 @@ export default function ProjectSidebar({
         <div style={{ flex: 1, minHeight: 0, border: "1px solid rgba(148, 163, 184, .28)", borderRadius: 8, background: "rgba(30, 41, 59, .62)", padding: 12 }}>
           <div style={{ fontSize: 12, fontWeight: 900, color: "#f8fafc", marginBottom: 6 }}>홈</div>
           <div style={{ fontSize: 11, lineHeight: 1.6, color: "#94a3b8" }}>제품개발 시스템의 업데이트 및 변경사항을 확인합니다.</div>
+        </div>
+      ) : isDevelopmentOverviewMode ? (
+        <div style={{ flex: 1, minHeight: 0, border: "1px solid rgba(148, 163, 184, .28)", borderRadius: 8, background: "rgba(30, 41, 59, .62)", padding: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 900, color: "#f8fafc", marginBottom: 6 }}>제품개발</div>
+          <div style={{ fontSize: 11, lineHeight: 1.6, color: "#94a3b8" }}>성분·함량 조합별 공급단가부터 제품 일정까지의 진척도를 확인합니다.</div>
         </div>
       ) : (
         <div style={{
