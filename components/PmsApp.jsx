@@ -1,11 +1,8 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import DistributionStructureTab from "@/components/DistributionStructureTab";
-import MarketSizeAnalysisTab from "@/components/MarketSizeAnalysisTab";
-import ContractManagementTab from "@/components/ContractManagementTab";
-import ProjectPromotionTab from "@/components/ProjectPromotionTab";
 import ProjectSidebar from "@/components/ProjectSidebar";
 import DesktopProjectPathControl from "@/components/DesktopProjectPathControl";
 import SegmentedDateInput from "@/components/SegmentedDateInput";
@@ -63,6 +60,13 @@ import {
   supportsSupplyCostBreakdown
 } from "@/lib/pms/supplyCostBreakdown";
 import { normalizeProjectPromotion, projectPromotionTotalExpectedCost } from "@/lib/pms/projectPromotion";
+import { createCompactPmsPayload } from "@/lib/pms/storageCompact";
+
+const tabLoading = () => <div style={{ padding: 24, color: "#64748b", fontSize: 13 }}>화면을 불러오는 중...</div>;
+const DistributionStructureTab = dynamic(() => import("@/components/DistributionStructureTab"), { loading: tabLoading });
+const MarketSizeAnalysisTab = dynamic(() => import("@/components/MarketSizeAnalysisTab"), { loading: tabLoading });
+const ContractManagementTab = dynamic(() => import("@/components/ContractManagementTab"), { loading: tabLoading });
+const ProjectPromotionTab = dynamic(() => import("@/components/ProjectPromotionTab"), { loading: tabLoading });
 
 const LOCAL_CACHE_KEY = "pharmadev_pms_cache_v2";
 const DEVELOP_TASK_ID = "develop";
@@ -1052,30 +1056,33 @@ function createSupplyPriceItem() {
 }
 
 function useProjectsStore() {
+  const initialCacheRef = useRef(null);
+  if (initialCacheRef.current === null) initialCacheRef.current = readLocalCacheState();
   const [projects, setProjects] = useState(() => {
-    return readLocalCacheState().projects;
+    return initialCacheRef.current.projects;
   });
 
   const [adminLogs, setAdminLogs] = useState(() => {
-    return readLocalCacheState().adminLogs;
+    return initialCacheRef.current.adminLogs;
   });
 
   const [supplyPriceItems, setSupplyPriceItems] = useState(() => {
-    return readLocalCacheState().supplyPriceItems;
+    return initialCacheRef.current.supplyPriceItems;
   });
 
   const [contractRecords, setContractRecords] = useState(() => {
-    return readLocalCacheState().contractRecords;
+    return initialCacheRef.current.contractRecords;
   });
 
   const [marketAnalysisDefaults, setMarketAnalysisDefaults] = useState(() => {
-    return readLocalCacheState().marketAnalysisDefaults;
+    return initialCacheRef.current.marketAnalysisDefaults;
   });
 
   const [syncState, setSyncState] = useState({ status: "loading", message: "서버 데이터 확인 중..." });
   const readyRef = useRef(false);
   const serverAvailableRef = useRef(false);
   const saveTimerRef = useRef(null);
+  const lastSavedPayloadRef = useRef("");
 
   useEffect(() => {
     let disposed = false;
@@ -1118,6 +1125,13 @@ function useProjectsStore() {
           setSupplyPriceItems(nextSupplyPriceItems);
           setContractRecords(nextContractRecords);
           setMarketAnalysisDefaults(nextMarketAnalysisDefaults);
+          lastSavedPayloadRef.current = JSON.stringify(createCompactPmsPayload({
+            projects: nextProjects,
+            adminLogs: nextAdminLogs,
+            supplyPriceItems: nextSupplyPriceItems,
+            contractRecords: nextContractRecords,
+            marketAnalysisDefaults: nextMarketAnalysisDefaults
+          }));
           serverAvailableRef.current = true;
           setSyncState({
             status: "ready",
@@ -1153,35 +1167,38 @@ function useProjectsStore() {
   useEffect(() => {
     if (!readyRef.current) return;
 
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify({
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      const storagePayload = createCompactPmsPayload({
         projects,
         adminLogs,
         supplyPriceItems,
         contractRecords,
-        marketAnalysisDefaults,
-        cachedAt: new Date().toISOString()
-      }));
-    }
-
-    if (!serverAvailableRef.current) {
-      return;
-    }
-
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(async () => {
+        marketAnalysisDefaults
+      });
+      const serializedPayload = JSON.stringify(storagePayload);
+      if (serializedPayload === lastSavedPayloadRef.current) return;
+      if (typeof window !== "undefined") {
+        try {
+          window.localStorage.setItem(LOCAL_CACHE_KEY, serializedPayload);
+        } catch (error) {
+          setSyncState({ status: "warning", message: `로컬 캐시 저장 실패: ${errorMessage(error)}` });
+        }
+      }
+      if (!serverAvailableRef.current) return;
       try {
         setSyncState({ status: "saving", message: "서버 저장 중..." });
         const response = await fetch("/api/projects", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projects, adminLogs, supplyPriceItems, contractRecords, marketAnalysisDefaults })
+          body: serializedPayload
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.ok) {
           throw new Error(payload.error || payload.message || `저장 실패 (${response.status})`);
         }
         setSyncState({ status: "saved", message: `저장 완료 (${new Date(payload.updatedAt).toLocaleString()})` });
+        lastSavedPayloadRef.current = serializedPayload;
       } catch (error) {
         serverAvailableRef.current = true;
         setSyncState({
@@ -4783,6 +4800,10 @@ export default function PmsApp() {
   });
   const isAdmin = canManage(userRole);
   const roleLabel = isAdmin ? "ADMIN" : "MANAGER";
+  const normalizedSupplyPriceItems = useMemo(
+    () => normalizeSupplyPriceItems(supplyPriceItems),
+    [supplyPriceItems]
+  );
 
   useEffect(() => {
     if (contractParentScope === "all") return;
@@ -6195,11 +6216,11 @@ export default function PmsApp() {
 
   const supplyCategoryCounts = useMemo(() => {
     const counts = Object.fromEntries(SUPPLY_PRICE_CATEGORIES.map((category) => [category.id, 0]));
-    normalizeSupplyPriceItems(supplyPriceItems).forEach((item) => {
+    normalizedSupplyPriceItems.forEach((item) => {
       counts[item.category] = (counts[item.category] || 0) + 1;
     });
     return counts;
-  }, [supplyPriceItems]);
+  }, [normalizedSupplyPriceItems]);
 
   const bucketOrder = Object.fromEntries(PROJECT_BUCKETS.map((bucket, index) => [bucket.id, index]));
   const getProjectBucketId = (project) => (
@@ -6382,7 +6403,7 @@ export default function PmsApp() {
   };
 
   const openDistributionStructure = (itemId) => {
-    const target = normalizeSupplyPriceItems(supplyPriceItems).find((item) => String(item.id) === String(itemId));
+    const target = normalizedSupplyPriceItems.find((item) => String(item.id) === String(itemId));
     if (target) setSupplyCategory(target.category);
     setFocusedSupplyItemId(null);
     setSelectedDistributionItemId(itemId);
@@ -6391,7 +6412,7 @@ export default function PmsApp() {
   };
 
   const openMarketSizeAnalysis = (itemId) => {
-    const target = normalizeSupplyPriceItems(supplyPriceItems).find((item) => String(item.id) === String(itemId));
+    const target = normalizedSupplyPriceItems.find((item) => String(item.id) === String(itemId));
     if (target) setSupplyCategory(target.category);
     setFocusedSupplyItemId(null);
     setSelectedMarketItemId(itemId);
@@ -6400,7 +6421,7 @@ export default function PmsApp() {
   };
 
   const openSupplyPriceItem = (itemId) => {
-    const target = normalizeSupplyPriceItems(supplyPriceItems).find((item) => String(item.id) === String(itemId));
+    const target = normalizedSupplyPriceItems.find((item) => String(item.id) === String(itemId));
     if (target) setSupplyCategory(target.category);
     setFocusedSupplyItemId(itemId);
     setModuleTab("supply");
@@ -6542,7 +6563,7 @@ export default function PmsApp() {
           />
         ) : moduleTab === "distribution" ? (
           <DistributionStructureTab
-            items={normalizeSupplyPriceItems(supplyPriceItems)}
+            items={normalizedSupplyPriceItems}
             categories={SUPPLY_PRICE_CATEGORIES}
             selectedCategory={supplyCategory}
             selectedItemId={selectedDistributionItemId}
@@ -6554,7 +6575,7 @@ export default function PmsApp() {
           />
         ) : moduleTab === "market" ? (
           <MarketSizeAnalysisTab
-            items={normalizeSupplyPriceItems(supplyPriceItems)}
+            items={normalizedSupplyPriceItems}
             categories={SUPPLY_PRICE_CATEGORIES}
             selectedCategory={supplyCategory}
             selectedItemId={selectedMarketItemId}
@@ -6570,7 +6591,7 @@ export default function PmsApp() {
           />
         ) : moduleTab === "promotion" ? (
           <ProjectPromotionTab
-            items={normalizeSupplyPriceItems(supplyPriceItems)}
+            items={normalizedSupplyPriceItems}
             projects={projects}
             marketAnalysisDefaults={marketAnalysisDefaults}
             onUpdateItem={updateSupplyPriceItem}
@@ -6587,7 +6608,7 @@ export default function PmsApp() {
             records={contractRecords}
             onRecordsChange={(nextRecords) => setContractRecords(normalizeContractRecords(nextRecords))}
             projects={projects}
-            supplyPriceItems={normalizeSupplyPriceItems(supplyPriceItems)}
+            supplyPriceItems={normalizedSupplyPriceItems}
             syncState={syncState}
             isAdmin={isAdmin}
             parentScope={contractParentScope}
