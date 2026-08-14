@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import SegmentedDateInput from "@/components/SegmentedDateInput";
+import IngredientAmountTitle, { formatIngredientAmountLabel } from "@/components/IngredientAmountTitle";
 import { calculateSellingPriceFromMarginRate } from "@/lib/pms/marketAnalysis";
 import {
   marketDecisionBadgeStyle,
@@ -71,16 +72,7 @@ function formatPercent(value) {
 }
 
 function getItemLabel(item) {
-  const ingredientLabels = (item.ingredients || [])
-    .map((ingredient) => {
-      const name = String(ingredient.name || "").trim();
-      const content = String(ingredient.content || "").trim();
-      if (!name) return "";
-      return content ? `${name} / ${content}` : name;
-    })
-    .filter(Boolean)
-    .join(", ");
-  return ingredientLabels || item.manufacturer || "성분 미입력";
+  return formatIngredientAmountLabel(item, item.manufacturer || "성분 미입력");
 }
 
 function normalizePricingScenario(value = {}, fallbackId = "pricing_default", fallbackLabel = "기본") {
@@ -487,9 +479,7 @@ export default function DistributionStructureTab({
                   }}
                 >
                   <div style={{ width: "100%", minWidth: 0, display: "flex", justifyContent: "space-between", gap: 8, overflow: "hidden" }}>
-                    <strong title={fullLabel} aria-label={fullLabel} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 14 }}>
-                      {fullLabel}
-                    </strong>
+                    <IngredientAmountTitle label={fullLabel} maxFontSize={14} minFontSize={12} />
                     <span style={{ flex: "0 0 auto", color: "#64748b", fontSize: 11 }}>
                       {categoryLabelById[item.category] || item.category}
                     </span>
@@ -536,7 +526,7 @@ export default function DistributionStructureTab({
               <section style={panelStyle}>
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, padding: "13px 15px", borderBottom: "1px solid #cbd5e1", background: "#e8f1fb" }}>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ color: "#0f172a", fontSize: 17, fontWeight: 900 }}>{getItemLabel(selectedItem)}</div>
+                    <IngredientAmountTitle item={selectedItem} fallback={selectedItem.manufacturer || "성분 미입력"} maxFontSize={17} minFontSize={12} />
                     <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>
                       {selectedItem.manufacturer || "제조사 미입력"} · {categoryLabelById[selectedItem.category] || selectedItem.category}
                     </div>

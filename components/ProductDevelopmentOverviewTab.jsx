@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import IngredientAmountTitle, { formatIngredientAmountLabel } from "@/components/IngredientAmountTitle";
 import { marketDecisionLabel } from "@/lib/pms/marketDecision";
 import {
   normalizeProjectPromotion,
@@ -27,10 +28,7 @@ const controlStyle = {
 };
 
 function ingredientLabel(item) {
-  return (item.ingredients || [])
-    .map((ingredient) => [ingredient?.name, ingredient?.content].filter(Boolean).join(" / "))
-    .filter(Boolean)
-    .join(", ") || "성분·함량 미입력";
+  return formatIngredientAmountLabel(item, "성분·함량 미입력");
 }
 
 function linkedProjectFor(item, projects) {
@@ -117,11 +115,12 @@ export default function ProductDevelopmentOverviewTab({
   onOpenMarket,
   onOpenPromotion,
   onOpenSchedule,
-  onOpenScheduleHome
+  onOpenScheduleHome,
+  stageFilter = "all",
+  onStageFilterChange
 }) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
-  const [completionFilter, setCompletionFilter] = useState("all");
 
   const rows = useMemo(() => (items || []).map((item) => {
     const readiness = projectPromotionReadiness(item);
@@ -137,6 +136,17 @@ export default function ProductDevelopmentOverviewTab({
       scheduleProgress
     ];
     const progress = stageValues.reduce((sum, value) => sum + value, 0) / stageValues.length;
+    const currentStage = !readiness.supplyReady
+      ? "supply"
+      : !readiness.distributionReady
+        ? "distribution"
+        : !readiness.marketReady
+          ? "market"
+          : !promotionComplete
+            ? "promotion"
+            : scheduleProgress < 1
+              ? "schedule"
+              : "complete";
     return {
       item,
       label: ingredientLabel(item),
@@ -145,7 +155,8 @@ export default function ProductDevelopmentOverviewTab({
       promotionComplete,
       linkedProject,
       scheduleProgress,
-      progress
+      progress,
+      currentStage
     };
   }), [items, projects]);
 
@@ -154,8 +165,7 @@ export default function ProductDevelopmentOverviewTab({
     const keyword = query.trim().toLowerCase();
     return rows
       .filter((row) => category === "all" || row.item.category === category)
-      .filter((row) => completionFilter === "all"
-        || (completionFilter === "complete" ? row.progress === 1 : row.progress < 1))
+      .filter((row) => stageFilter === "all" || row.currentStage === stageFilter)
       .filter((row) => !keyword || [
         row.label,
         row.item.manufacturer,
@@ -163,9 +173,10 @@ export default function ProductDevelopmentOverviewTab({
         row.item.category,
         row.linkedProject?.name
       ].some((value) => String(value || "").toLowerCase().includes(keyword)))
-      .sort((left, right) => left.progress - right.progress
+      .sort((left, right) => Number(left.currentStage === "complete") - Number(right.currentStage === "complete")
+        || right.progress - left.progress
         || String(right.item.updatedAt || right.item.createdAt || "").localeCompare(String(left.item.updatedAt || left.item.createdAt || "")));
-  }, [rows, query, category, completionFilter]);
+  }, [rows, query, category, stageFilter]);
 
   const completeCount = rows.filter((row) => row.progress === 1).length;
   const averageProgress = rows.length
@@ -207,9 +218,13 @@ export default function ProductDevelopmentOverviewTab({
             <option value="all">전체 카테고리</option>
             {categories.map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
-          <select value={completionFilter} onChange={(event) => setCompletionFilter(event.target.value)} style={controlStyle}>
-            <option value="all">전체 진행 상태</option>
-            <option value="incomplete">보완 필요</option>
+          <select value={stageFilter} onChange={(event) => onStageFilterChange?.(event.target.value)} style={controlStyle}>
+            <option value="all">전체 진행 단계</option>
+            <option value="supply">공급단가 확인</option>
+            <option value="distribution">유통 구조 설정</option>
+            <option value="market">시장 규모 분석</option>
+            <option value="promotion">프로젝트 추진</option>
+            <option value="schedule">제품일정·간트</option>
             <option value="complete">전 단계 완료</option>
           </select>
         </div>
@@ -241,7 +256,7 @@ export default function ProductDevelopmentOverviewTab({
                 return (
                   <tr key={item.id} style={{ borderBottom: "1px solid #e2e8f0", background: "#fff" }}>
                     <td style={{ padding: 11, verticalAlign: "top" }}>
-                      <div title={row.label} style={{ fontSize: 13, fontWeight: 900, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.label}</div>
+                      <IngredientAmountTitle label={row.label} maxFontSize={13} minFontSize={11} />
                       <div style={{ marginTop: 5, color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>{item.manufacturer || "제조사 미입력"} · {item.category || "카테고리 미입력"}</div>
                       <div style={{ marginTop: 2, color: "#64748b", fontSize: 11 }}>포장단위 {item.packagingUnit || "-"} · 수량 {item.quantity || "-"}</div>
                     </td>

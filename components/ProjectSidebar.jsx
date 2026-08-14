@@ -44,6 +44,8 @@ export default function ProjectSidebar({
   supplyCategory = "all",
   setSupplyCategory,
   supplyCategoryCounts = {},
+  developmentStageFilter = "all",
+  setDevelopmentStageFilter,
   contractRecords = [],
   contractParentScope = "all",
   setContractParentScope,
@@ -372,9 +374,50 @@ export default function ProjectSidebar({
           <div style={{ fontSize: 11, lineHeight: 1.6, color: "#94a3b8" }}>제품개발 시스템의 업데이트 및 변경사항을 확인합니다.</div>
         </div>
       ) : isDevelopmentOverviewMode ? (
-        <div style={{ flex: 1, minHeight: 0, border: "1px solid rgba(148, 163, 184, .28)", borderRadius: 8, background: "rgba(30, 41, 59, .62)", padding: 12 }}>
-          <div style={{ fontSize: 12, fontWeight: 900, color: "#f8fafc", marginBottom: 6 }}>제품개발</div>
-          <div style={{ fontSize: 11, lineHeight: 1.6, color: "#94a3b8" }}>성분·함량 조합별 공급단가부터 제품 일정까지의 진척도를 확인합니다.</div>
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ border: "1px solid rgba(148, 163, 184, .28)", borderRadius: 8, background: "rgba(30, 41, 59, .62)", padding: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 900, color: "#f8fafc", marginBottom: 6 }}>제품개발</div>
+            <div style={{ fontSize: 11, lineHeight: 1.6, color: "#94a3b8" }}>진행 단계별 품목을 선택해 모아봅니다.</div>
+          </div>
+          <div style={{ minHeight: 0, overflowY: "auto", display: "grid", gridAutoRows: "max-content", alignContent: "start", gap: 7, paddingRight: 3 }}>
+            {[
+              ["all", "전체 단계", "#e2e8f0"],
+              ["supply", "공급단가 확인", "#38bdf8"],
+              ["distribution", "유통 구조 설정", "#2dd4bf"],
+              ["market", "시장 규모 분석", "#fbbf24"],
+              ["promotion", "프로젝트 추진", "#a78bfa"],
+              ["schedule", "제품일정·간트", "#fb7185"],
+              ["complete", "전 단계 완료", "#34d399"]
+            ].map(([id, label, color]) => {
+              const active = developmentStageFilter === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setDevelopmentStageFilter?.(id)}
+                  style={{
+                    width: "100%",
+                    minHeight: 40,
+                    padding: "9px 10px",
+                    borderRadius: 8,
+                    border: `1px solid ${active ? "#e2e8f0" : "rgba(148, 163, 184, .28)"}`,
+                    background: active ? "#fff" : "rgba(30, 41, 59, .65)",
+                    color: active ? "#0f172a" : "#e2e8f0",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    textAlign: "left",
+                    fontSize: 12,
+                    fontWeight: 900
+                  }}
+                >
+                  <span style={{ width: 8, height: 8, borderRadius: 99, background: color, flex: "0 0 8px" }} />
+                  <span>{label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       ) : (
         <div style={{

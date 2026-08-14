@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import SegmentedDateInput from "@/components/SegmentedDateInput";
+import IngredientAmountTitle, { formatIngredientAmountLabel } from "@/components/IngredientAmountTitle";
 import { calculateMarketAnalysis, calculateSellingPriceFromMarginRate } from "@/lib/pms/marketAnalysis";
 import { marketDecisionBadgeStyle, marketDecisionLabel } from "@/lib/pms/marketDecision";
 import {
@@ -25,7 +26,7 @@ function numberValue(value) {
 }
 
 function itemLabel(item) {
-  return (item.ingredients || []).map((ingredient) => [ingredient?.name, ingredient?.content].filter(Boolean).join(" / ")).filter(Boolean).join(", ") || "성분 미입력";
+  return formatIngredientAmountLabel(item, "성분 미입력");
 }
 
 function formatWon(value) {
@@ -47,12 +48,14 @@ function SummaryCell({ label, value, subtext }) {
   return <div style={{ padding: 12, minHeight: 70, borderRight: "1px solid #e2e8f0" }}><div style={{ color: "#64748b", fontSize: 11, fontWeight: 800 }}>{label}</div><strong style={{ display: "block", marginTop: 6, color: "#0f172a", fontSize: 15, overflowWrap: "anywhere" }}>{value}</strong>{subtext && <small style={{ display: "block", marginTop: 3, color: "#64748b" }}>{subtext}</small>}</div>;
 }
 
-export default function ProjectPromotionTab({ items = [], projects = [], marketAnalysisDefaults = {}, selectedItemId: controlledSelectedItemId = null, onSelectedItemChange, onUpdateItem, onOpenSupply, onOpenDistribution, onOpenMarket, onCreateProjectDraft, onOpenProject, syncState, isAdmin = false }) {
+export default function ProjectPromotionTab({ items = [], projects = [], marketAnalysisDefaults = {}, selectedItemId: controlledSelectedItemId = null, onSelectedItemChange, onUpdateItem, onLinkProject, onOpenSupply, onOpenDistribution, onOpenMarket, onCreateProjectDraft, onOpenProject, syncState, isAdmin = false }) {
   const [progressFilter, setProgressFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [selectedItemId, setSelectedItemId] = useState(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(normalizeProjectPromotion());
+  const [linkingProject, setLinkingProject] = useState(false);
+  const [projectLinkDraftId, setProjectLinkDraftId] = useState("");
 
   const eligibleItems = useMemo(() => (Array.isArray(items) ? items : []).filter((item) => (
     item.marketDecisionStatus === "proceed" && projectPromotionReadiness(item).isImminent
@@ -139,6 +142,40 @@ export default function ProjectPromotionTab({ items = [], projects = [], marketA
   const market = selectedItem ? calculateMarketAnalysis(selectedItem, selectedItem.marketSizeAnalysis, marketAnalysisDefaults) : null;
   const scenarios = selectedItem?.distributionStructure?.pricingScenarios || [];
   const linkedProject = selectedItem ? (projects || []).find((project) => String(project.id) === String(promotion.linkedProjectId) || String(project.sourceSupplyItemId || "") === String(selectedItem.id)) : null;
+  const projectConnectionById = new Map();
+  (items || []).forEach((item) => {
+    const linkedId = normalizeProjectPromotion(item.projectPromotion).linkedProjectId;
+    if (linkedId) projectConnectionById.set(String(linkedId), item.id);
+  });
+  (projects || []).forEach((project) => {
+    if (project.sourceSupplyItemId) projectConnectionById.set(String(project.id), project.sourceSupplyItemId);
+  });
+  const selectableProjects = (projects || []).filter((project) => {
+    const connectedItemId = projectConnectionById.get(String(project.id));
+    return !connectedItemId || String(connectedItemId) === String(selectedItem?.id);
+  });
+
+  useEffect(() => {
+    setLinkingProject(false);
+    setProjectLinkDraftId(linkedProject ? String(linkedProject.id) : "");
+  }, [selectedItem?.id, linkedProject?.id]);
+
+  const saveProjectLink = () => {
+    if (!selectedItem || !projectLinkDraftId) {
+      window.alert("연결할 기존 프로젝트를 선택해주세요.");
+      return;
+    }
+    onLinkProject?.(selectedItem.id, projectLinkDraftId);
+    setLinkingProject(false);
+  };
+
+  const clearProjectLink = () => {
+    if (!selectedItem || !linkedProject) return;
+    if (!window.confirm(`‘${linkedProject.name}’ 프로젝트 연결을 해제하시겠습니까?`)) return;
+    onLinkProject?.(selectedItem.id, "");
+    setProjectLinkDraftId("");
+    setLinkingProject(false);
+  };
 
   return <div style={{ display: "grid", gap: 14 }}>
     <section style={{ ...panelStyle, padding: 16 }}>
@@ -153,11 +190,11 @@ export default function ProjectPromotionTab({ items = [], projects = [], marketA
           <select value={progressFilter} onChange={(event) => setProgressFilter(event.target.value)} style={inputStyle}><option value="all">전체 진행 상태 ({eligibleItems.length})</option>{PROMOTION_PROGRESS_OPTIONS.map((option) => <option key={option.value || "undecided"} value={option.value}>{option.label} ({counts[option.value] || 0})</option>)}</select>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="성분명, 제조사, 허가사 검색" style={inputStyle} />
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 7, marginTop: 10, maxHeight: "calc(100vh - 250px)", overflowY: "auto", overflowX: "hidden" }}>{visibleItems.map((item) => { const active = String(item.id) === String(selectedItem?.id); const itemPromotion = normalizeProjectPromotion(item.projectPromotion); const fullLabel = itemLabel(item); return <button key={item.id} type="button" onClick={() => setSelectedItemId(item.id)} style={{ width: "100%", minWidth: 0, maxWidth: "100%", overflow: "hidden", padding: 10, textAlign: "left", borderRadius: 7, border: `1px solid ${active ? "#2563eb" : "#cbd5e1"}`, background: active ? "#eff6ff" : "#fff", cursor: "pointer" }}><div title={fullLabel} aria-label={fullLabel} style={{ width: "100%", minWidth: 0, fontSize: 13, fontWeight: 900, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fullLabel}</div><div style={{ minWidth: 0, marginTop: 4, color: "#64748b", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.manufacturer || "제조사 미입력"} · {item.permitCompany || "허가사 미입력"}</div><div style={{ marginTop: 6 }}><span style={promotionProgressBadgeStyle(itemPromotion.progressDecision)}>{promotionProgressLabel(itemPromotion.progressDecision)}</span></div></button>; })}{visibleItems.length === 0 && <div style={{ padding: 18, color: "#94a3b8", textAlign: "center", fontSize: 12 }}>조건에 맞는 추진 품목이 없습니다.</div>}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 7, marginTop: 10, maxHeight: "calc(100vh - 250px)", overflowY: "auto", overflowX: "hidden" }}>{visibleItems.map((item) => { const active = String(item.id) === String(selectedItem?.id); const itemPromotion = normalizeProjectPromotion(item.projectPromotion); const fullLabel = itemLabel(item); return <button key={item.id} type="button" onClick={() => setSelectedItemId(item.id)} style={{ width: "100%", minWidth: 0, maxWidth: "100%", overflow: "hidden", padding: 10, textAlign: "left", borderRadius: 7, border: `1px solid ${active ? "#2563eb" : "#cbd5e1"}`, background: active ? "#eff6ff" : "#fff", cursor: "pointer" }}><IngredientAmountTitle label={fullLabel} maxFontSize={13} minFontSize={11} /><div style={{ minWidth: 0, marginTop: 4, color: "#64748b", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.manufacturer || "제조사 미입력"} · {item.permitCompany || "허가사 미입력"}</div><div style={{ marginTop: 6 }}><span style={promotionProgressBadgeStyle(itemPromotion.progressDecision)}>{promotionProgressLabel(itemPromotion.progressDecision)}</span></div></button>; })}{visibleItems.length === 0 && <div style={{ padding: 18, color: "#94a3b8", textAlign: "center", fontSize: 12 }}>조건에 맞는 추진 품목이 없습니다.</div>}</div>
       </aside>
 
       <main style={{ minWidth: 0 }}>{!selectedItem ? <section style={{ ...panelStyle, padding: 32, textAlign: "center", color: "#64748b" }}>시장 검토결과가 ‘진행 추진’인 품목이 없습니다.</section> : <div style={{ display: "grid", gap: 12 }}>
-        <section style={panelStyle}><div style={{ padding: 14, background: "#ecfdf5", borderBottom: "1px solid #cbd5e1", display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}><div><div style={{ fontSize: 18, fontWeight: 900 }}>{itemLabel(selectedItem)}</div><div style={{ marginTop: 4, color: "#475569", fontSize: 12 }}>{selectedItem.manufacturer || "제조사 미입력"} · {selectedItem.category} · 허가사 {selectedItem.category === "OTC" ? (selectedItem.permitCompany || "미입력") : "해당 없음"}</div></div><div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}><span style={marketDecisionBadgeStyle(selectedItem.marketDecisionStatus)}>시장 검토 · {marketDecisionLabel(selectedItem.marketDecisionStatus)}</span><span style={promotionProgressBadgeStyle(promotion.progressDecision)}>최종 진행 · {promotionProgressLabel(promotion.progressDecision)}</span><button type="button" onClick={() => { setDraft(promotion); setEditing(true); }} style={buttonStyle}>추진 계획 설정</button>{isAdmin && promotion.updatedAt && <button type="button" onClick={deletePlan} style={{ ...buttonStyle, borderColor: "#fca5a5", color: "#dc2626", background: "#fff" }}>추진 계획 삭제</button>}</div></div>
+        <section style={panelStyle}><div style={{ padding: 14, background: "#ecfdf5", borderBottom: "1px solid #cbd5e1", display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}><div style={{ minWidth: 0, flex: "1 1 440px" }}><IngredientAmountTitle item={selectedItem} fallback="성분 미입력" maxFontSize={18} minFontSize={12} /><div style={{ marginTop: 4, color: "#475569", fontSize: 12 }}>{selectedItem.manufacturer || "제조사 미입력"} · {selectedItem.category} · 허가사 {selectedItem.category === "OTC" ? (selectedItem.permitCompany || "미입력") : "해당 없음"}</div></div><div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}><span style={marketDecisionBadgeStyle(selectedItem.marketDecisionStatus)}>시장 검토 · {marketDecisionLabel(selectedItem.marketDecisionStatus)}</span><span style={promotionProgressBadgeStyle(promotion.progressDecision)}>최종 진행 · {promotionProgressLabel(promotion.progressDecision)}</span><button type="button" onClick={() => { setDraft(promotion); setEditing(true); }} style={buttonStyle}>추진 계획 설정</button>{isAdmin && promotion.updatedAt && <button type="button" onClick={deletePlan} style={{ ...buttonStyle, borderColor: "#fca5a5", color: "#dc2626", background: "#fff" }}>추진 계획 삭제</button>}</div></div>
           <div className="promotion-summary-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}><SummaryCell label="제조사" value={selectedItem.manufacturer || "미입력"} /><SummaryCell label="허가사" value={selectedItem.category === "OTC" ? (selectedItem.permitCompany || "미입력") : "해당 없음"} /><SummaryCell label="예상 출시일" value={promotion.expectedLaunchDate || "미입력"} /><SummaryCell label="총 예상비용" value={formatWon(totalCost)} /></div>
         </section>
 
@@ -173,7 +210,24 @@ export default function ProjectPromotionTab({ items = [], projects = [], marketA
 
         <section style={panelStyle}><div style={{ padding: "10px 13px", background: "#dbeafe", borderBottom: "1px solid #bfdbfe", fontWeight: 900 }}>시장 규모 분석</div><div className="promotion-data-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}><SummaryCell label="기준 시장 규모" value={formatCompactWon(market?.latestYear?.totalKrw)} /><SummaryCell label="연평균 성장률" value={Number.isFinite(market?.cagr5Year) ? `${market.cagr5Year.toFixed(2)}%` : "-"} /><SummaryCell label="연간 예상 소진수량" value={Number.isFinite(market?.annualDemandUnits) ? `${Math.round(market.annualDemandUnits).toLocaleString("ko-KR")}개` : "-"} /><SummaryCell label="연간 필요 배치" value={Number.isFinite(market?.exactBatches) ? `${market.exactBatches.toFixed(2)}배치` : "-"} /><SummaryCell label="연간 금융 기회비용" value={formatWon(market?.annualFinanceCost)} /><SummaryCell label="참약사 예상 판매가" value={formatWon(market?.chamyaksaSellingPrice)} /><SummaryCell label="연간 기대 매출총이익" value={formatCompactWon(market?.expectedGrossProfit)} /><SummaryCell label="금융비용 차감 기댓값" value={formatCompactWon(market?.expectedProfitAfterFinance)} /></div><div style={{ padding: "9px 13px", borderTop: "1px solid #e2e8f0" }}><button onClick={() => onOpenMarket?.(selectedItem.id)} style={buttonStyle}>시장 분석 원문 보기</button></div></section>
 
-        <section style={{ ...panelStyle, padding: 12 }}><div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 10 }}>{readinessBadge(readiness?.supplyReady, "공급단가")}{readinessBadge(readiness?.distributionReady, "유통 구조")}{readinessBadge(readiness?.marketReady, "시장 분석")}</div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{linkedProject ? <button onClick={() => onOpenProject?.(linkedProject.id)} style={{ ...buttonStyle, borderColor: "#10b981", color: "#047857", background: "#ecfdf5" }}>제품개발 프로젝트 보기</button> : <button onClick={() => onCreateProjectDraft?.(selectedItem)} style={{ ...buttonStyle, background: "#2563eb", borderColor: "#2563eb", color: "#fff" }}>제품개발 프로젝트 기안</button>}</div></section>
+        <section style={{ ...panelStyle, padding: 12 }}>
+          <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 10 }}>{readinessBadge(readiness?.supplyReady, "공급단가")}{readinessBadge(readiness?.distributionReady, "유통 구조")}{readinessBadge(readiness?.marketReady, "시장 분석")}</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {linkedProject ? <>
+              <button onClick={() => onOpenProject?.(linkedProject.id)} style={{ ...buttonStyle, borderColor: "#10b981", color: "#047857", background: "#ecfdf5" }}>연결 프로젝트 보기</button>
+              <button onClick={() => { setProjectLinkDraftId(String(linkedProject.id)); setLinkingProject(true); }} style={buttonStyle}>연결 변경</button>
+              <button onClick={clearProjectLink} style={{ ...buttonStyle, borderColor: "#fca5a5", color: "#dc2626" }}>연결 해제</button>
+            </> : <>
+              <button onClick={() => onCreateProjectDraft?.(selectedItem)} style={{ ...buttonStyle, background: "#2563eb", borderColor: "#2563eb", color: "#fff" }}>제품개발 프로젝트 기안</button>
+              <button onClick={() => { setProjectLinkDraftId(""); setLinkingProject(true); }} style={buttonStyle}>기존 프로젝트 연결</button>
+            </>}
+          </div>
+          {linkingProject && <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) auto", gap: 8, alignItems: "end", marginTop: 10, padding: 10, border: "1px solid #bfdbfe", borderRadius: 7, background: "#eff6ff" }}>
+            <label><b style={{ display: "block", marginBottom: 5, color: "#1e3a8a", fontSize: 12 }}>기존 제품개발 프로젝트</b><select value={projectLinkDraftId} onChange={(event) => setProjectLinkDraftId(event.target.value)} style={inputStyle}><option value="">프로젝트 선택</option>{selectableProjects.map((project) => <option key={project.id} value={String(project.id)}>{project.name} · {project.category} · {project.status === "completed" ? "완료" : (project.status === "on_hold" ? "보류" : "진행")}</option>)}</select></label>
+            <div style={{ display: "flex", gap: 6 }}><button type="button" onClick={saveProjectLink} style={{ ...buttonStyle, background: "#0f172a", color: "#fff" }}>연결</button><button type="button" onClick={() => setLinkingProject(false)} style={buttonStyle}>취소</button></div>
+            {selectableProjects.length === 0 && <div style={{ gridColumn: "1 / -1", color: "#64748b", fontSize: 11 }}>연결 가능한 기존 프로젝트가 없습니다.</div>}
+          </div>}
+        </section>
       </div>}</main>
     </div>
 

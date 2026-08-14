@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import SegmentedDateInput from "@/components/SegmentedDateInput";
+import IngredientAmountTitle, { formatIngredientAmountLabel } from "@/components/IngredientAmountTitle";
 import {
   applyMarketAnalysisDefaults,
   calculateBatchFinance,
@@ -69,10 +70,7 @@ const secondaryButtonStyle = {
 };
 
 function getItemLabel(item) {
-  const ingredients = (item?.ingredients || [])
-    .map((ingredient) => [ingredient?.name, ingredient?.content].filter(Boolean).join(" / "))
-    .filter(Boolean);
-  return ingredients.join(", ") || "성분 미입력";
+  return formatIngredientAmountLabel(item, "성분 미입력");
 }
 
 function isDistributionConfigured(item) {
@@ -533,9 +531,7 @@ export default function MarketSizeAnalysisTab({
                   }}
                 >
                   <div style={{ width: "100%", minWidth: 0, display: "flex", justifyContent: "space-between", gap: 8, overflow: "hidden" }}>
-                    <strong title={fullLabel} aria-label={fullLabel} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 14 }}>
-                      {fullLabel}
-                    </strong>
+                    <IngredientAmountTitle label={fullLabel} maxFontSize={14} minFontSize={12} />
                     <span style={{ flex: "0 0 auto", color: "#64748b", fontSize: 11 }}>
                       {categoryLabelById[item.category] || item.category}
                     </span>
@@ -581,7 +577,7 @@ export default function MarketSizeAnalysisTab({
               <section style={panelStyle}>
                 <div className="market-item-header">
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ color: "#0f172a", fontSize: 18, fontWeight: 900 }}>{getItemLabel(selectedItem)}</div>
+                    <IngredientAmountTitle item={selectedItem} fallback="성분 미입력" maxFontSize={18} minFontSize={12} />
                     <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>
                       {selectedItem.manufacturer || "제조사 미입력"} · {categoryLabelById[selectedItem.category] || selectedItem.category}
                       {" · "}포장단위 {selectedItem.packagingUnit || "미입력"}

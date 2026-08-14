@@ -119,7 +119,7 @@ const DASHBOARD_REGULATORY_DIRECTION_CHECK_SEED_KEY = "pharmadev_dashboard_chang
 const DASHBOARD_SUPPLY_COST_BREAKDOWN_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260803_40";
 const DASHBOARD_PROJECT_PROMOTION_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260805_41";
 const DASHBOARD_REVIEW_PROMOTION_WORKFLOW_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260813_42";
-const DASHBOARD_DEVELOPMENT_OVERVIEW_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260814_43";
+const DASHBOARD_DEVELOPMENT_OVERVIEW_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260814_45";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -4788,6 +4788,7 @@ export default function PmsApp() {
   const [userRole, setUserRole] = useState(ROLE_GUEST);
   const [moduleTab, setModuleTab] = useState("development");
   const [supplyCategory, setSupplyCategory] = useState("all");
+  const [developmentStageFilter, setDevelopmentStageFilter] = useState("all");
   const [selectedDistributionItemId, setSelectedDistributionItemId] = useState(null);
   const [selectedMarketItemId, setSelectedMarketItemId] = useState(null);
   const [selectedPromotionItemId, setSelectedPromotionItemId] = useState(null);
@@ -6110,7 +6111,10 @@ export default function PmsApp() {
         changeDateTime: toDashboardDateTimeInput(),
         changes: [
           "기존 제품개발 프로젝트 화면을 제품일정관리 및 간트차트로 분리해 프로젝트 추진 오른편으로 이동했습니다.",
-          "공급 성분·함량 조합별 공급단가·유통 구조·시장 분석·프로젝트 추진·제품 일정의 완료 상태와 전체 진척도를 확인하는 제품개발 현황판을 추가했습니다."
+          "공급 성분·함량 조합별 공급단가·유통 구조·시장 분석·프로젝트 추진·제품 일정의 완료 상태와 전체 진척도를 확인하는 제품개발 현황판을 추가했습니다.",
+          "프로젝트 추진 품목을 이미 온보딩된 제품개발 프로젝트와 연결·변경·해제할 수 있도록 개선했습니다.",
+          "제품개발 현황을 진행 중 고진척순으로 정렬하고 좌측에서 현재 진행 단계별로 모아볼 수 있는 필터를 추가했습니다.",
+          "각 시트의 복합 성분명을 성분·함량 단위로 한 줄 정렬하고 길이에 따라 글자 크기와 말줄임 표시가 자동 조정되도록 통일했습니다."
         ],
         actor: "시스템",
         createdAt: new Date().toISOString()
@@ -6430,6 +6434,34 @@ export default function PmsApp() {
     ))));
   };
 
+  const linkProjectToSupplyItem = (itemId, projectId) => {
+    const normalizedProjectId = projectId === null || projectId === undefined ? "" : String(projectId);
+    const now = new Date().toISOString();
+    setSupplyPriceItems((previousItems) => normalizeSupplyPriceItems(previousItems.map((item) => {
+      const promotion = normalizeProjectPromotion(item.projectPromotion);
+      const isTargetItem = String(item.id) === String(itemId);
+      const usesTargetProject = normalizedProjectId && String(promotion.linkedProjectId) === normalizedProjectId;
+      if (!isTargetItem && !usesTargetProject) return item;
+      return {
+        ...item,
+        projectPromotion: {
+          ...promotion,
+          linkedProjectId: isTargetItem ? normalizedProjectId : ""
+        },
+        updatedAt: now
+      };
+    })));
+    setProjects((previousProjects) => normalizeProjects(previousProjects.map((project) => {
+      const isTargetProject = normalizedProjectId && String(project.id) === normalizedProjectId;
+      const wasLinkedToItem = String(project.sourceSupplyItemId || "") === String(itemId);
+      if (!isTargetProject && !wasLinkedToItem) return project;
+      return {
+        ...project,
+        sourceSupplyItemId: isTargetProject ? itemId : ""
+      };
+    })));
+  };
+
   const openDistributionStructure = (itemId) => {
     const target = normalizedSupplyPriceItems.find((item) => String(item.id) === String(itemId));
     if (target) setSupplyCategory(target.category);
@@ -6533,10 +6565,10 @@ export default function PmsApp() {
                 ? homeModuleTabButtonStyle(moduleTab === id)
                 : {
                     ...moduleTabButtonStyle(moduleTab === id),
-                    ...(id === "schedule" ? { minWidth: 250, whiteSpace: "nowrap" } : {})
+                    ...(id === "schedule" ? { minWidth: 178, lineHeight: 1.15, whiteSpace: "normal" } : {})
                   }}
             >
-              {label}
+              {id === "schedule" ? <>제품일정관리<br />및 간트차트</> : label}
             </button>
           ))}
         </div>
@@ -6559,6 +6591,8 @@ export default function PmsApp() {
         supplyCategory={supplyCategory}
         setSupplyCategory={setSupplyCategory}
         supplyCategoryCounts={supplyCategoryCounts}
+        developmentStageFilter={developmentStageFilter}
+        setDevelopmentStageFilter={setDevelopmentStageFilter}
         contractRecords={contractRecords}
         contractParentScope={contractParentScope}
         setContractParentScope={setContractParentScope}
@@ -6601,6 +6635,8 @@ export default function PmsApp() {
             items={normalizedSupplyPriceItems}
             projects={projects}
             syncState={syncState}
+            stageFilter={developmentStageFilter}
+            onStageFilterChange={setDevelopmentStageFilter}
             onOpenSupply={openSupplyPriceItem}
             onOpenDistribution={openDistributionStructure}
             onOpenMarket={openMarketSizeAnalysis}
@@ -6654,6 +6690,7 @@ export default function PmsApp() {
             onSelectedItemChange={setSelectedPromotionItemId}
             marketAnalysisDefaults={marketAnalysisDefaults}
             onUpdateItem={updateSupplyPriceItem}
+            onLinkProject={linkProjectToSupplyItem}
             onOpenSupply={openSupplyPriceItem}
             onOpenDistribution={openDistributionStructure}
             onOpenMarket={openMarketSizeAnalysis}

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import SegmentedDateInput from "@/components/SegmentedDateInput";
+import { formatIngredientAmountLabel } from "@/components/IngredientAmountTitle";
 import {
   CHILD_CONTRACT_TYPES,
   CONTRACT_STATUSES,
@@ -80,12 +81,9 @@ function contractDisplayTitle(record) {
 }
 
 function supplyItemLabel(item = {}) {
-  const ingredients = (Array.isArray(item.ingredients) ? item.ingredients : [])
-    .map((ingredient) => [ingredient?.name, ingredient?.content].filter(Boolean).join(" / "))
-    .filter(Boolean)
-    .join(", ");
+  const ingredients = formatIngredientAmountLabel(item, "성분 미입력");
   const packageLabel = [item.packagingUnit, item.packagingForm].filter(Boolean).join(" · ");
-  return [ingredients || "성분 미입력", item.manufacturer, packageLabel].filter(Boolean).join(" | ");
+  return [ingredients, item.manufacturer, packageLabel].filter(Boolean).join(" | ");
 }
 
 function toTimestamp(value) {
