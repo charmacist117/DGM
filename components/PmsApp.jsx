@@ -2163,6 +2163,7 @@ function SupplyPriceTab({
   isAdmin = false
 }) {
   const [search, setSearch] = useState("");
+  const [manufacturerSearch, setManufacturerSearch] = useState("");
   const [permitCompanyFilter, setPermitCompanyFilter] = useState("all");
   const [ingredientComparisonMode, setIngredientComparisonMode] = useState(false);
   const [ingredientComparisonSearch, setIngredientComparisonSearch] = useState("");
@@ -2185,17 +2186,30 @@ function SupplyPriceTab({
     if (currentCategory === "all") return safeItems;
     return safeItems.filter((item) => item.category === currentCategory);
   }, [currentCategory, safeItems]);
+  const manufacturerQuery = useMemo(
+    () => manufacturerSearch.trim().toLowerCase(),
+    [manufacturerSearch]
+  );
+  const manufacturerFilteredItems = useMemo(
+    () => categoryFilteredItems.filter((item) => (
+      editingIds.has(String(item.id))
+      || isSupplyPriceItemEmpty(item)
+      || !manufacturerQuery
+      || String(item.manufacturer || "").toLowerCase().includes(manufacturerQuery)
+    )),
+    [categoryFilteredItems, editingIds, manufacturerQuery]
+  );
   const permitCompanyOptions = useMemo(
-    () => permitCompanyFilterOptions(categoryFilteredItems),
-    [categoryFilteredItems]
+    () => permitCompanyFilterOptions(manufacturerFilteredItems),
+    [manufacturerFilteredItems]
   );
   const permitCompanyFilteredItems = useMemo(
-    () => categoryFilteredItems.filter((item) => (
+    () => manufacturerFilteredItems.filter((item) => (
       editingIds.has(String(item.id))
       || isSupplyPriceItemEmpty(item)
       || matchesPermitCompanyFilter(item, permitCompanyFilter)
     )),
-    [categoryFilteredItems, editingIds, permitCompanyFilter]
+    [editingIds, manufacturerFilteredItems, permitCompanyFilter]
   );
   const currentCategoryLabel = currentCategory === "all"
     ? "전체"
@@ -2268,6 +2282,7 @@ function SupplyPriceTab({
     if (!focusedItemId) return;
     setIngredientComparisonMode(false);
     setSearch("");
+    setManufacturerSearch("");
     setQuickQuoteDateFilter("all");
     setFromMonth("");
     setToMonth("");
@@ -2652,7 +2667,7 @@ function SupplyPriceTab({
           <div>
             <div style={{ fontSize: 23, fontWeight: 900 }}>공급단가</div>
             <div style={{ fontSize: 15, color: "#64748b", marginTop: 2 }}>
-              {currentCategoryLabel} 공급단가를 건별로 추가하고 성분명으로 검색합니다.
+              {currentCategoryLabel} 공급단가를 건별로 추가하고 성분명 또는 제조사로 검색합니다.
             </div>
           </div>
           <div style={{ display: "grid", justifyItems: "end", gap: 7 }}>
@@ -2662,13 +2677,20 @@ function SupplyPriceTab({
             </button>
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 360px) minmax(360px, 460px) auto auto 1fr", gap: 8, alignItems: "end" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 360px) minmax(360px, 460px) auto auto", gap: 8, alignItems: "end" }}>
           <div style={{ display: "grid", gap: 6 }}>
             <input
               value={ingredientComparisonMode ? ingredientComparisonSearch : search}
               onChange={(event) => ingredientComparisonMode ? setIngredientComparisonSearch(event.target.value) : setSearch(event.target.value)}
               placeholder={ingredientComparisonMode ? "비교할 특정 원료명 검색" : "성분명 검색"}
               aria-label={ingredientComparisonMode ? "특정 원료로 검색" : "성분명 검색"}
+              style={{ ...inputStyle, fontSize: 15 }}
+            />
+            <input
+              value={manufacturerSearch}
+              onChange={(event) => setManufacturerSearch(event.target.value)}
+              placeholder="제조사 검색"
+              aria-label="제조사 검색"
               style={{ ...inputStyle, fontSize: 15 }}
             />
             <select
@@ -2743,7 +2765,7 @@ function SupplyPriceTab({
           >
             {ingredientComparisonMode ? "원료 비교 닫기" : "특정 원료로 검색"}
           </button>
-          <div style={{ fontSize: 15, color: "#64748b", textAlign: "right" }}>
+          <div style={{ gridColumn: "1 / -1", fontSize: 15, color: "#64748b", textAlign: "right", whiteSpace: "nowrap" }}>
             {ingredientComparisonMode
               ? `비교 결과 ${ingredientComparisonRows.length}건`
               : `전체 ${safeItems.length}건 · 현재 ${categoryFilteredItems.length}건${monthRangeActive ? ` · 기간 ${monthFilteredItems.length}건` : ""} · 표시 ${filteredItems.length}건`}
