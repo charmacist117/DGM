@@ -125,7 +125,7 @@ const DASHBOARD_SUPPLY_COST_BREAKDOWN_SEED_KEY = "pharmadev_dashboard_changelog_
 const DASHBOARD_PROJECT_PROMOTION_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260805_41";
 const DASHBOARD_REVIEW_PROMOTION_WORKFLOW_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260813_42";
 const DASHBOARD_DEVELOPMENT_OVERVIEW_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260814_45";
-const DASHBOARD_PERMIT_COMPANY_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260818_47";
+const DASHBOARD_PERMIT_COMPANY_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260818_49";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -958,6 +958,7 @@ function normalizeDistributionStructure(value = {}) {
     competitors: (Array.isArray(source.competitors) ? source.competitors : [])
       .filter((competitor) => competitor && typeof competitor === "object")
       .map((competitor, index) => normalizeDistributionCompetitor(competitor, `competitor_${index + 1}`)),
+    comparisonCategory: String(source.comparisonCategory || "").trim(),
     isConfigured: typeof source.isConfigured === "boolean"
       ? source.isConfigured
       : Boolean(source.updatedAt),
@@ -3325,7 +3326,7 @@ function SupplyPriceTab({
                     <tr style={{ ...supplyDetailHeaderRowStyle, height: 38 }}>
                       {[
                         ...(supportsPermitCompanyFee ? ["허가사 수수료"] : []),
-                        "견적일자", "사용기한", "비고", "견적 채택 / 검토결과"
+                        "견적일자", "사용기한", "비고", "검토결과"
                       ].map((header) => (
                         <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#3730a3", borderBottom: "1px solid #c7d2fe", whiteSpace: "nowrap" }}>
                           {header}
@@ -3419,30 +3420,6 @@ function SupplyPriceTab({
                       </td>
                       <td style={{ padding: 8, width: 190 }}>
                         <div style={{ display: "grid", gap: 7, justifyItems: "start" }}>
-                          {isEditing ? (
-                            <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 14, color: item.quoteAdoptionExpected ? "#047857" : "#b45309", fontWeight: 800, cursor: "pointer" }}>
-                              <input
-                                type="checkbox"
-                                checked={Boolean(item.quoteAdoptionExpected)}
-                                onChange={(event) => updateItem(item.id, { quoteAdoptionExpected: event.target.checked })}
-                              />
-                              {item.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
-                            </label>
-                          ) : (
-                            <span style={{
-                              display: "inline-flex",
-                              padding: "4px 8px",
-                              borderRadius: 5,
-                              border: `1px solid ${item.quoteAdoptionExpected ? "#a7f3d0" : "#fde68a"}`,
-                              background: item.quoteAdoptionExpected ? "#ecfdf5" : "#fffbeb",
-                              color: item.quoteAdoptionExpected ? "#047857" : "#b45309",
-                              fontSize: 12,
-                              fontWeight: 900,
-                              whiteSpace: "nowrap"
-                            }}>
-                              {item.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
-                            </span>
-                          )}
                           <span style={{
                             ...marketDecisionBadgeStyle(item.marketDecisionStatus),
                             minWidth: 66
@@ -6174,7 +6151,10 @@ export default function PmsApp() {
         changeDateTime: toDashboardDateTimeInput(),
         changes: [
           "공급단가·유통 구조 설정·시장 규모 분석·프로젝트 추진 시트에 허가사별 조회 및 허가사 미입력 필터를 추가했습니다.",
-          "유통 구조 설정의 상세 표 최소 너비와 반응형 분기점을 조정해 일반 화면에서 공급 요약과 판매가 설정이 잘리지 않도록 개선했습니다."
+          "유통 구조 설정의 상세 표 최소 너비와 반응형 분기점을 조정해 일반 화면에서 공급 요약과 판매가 설정이 잘리지 않도록 개선했습니다.",
+          "유통 구조 설정에 비교 카테고리를 추가해 여러 제조사의 중복 품목 견적과 예상 판매가를 한 표에서 비교할 수 있도록 했습니다.",
+          "같은 비교 카테고리는 경쟁제품 목록을 공동 사용하도록 변경해 경쟁제품을 견적별로 반복 입력하지 않아도 됩니다.",
+          "견적 채택 예상·재고 변경 기능을 공급단가 입력 영역에서 유통 구조 설정 화면으로 이동했습니다."
         ],
         actor: "시스템",
         createdAt: new Date().toISOString()

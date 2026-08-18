@@ -121,12 +121,35 @@ function getDistribution(item) {
   return {
     pricingScenarios,
     competitors: Array.isArray(source.competitors) ? source.competitors : [],
+    comparisonCategory: String(source.comparisonCategory || "").trim(),
     isConfigured: typeof source.isConfigured === "boolean"
       ? source.isConfigured
       : Boolean(source.updatedAt),
     configuredAt: String(source.configuredAt || ""),
     updatedAt: String(source.updatedAt || "")
   };
+}
+
+function normalizeComparisonCategory(value) {
+  return String(value || "").trim();
+}
+
+function competitorIdentity(competitor = {}) {
+  const signature = [competitor.productName, competitor.salesChannel, competitor.packagingUnit]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .join("|");
+  return signature === "||" ? String(competitor.id || "") : signature;
+}
+
+function mergeCompetitors(items = []) {
+  const merged = new Map();
+  items.forEach((item) => {
+    getDistribution(item).competitors.forEach((competitor) => {
+      const key = competitorIdentity(competitor);
+      if (key && !merged.has(key)) merged.set(key, competitor);
+    });
+  });
+  return Array.from(merged.values());
 }
 
 function getBaseAmounts(item) {
@@ -197,6 +220,7 @@ export default function DistributionStructureTab({
   const [structureStatusFilter, setStructureStatusFilter] = useState("all");
   const [editingItemId, setEditingItemId] = useState(null);
   const [activePricingScenarioId, setActivePricingScenarioId] = useState(null);
+  const [comparisonCategoryDraft, setComparisonCategoryDraft] = useState("");
   const query = search.trim().toLowerCase();
   const categoryItems = useMemo(() => (
     selectedCategory === "all" ? items : items.filter((item) => item.category === selectedCategory)
@@ -244,6 +268,20 @@ export default function DistributionStructureTab({
   const selectedItem = visibleItems.find((item) => String(item.id) === String(selectedItemId)) || visibleItems[0] || null;
   const isEditing = selectedItem && String(editingItemId) === String(selectedItem.id);
   const distribution = getDistribution(selectedItem);
+  const comparisonCategoryOptions = useMemo(() => Array.from(new Set(
+    items.map((item) => getDistribution(item).comparisonCategory).filter(Boolean)
+  )).sort((left, right) => left.localeCompare(right, "ko")), [items]);
+  const comparisonGroupItems = useMemo(() => {
+    if (!selectedItem) return [];
+    if (!distribution.comparisonCategory) return [selectedItem];
+    return items.filter((item) => (
+      getDistribution(item).comparisonCategory === distribution.comparisonCategory
+    ));
+  }, [distribution.comparisonCategory, items, selectedItem]);
+  const sharedCompetitors = useMemo(() => mergeCompetitors([
+    selectedItem,
+    ...comparisonGroupItems.filter((item) => String(item.id) !== String(selectedItem?.id))
+  ].filter(Boolean)), [comparisonGroupItems, selectedItem]);
   const activePricingScenario = distribution.pricingScenarios.find((scenario) => (
     String(scenario.id) === String(activePricingScenarioId)
   )) || distribution.pricingScenarios[0];
@@ -275,6 +313,10 @@ export default function DistributionStructureTab({
     : null;
   const categoryLabelById = Object.fromEntries(categories.map((category) => [category.id, category.label]));
 
+  useEffect(() => {
+    setComparisonCategoryDraft(distribution.comparisonCategory);
+  }, [distribution.comparisonCategory, selectedItem?.id]);
+
   const updateDistribution = (patch) => {
     if (!selectedItem) return;
     onUpdateItem?.(selectedItem.id, {
@@ -282,6 +324,48 @@ export default function DistributionStructureTab({
         ...distribution,
         ...patch,
         updatedAt: new Date().toISOString()
+      }
+    });
+  };
+
+  const updateSharedCompetitors = (competitors) => {
+    const targetItems = distribution.comparisonCategory ? comparisonGroupItems : [selectedItem];
+    const updatedAt = new Date().toISOString();
+    targetItems.filter(Boolean).forEach((item) => {
+      onUpdateItem?.(item.id, {
+        distributionStructure: {
+          ...getDistribution(item),
+          competitors,
+          updatedAt
+        }
+      });
+    });
+  };
+
+  const applyComparisonCategory = () => {
+    if (!selectedItem) return;
+    const nextCategory = normalizeComparisonCategory(comparisonCategoryDraft);
+    const nextGroupItems = nextCategory
+      ? items.filter((item) => getDistribution(item).comparisonCategory === nextCategory)
+      : [];
+    const competitors = mergeCompetitors([selectedItem, ...nextGroupItems]);
+    const updatedAt = new Date().toISOString();
+
+    nextGroupItems.forEach((item) => {
+      onUpdateItem?.(item.id, {
+        distributionStructure: {
+          ...getDistribution(item),
+          competitors,
+          updatedAt
+        }
+      });
+    });
+    onUpdateItem?.(selectedItem.id, {
+      distributionStructure: {
+        ...distribution,
+        comparisonCategory: nextCategory,
+        competitors,
+        updatedAt
       }
     });
   };
@@ -333,15 +417,15 @@ export default function DistributionStructureTab({
   };
 
   const updateCompetitor = (competitorId, patch) => {
-    updateDistribution({
-      competitors: distribution.competitors.map((competitor) => (
+    updateSharedCompetitors(
+      sharedCompetitors.map((competitor) => (
         String(competitor.id) === String(competitorId) ? { ...competitor, ...patch } : competitor
       ))
-    });
+    );
   };
 
   const updateCompetitorPriceTier = (competitorId, tierId, patch) => {
-    const competitor = distribution.competitors.find((entry) => String(entry.id) === String(competitorId));
+    const competitor = sharedCompetitors.find((entry) => String(entry.id) === String(competitorId));
     if (!competitor) return;
     const priceTiers = getCompetitorPriceTiers(competitor).map((tier) => (
       String(tier.id) === String(tierId) ? { ...tier, ...patch } : tier
@@ -353,7 +437,7 @@ export default function DistributionStructureTab({
   };
 
   const addCompetitorPriceTier = (competitorId) => {
-    const competitor = distribution.competitors.find((entry) => String(entry.id) === String(competitorId));
+    const competitor = sharedCompetitors.find((entry) => String(entry.id) === String(competitorId));
     if (!competitor) return;
     const priceTiers = getCompetitorPriceTiers(competitor);
     updateCompetitor(competitorId, {
@@ -363,7 +447,7 @@ export default function DistributionStructureTab({
   };
 
   const removeCompetitorPriceTier = (competitorId, tierId) => {
-    const competitor = distribution.competitors.find((entry) => String(entry.id) === String(competitorId));
+    const competitor = sharedCompetitors.find((entry) => String(entry.id) === String(competitorId));
     if (!competitor) return;
     const priceTiers = getCompetitorPriceTiers(competitor).filter((tier) => String(tier.id) !== String(tierId));
     updateCompetitor(competitorId, {
@@ -557,17 +641,27 @@ export default function DistributionStructureTab({
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7, flex: "0 0 auto", flexWrap: "wrap" }}>
-                    <span style={{
+                    <label style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
                       padding: "4px 8px",
                       borderRadius: 5,
                       border: `1px solid ${selectedItem.quoteAdoptionExpected ? "#a7f3d0" : "#fde68a"}`,
                       background: selectedItem.quoteAdoptionExpected ? "#ecfdf5" : "#fffbeb",
                       color: selectedItem.quoteAdoptionExpected ? "#047857" : "#b45309",
                       fontSize: 12,
-                      fontWeight: 900
+                      fontWeight: 900,
+                      cursor: "pointer"
                     }}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(selectedItem.quoteAdoptionExpected)}
+                        onChange={(event) => onUpdateItem?.(selectedItem.id, { quoteAdoptionExpected: event.target.checked })}
+                        aria-label="견적 채택 예상"
+                      />
                       {selectedItem.quoteAdoptionExpected ? "채택 예상" : "채택 재고"}
-                    </span>
+                    </label>
                     <span style={marketDecisionBadgeStyle(selectedItem.marketDecisionStatus)}>
                       검토결과 · {marketDecisionLabel(selectedItem.marketDecisionStatus)}
                     </span>
@@ -800,16 +894,35 @@ export default function DistributionStructureTab({
               </section>
 
               <section className="competitor-panel" style={panelStyle}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 15px", borderBottom: "1px solid #cbd5e1" }}>
+                <div className="competitor-panel-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 15px", borderBottom: "1px solid #cbd5e1" }}>
                   <div>
-                    <div style={{ color: "#0f172a", fontSize: 16, fontWeight: 900 }}>경쟁제품 비교</div>
-                    <div style={{ marginTop: 2, color: "#64748b", fontSize: 12 }}>동일 시장 제품의 판매 조건을 간단히 기록합니다.</div>
+                    <div style={{ color: "#0f172a", fontSize: 16, fontWeight: 900 }}>견적·경쟁제품 비교</div>
+                    <div style={{ marginTop: 2, color: "#64748b", fontSize: 12 }}>같은 비교 카테고리의 제조사 견적과 시장 판매 조건을 함께 확인합니다.</div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <label style={{ display: "grid", gap: 3, minWidth: 210 }}>
+                      <span style={{ color: "#64748b", fontSize: 11, fontWeight: 800 }}>비교 카테고리</span>
+                      <input
+                        list="distribution-comparison-categories"
+                        value={comparisonCategoryDraft}
+                        onChange={(event) => setComparisonCategoryDraft(event.target.value)}
+                        placeholder="예: 지사제"
+                        style={{ ...inputStyle, minHeight: 34, padding: "6px 8px", fontSize: 12 }}
+                      />
+                      <datalist id="distribution-comparison-categories">
+                        {comparisonCategoryOptions.map((category) => <option key={category} value={category} />)}
+                      </datalist>
+                    </label>
+                    <button type="button" onClick={applyComparisonCategory} style={secondaryButtonStyle}>적용</button>
+                    {distribution.comparisonCategory && (
+                      <span style={{ padding: "5px 8px", border: "1px solid #bfdbfe", borderRadius: 6, background: "#eff6ff", color: "#1d4ed8", fontSize: 11, fontWeight: 900 }}>
+                        공동 견적 {comparisonGroupItems.length}건
+                      </span>
+                    )}
                     {isEditing && (
                       <button
                         type="button"
-                        onClick={() => updateDistribution({ competitors: [...distribution.competitors, createCompetitor()] })}
+                        onClick={() => updateSharedCompetitors([...sharedCompetitors, createCompetitor()])}
                         style={secondaryButtonStyle}
                       >
                         + 경쟁제품 추가
@@ -825,6 +938,43 @@ export default function DistributionStructureTab({
                       {isEditing ? "완료" : "수정"}
                     </button>
                   </div>
+                </div>
+                <div style={{ borderBottom: "1px solid #cbd5e1", overflowX: "auto" }}>
+                  <div style={{ padding: "9px 12px", background: "#f8fafc", color: "#334155", fontSize: 12, fontWeight: 900 }}>
+                    제조사 견적 비교 {distribution.comparisonCategory ? `· ${distribution.comparisonCategory}` : "· 미분류"}
+                  </div>
+                  <table style={{ width: "100%", minWidth: 900, borderCollapse: "collapse", tableLayout: "fixed" }}>
+                    <thead>
+                      <tr style={{ background: "#eef6ff" }}>
+                        {["제조사", "허가사", "포장단위", "배치 당 포장단위 개수", "포장단위 당 공급단가", "VAT 포함 단가", "최종 유통 원가", "참약사 예상 판매가"].map((header) => (
+                          <th key={header} style={{ padding: "8px 9px", borderBottom: "1px solid #dbe3ee", color: "#475569", fontSize: 11, textAlign: "left" }}>{header}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {comparisonGroupItems.map((item) => {
+                        const itemDistribution = getDistribution(item);
+                        const scenario = itemDistribution.pricingScenarios[0];
+                        const amounts = getBaseAmounts(item);
+                        const expectedSellingPrice = calculateSellingPriceFromMarginRate(
+                          amounts.finalUnitCost,
+                          parseNumber(scenario?.chamyaksaMarginRate)
+                        );
+                        return (
+                          <tr key={item.id} style={{ background: String(item.id) === String(selectedItem.id) ? "#f0f9ff" : "#fff" }}>
+                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12, fontWeight: 800 }}>{item.manufacturer || "-"}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12 }}>{item.permitCompany || "-"}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12 }}>{item.packagingUnit || "-"}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12 }}>{item.quantity || "-"}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12, fontWeight: 800 }}>{formatWon(amounts.unitPrice)}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12, fontWeight: 800 }}>{formatWon(amounts.vatUnitPrice)}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12, fontWeight: 800 }}>{formatWon(amounts.finalUnitCost)}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", color: "#047857", fontSize: 12, fontWeight: 900 }}>{formatWon(expectedSellingPrice)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
                 <div>
                   <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
@@ -847,7 +997,7 @@ export default function DistributionStructureTab({
                       </tr>
                     </thead>
                     <tbody>
-                      {distribution.competitors.map((competitor) => (
+                      {sharedCompetitors.map((competitor) => (
                         <tr key={competitor.id}>
                           <td style={{ padding: 7, borderBottom: "1px solid #edf2f7" }}>
                             {isEditing ? (
@@ -948,7 +1098,7 @@ export default function DistributionStructureTab({
                           {isEditing && <td style={{ padding: 7, borderBottom: "1px solid #edf2f7" }}>
                             <button
                               type="button"
-                              onClick={() => updateDistribution({ competitors: distribution.competitors.filter((entry) => String(entry.id) !== String(competitor.id)) })}
+                              onClick={() => updateSharedCompetitors(sharedCompetitors.filter((entry) => String(entry.id) !== String(competitor.id)))}
                               style={{ ...secondaryButtonStyle, color: "#dc2626", borderColor: "#fecaca" }}
                             >
                               삭제
@@ -956,7 +1106,7 @@ export default function DistributionStructureTab({
                           </td>}
                         </tr>
                       ))}
-                      {distribution.competitors.length === 0 && (
+                      {sharedCompetitors.length === 0 && (
                         <tr>
                             <td colSpan={isEditing ? 7 : 6} style={{ padding: 20, color: "#94a3b8", fontSize: 13, textAlign: "center" }}>
                             등록된 경쟁제품이 없습니다.
@@ -1051,6 +1201,10 @@ export default function DistributionStructureTab({
           }
         }
         @media (max-width: 760px) {
+          .competitor-panel-header {
+            align-items: stretch !important;
+            flex-direction: column;
+          }
           .base-grid,
           .margin-grid {
             grid-template-columns: 1fr;
