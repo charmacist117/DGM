@@ -125,7 +125,7 @@ const DASHBOARD_SUPPLY_COST_BREAKDOWN_SEED_KEY = "pharmadev_dashboard_changelog_
 const DASHBOARD_PROJECT_PROMOTION_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260805_41";
 const DASHBOARD_REVIEW_PROMOTION_WORKFLOW_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260813_42";
 const DASHBOARD_DEVELOPMENT_OVERVIEW_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260814_45";
-const DASHBOARD_PERMIT_COMPANY_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260818_52";
+const DASHBOARD_PERMIT_COMPANY_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260818_53";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -6157,7 +6157,8 @@ export default function PmsApp() {
           "견적 채택 예상·재고 변경 기능을 공급단가 입력 영역에서 유통 구조 설정 화면으로 이동했습니다.",
           "긴 성분·함량 제목이 공급 요약 카드 경계를 넘지 않도록 폭 제한과 말줄임 처리를 강화하고 우측 버튼 영역을 고정했습니다.",
           "견적 비교 카테고리의 적용을 해당 견적에서 즉시 해제할 수 있는 버튼을 추가했습니다.",
-          "비교 카테고리 제조사 견적 표에 참약사 예상 마진율을 추가했습니다."
+          "비교 카테고리 제조사 견적 표에 참약사 예상 마진율을 추가했습니다.",
+          "제조사 견적 비교표에서 제조사 또는 허가사를 누르면 해당 견적으로 이동해 바로 수정할 수 있도록 연결했습니다."
         ],
         actor: "시스템",
         createdAt: new Date().toISOString()

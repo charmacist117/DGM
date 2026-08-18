@@ -383,6 +383,13 @@ export default function DistributionStructureTab({
     setComparisonCategoryDraft("");
   };
 
+  const openComparisonItem = (itemId) => {
+    onSelectedItemChange?.(itemId);
+    window.requestAnimationFrame(() => {
+      document.querySelector(".decision-grid")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
   const updatePricingScenario = (patch) => {
     if (!activePricingScenario) return;
     updateDistribution({
@@ -984,8 +991,26 @@ export default function DistributionStructureTab({
                         );
                         return (
                           <tr key={item.id} style={{ background: String(item.id) === String(selectedItem.id) ? "#f0f9ff" : "#fff" }}>
-                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12, fontWeight: 800 }}>{item.manufacturer || "-"}</td>
-                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12 }}>{item.permitCompany || "-"}</td>
+                            <td style={{ padding: 6, borderBottom: "1px solid #edf2f7", fontSize: 12, fontWeight: 800 }}>
+                              <button
+                                type="button"
+                                onClick={() => openComparisonItem(item.id)}
+                                title={`${item.manufacturer || "제조사 미입력"} 견적 열기`}
+                                style={{ padding: "3px 4px", border: 0, background: "transparent", color: "#1d4ed8", cursor: "pointer", font: "inherit", fontWeight: 900, textDecoration: "underline", textUnderlineOffset: 3 }}
+                              >
+                                {item.manufacturer || "-"}
+                              </button>
+                            </td>
+                            <td style={{ padding: 6, borderBottom: "1px solid #edf2f7", fontSize: 12 }}>
+                              <button
+                                type="button"
+                                onClick={() => openComparisonItem(item.id)}
+                                title={`${item.permitCompany || "허가사 미입력"} 견적 열기`}
+                                style={{ padding: "3px 4px", border: 0, background: "transparent", color: "#1d4ed8", cursor: "pointer", font: "inherit", fontWeight: 800, textDecoration: "underline", textUnderlineOffset: 3 }}
+                              >
+                                {item.permitCompany || "-"}
+                              </button>
+                            </td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12 }}>{item.packagingUnit || "-"}</td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12 }}>{item.quantity || "-"}</td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12, fontWeight: 800 }}>{formatWon(amounts.unitPrice)}</td>
