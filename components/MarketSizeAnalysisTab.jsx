@@ -17,6 +17,11 @@ import {
   marketDecisionLabel,
   normalizeMarketDecisionStatus
 } from "@/lib/pms/marketDecision";
+import {
+  MISSING_PERMIT_COMPANY_FILTER,
+  matchesPermitCompanyFilter,
+  permitCompanyFilterOptions
+} from "@/lib/pms/permitCompanyFilter";
 
 const panelStyle = {
   background: "#fff",
@@ -237,6 +242,7 @@ export default function MarketSizeAnalysisTab({
   syncState
 }) {
   const [search, setSearch] = useState("");
+  const [permitCompanyFilter, setPermitCompanyFilter] = useState("all");
   const [decisionFilter, setDecisionFilter] = useState("all");
   const [showConfiguredDistributionOnly, setShowConfiguredDistributionOnly] = useState(false);
   const [editingItemId, setEditingItemId] = useState(null);
@@ -250,13 +256,22 @@ export default function MarketSizeAnalysisTab({
   const [defaultsDraft, setDefaultsDraft] = useState(() => normalizeMarketAnalysisDefaults(marketAnalysisDefaults));
   const query = search.trim().toLowerCase();
   const categoryLabelById = Object.fromEntries(categories.map((category) => [category.id, category.label]));
+  const categoryItems = useMemo(() => (
+    selectedCategory === "all" ? items : items.filter((item) => item.category === selectedCategory)
+  ), [items, selectedCategory]);
+  const permitCompanyOptions = useMemo(
+    () => permitCompanyFilterOptions(categoryItems),
+    [categoryItems]
+  );
+  useEffect(() => {
+    if (permitCompanyFilter === "all" || permitCompanyFilter === MISSING_PERMIT_COMPANY_FILTER) return;
+    if (!permitCompanyOptions.includes(permitCompanyFilter)) setPermitCompanyFilter("all");
+  }, [permitCompanyFilter, permitCompanyOptions]);
   const visibleItems = useMemo(() => {
-    const categoryItems = selectedCategory === "all"
-      ? items
-      : items.filter((item) => item.category === selectedCategory);
+    const permitCompanyItems = categoryItems.filter((item) => matchesPermitCompanyFilter(item, permitCompanyFilter));
     const distributionItems = showConfiguredDistributionOnly
-      ? categoryItems.filter(isDistributionConfigured)
-      : categoryItems;
+      ? permitCompanyItems.filter(isDistributionConfigured)
+      : permitCompanyItems;
     const decisionItems = decisionFilter === "all"
       ? distributionItems
       : distributionItems.filter((item) => normalizeMarketDecisionStatus(item.marketDecisionStatus) === decisionFilter);
@@ -266,7 +281,7 @@ export default function MarketSizeAnalysisTab({
       item.packagingUnit,
       ...(item.ingredients || []).flatMap((ingredient) => [ingredient.name, ingredient.content])
     ].join(" ").toLowerCase().includes(query));
-  }, [decisionFilter, items, query, selectedCategory, showConfiguredDistributionOnly]);
+  }, [categoryItems, decisionFilter, permitCompanyFilter, query, showConfiguredDistributionOnly]);
 
   const normalizedDefaults = useMemo(
     () => normalizeMarketAnalysisDefaults(marketAnalysisDefaults),
@@ -495,6 +510,11 @@ export default function MarketSizeAnalysisTab({
             <select value={decisionFilter} onChange={(event) => setDecisionFilter(event.target.value)} style={{ ...inputStyle, marginBottom: 8 }} aria-label="시장 검토결과 필터">
               <option value="all">검토결과 전체</option>
               {MARKET_DECISION_OPTIONS.map((option) => <option key={option.value || "undecided"} value={option.value}>{option.label}</option>)}
+            </select>
+            <select value={permitCompanyFilter} onChange={(event) => setPermitCompanyFilter(event.target.value)} style={{ ...inputStyle, marginBottom: 8 }} aria-label="허가사 필터">
+              <option value="all">전체 허가사</option>
+              {permitCompanyOptions.map((permitCompany) => <option key={permitCompany} value={permitCompany}>{permitCompany}</option>)}
+              <option value={MISSING_PERMIT_COMPANY_FILTER}>허가사 미입력</option>
             </select>
             <input
               id="market-search"

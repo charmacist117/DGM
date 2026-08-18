@@ -8,6 +8,11 @@ import {
   marketDecisionBadgeStyle,
   marketDecisionLabel
 } from "@/lib/pms/marketDecision";
+import {
+  MISSING_PERMIT_COMPANY_FILTER,
+  matchesPermitCompanyFilter,
+  permitCompanyFilterOptions
+} from "@/lib/pms/permitCompanyFilter";
 
 const panelStyle = {
   border: "1px solid #cbd5e1",
@@ -187,18 +192,28 @@ export default function DistributionStructureTab({
   syncState
 }) {
   const [search, setSearch] = useState("");
+  const [permitCompanyFilter, setPermitCompanyFilter] = useState("all");
   const [adoptionStatusFilter, setAdoptionStatusFilter] = useState("all");
   const [structureStatusFilter, setStructureStatusFilter] = useState("all");
   const [editingItemId, setEditingItemId] = useState(null);
   const [activePricingScenarioId, setActivePricingScenarioId] = useState(null);
   const query = search.trim().toLowerCase();
+  const categoryItems = useMemo(() => (
+    selectedCategory === "all" ? items : items.filter((item) => item.category === selectedCategory)
+  ), [items, selectedCategory]);
+  const permitCompanyOptions = useMemo(
+    () => permitCompanyFilterOptions(categoryItems),
+    [categoryItems]
+  );
+  useEffect(() => {
+    if (permitCompanyFilter === "all" || permitCompanyFilter === MISSING_PERMIT_COMPANY_FILTER) return;
+    if (!permitCompanyOptions.includes(permitCompanyFilter)) setPermitCompanyFilter("all");
+  }, [permitCompanyFilter, permitCompanyOptions]);
   const visibleItems = useMemo(() => {
-    const categoryItems = selectedCategory === "all"
-      ? items
-      : items.filter((item) => item.category === selectedCategory);
+    const permitCompanyItems = categoryItems.filter((item) => matchesPermitCompanyFilter(item, permitCompanyFilter));
     const adoptionItems = adoptionStatusFilter === "all"
-      ? categoryItems
-      : categoryItems.filter((item) => (
+      ? permitCompanyItems
+      : permitCompanyItems.filter((item) => (
           adoptionStatusFilter === "expected"
             ? Boolean(item.quoteAdoptionExpected)
             : !item.quoteAdoptionExpected
@@ -218,7 +233,7 @@ export default function DistributionStructureTab({
       ].join(" ").toLowerCase();
       return haystack.includes(query);
     });
-  }, [adoptionStatusFilter, items, query, selectedCategory, structureStatusFilter]);
+  }, [adoptionStatusFilter, categoryItems, permitCompanyFilter, query, structureStatusFilter]);
 
   useEffect(() => {
     if (visibleItems.length === 0) return;
@@ -445,6 +460,16 @@ export default function DistributionStructureTab({
                 </select>
               </label>
             </div>
+            <select
+              value={permitCompanyFilter}
+              onChange={(event) => setPermitCompanyFilter(event.target.value)}
+              aria-label="허가사 필터"
+              style={{ ...inputStyle, minHeight: 34, marginBottom: 7, fontSize: 12 }}
+            >
+              <option value="all">전체 허가사</option>
+              {permitCompanyOptions.map((permitCompany) => <option key={permitCompany} value={permitCompany}>{permitCompany}</option>)}
+              <option value={MISSING_PERMIT_COMPANY_FILTER}>허가사 미입력</option>
+            </select>
             <input
               id="distribution-search"
               value={search}

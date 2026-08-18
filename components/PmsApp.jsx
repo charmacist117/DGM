@@ -61,6 +61,11 @@ import {
 } from "@/lib/pms/supplyCostBreakdown";
 import { normalizeProjectPromotion, projectPromotionTotalExpectedCost } from "@/lib/pms/projectPromotion";
 import { createCompactPmsPayload } from "@/lib/pms/storageCompact";
+import {
+  MISSING_PERMIT_COMPANY_FILTER,
+  matchesPermitCompanyFilter,
+  permitCompanyFilterOptions
+} from "@/lib/pms/permitCompanyFilter";
 
 const tabLoading = () => <div style={{ padding: 24, color: "#64748b", fontSize: 13 }}>화면을 불러오는 중...</div>;
 const DistributionStructureTab = dynamic(() => import("@/components/DistributionStructureTab"), { loading: tabLoading });
@@ -120,6 +125,7 @@ const DASHBOARD_SUPPLY_COST_BREAKDOWN_SEED_KEY = "pharmadev_dashboard_changelog_
 const DASHBOARD_PROJECT_PROMOTION_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260805_41";
 const DASHBOARD_REVIEW_PROMOTION_WORKFLOW_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260813_42";
 const DASHBOARD_DEVELOPMENT_OVERVIEW_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260814_45";
+const DASHBOARD_PERMIT_COMPANY_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260818_46";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -2156,6 +2162,7 @@ function SupplyPriceTab({
   isAdmin = false
 }) {
   const [search, setSearch] = useState("");
+  const [permitCompanyFilter, setPermitCompanyFilter] = useState("all");
   const [ingredientComparisonMode, setIngredientComparisonMode] = useState(false);
   const [ingredientComparisonSearch, setIngredientComparisonSearch] = useState("");
   const [fromMonth, setFromMonth] = useState("");
@@ -2177,6 +2184,18 @@ function SupplyPriceTab({
     if (currentCategory === "all") return safeItems;
     return safeItems.filter((item) => item.category === currentCategory);
   }, [currentCategory, safeItems]);
+  const permitCompanyOptions = useMemo(
+    () => permitCompanyFilterOptions(categoryFilteredItems),
+    [categoryFilteredItems]
+  );
+  const permitCompanyFilteredItems = useMemo(
+    () => categoryFilteredItems.filter((item) => (
+      editingIds.has(String(item.id))
+      || isSupplyPriceItemEmpty(item)
+      || matchesPermitCompanyFilter(item, permitCompanyFilter)
+    )),
+    [categoryFilteredItems, editingIds, permitCompanyFilter]
+  );
   const currentCategoryLabel = currentCategory === "all"
     ? "전체"
     : (SUPPLY_PRICE_CATEGORY_LABEL_BY_ID[currentCategory] || currentCategory);
@@ -2187,8 +2206,8 @@ function SupplyPriceTab({
   }, [quickQuoteDateFilter]);
   const monthRangeActive = Boolean(quickQuoteDateRange || fromMonth || toMonth);
   const monthFilteredItems = useMemo(() => {
-    if (!monthRangeActive) return categoryFilteredItems;
-    return categoryFilteredItems.filter((item) => {
+    if (!monthRangeActive) return permitCompanyFilteredItems;
+    return permitCompanyFilteredItems.filter((item) => {
       if (editingIds.has(String(item.id)) || isSupplyPriceItemEmpty(item)) return true;
       if (quickQuoteDateRange) {
         const quoteDate = String(item.quoteDate || "").slice(0, 10);
@@ -2200,7 +2219,7 @@ function SupplyPriceTab({
       if (toMonth && quoteMonth > toMonth) return false;
       return true;
     });
-  }, [categoryFilteredItems, editingIds, fromMonth, monthRangeActive, quickQuoteDateRange, toMonth]);
+  }, [editingIds, fromMonth, monthRangeActive, permitCompanyFilteredItems, quickQuoteDateRange, toMonth]);
   const ingredientComparisonQuery = useMemo(
     () => ingredientComparisonSearch.trim().toLowerCase(),
     [ingredientComparisonSearch]
@@ -2257,6 +2276,11 @@ function SupplyPriceTab({
     if (currentCategory === "all" || supportsSupplyCostBreakdown(currentCategory)) return;
     setIngredientComparisonMode(false);
   }, [currentCategory]);
+
+  useEffect(() => {
+    if (permitCompanyFilter === "all" || permitCompanyFilter === MISSING_PERMIT_COMPANY_FILTER) return;
+    if (!permitCompanyOptions.includes(permitCompanyFilter)) setPermitCompanyFilter("all");
+  }, [permitCompanyFilter, permitCompanyOptions]);
 
   useEffect(() => {
     if (!focusedItemId) {
@@ -2638,13 +2662,25 @@ function SupplyPriceTab({
           </div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 360px) minmax(360px, 460px) auto auto 1fr", gap: 8, alignItems: "end" }}>
-          <input
-            value={ingredientComparisonMode ? ingredientComparisonSearch : search}
-            onChange={(event) => ingredientComparisonMode ? setIngredientComparisonSearch(event.target.value) : setSearch(event.target.value)}
-            placeholder={ingredientComparisonMode ? "비교할 특정 원료명 검색" : "성분명 검색"}
-            aria-label={ingredientComparisonMode ? "특정 원료로 검색" : "성분명 검색"}
-            style={{ ...inputStyle, fontSize: 15 }}
-          />
+          <div style={{ display: "grid", gap: 6 }}>
+            <input
+              value={ingredientComparisonMode ? ingredientComparisonSearch : search}
+              onChange={(event) => ingredientComparisonMode ? setIngredientComparisonSearch(event.target.value) : setSearch(event.target.value)}
+              placeholder={ingredientComparisonMode ? "비교할 특정 원료명 검색" : "성분명 검색"}
+              aria-label={ingredientComparisonMode ? "특정 원료로 검색" : "성분명 검색"}
+              style={{ ...inputStyle, fontSize: 15 }}
+            />
+            <select
+              value={permitCompanyFilter}
+              onChange={(event) => setPermitCompanyFilter(event.target.value)}
+              aria-label="허가사 필터"
+              style={{ ...inputStyle, fontSize: 14 }}
+            >
+              <option value="all">전체 허가사</option>
+              {permitCompanyOptions.map((permitCompany) => <option key={permitCompany} value={permitCompany}>{permitCompany}</option>)}
+              <option value={MISSING_PERMIT_COMPANY_FILTER}>허가사 미입력</option>
+            </select>
+          </div>
           <div style={{ display: "grid", gap: 6 }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 5 }}>
               {[
@@ -6115,6 +6151,29 @@ export default function PmsApp() {
           "프로젝트 추진 품목을 이미 온보딩된 제품개발 프로젝트와 연결·변경·해제할 수 있도록 개선했습니다.",
           "제품개발 현황을 진행 중 고진척순으로 정렬하고 좌측에서 현재 진행 단계별로 모아볼 수 있는 필터를 추가했습니다.",
           "각 시트의 복합 성분명을 성분·함량 단위로 한 줄 정렬하고 길이에 따라 글자 크기와 말줄임 표시가 자동 조정되도록 통일했습니다."
+        ],
+        actor: "시스템",
+        createdAt: new Date().toISOString()
+      }]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_PERMIT_COMPANY_FILTER_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_PERMIT_COMPANY_FILTER_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      const nextRevision = (previous || []).filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([...(previous || []), {
+        id: "dashboard_change_20260818_permit_company_filters",
+        type: DASHBOARD_CHANGE_NOTICE_TYPE,
+        projectName: "제품개발 대시보드",
+        revision: String(nextRevision),
+        changeDate: TODAY,
+        changeDateTime: toDashboardDateTimeInput(),
+        changes: [
+          "공급단가·유통 구조 설정·시장 규모 분석·프로젝트 추진 시트에 허가사별 조회 및 허가사 미입력 필터를 추가했습니다."
         ],
         actor: "시스템",
         createdAt: new Date().toISOString()
