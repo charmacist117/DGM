@@ -370,6 +370,19 @@ export default function DistributionStructureTab({
     });
   };
 
+  const clearComparisonCategory = () => {
+    if (!selectedItem || !distribution.comparisonCategory) return;
+    onUpdateItem?.(selectedItem.id, {
+      distributionStructure: {
+        ...distribution,
+        comparisonCategory: "",
+        competitors: sharedCompetitors,
+        updatedAt: new Date().toISOString()
+      }
+    });
+    setComparisonCategoryDraft("");
+  };
+
   const updatePricingScenario = (patch) => {
     if (!activePricingScenario) return;
     updateDistribution({
@@ -633,14 +646,14 @@ export default function DistributionStructureTab({
             <div style={{ display: "grid", gap: 14 }}>
               <div className="decision-grid">
               <section style={panelStyle}>
-                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, padding: "13px 15px", borderBottom: "1px solid #cbd5e1", background: "#e8f1fb" }}>
-                  <div style={{ minWidth: 0 }}>
+                <div className="supply-summary-header" style={{ padding: "13px 15px", borderBottom: "1px solid #cbd5e1", background: "#e8f1fb" }}>
+                  <div className="supply-summary-title" style={{ minWidth: 0, maxWidth: "100%", overflow: "hidden" }}>
                     <IngredientAmountTitle item={selectedItem} fallback={selectedItem.manufacturer || "성분 미입력"} maxFontSize={17} minFontSize={12} />
                     <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>
                       {selectedItem.manufacturer || "제조사 미입력"} · {categoryLabelById[selectedItem.category] || selectedItem.category}
                     </div>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7, flex: "0 0 auto", flexWrap: "wrap" }}>
+                  <div className="supply-summary-actions" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7, minWidth: 0, flexWrap: "wrap" }}>
                     <label style={{
                       display: "inline-flex",
                       alignItems: "center",
@@ -915,6 +928,15 @@ export default function DistributionStructureTab({
                     </label>
                     <button type="button" onClick={applyComparisonCategory} style={secondaryButtonStyle}>적용</button>
                     {distribution.comparisonCategory && (
+                      <button
+                        type="button"
+                        onClick={clearComparisonCategory}
+                        style={{ ...secondaryButtonStyle, color: "#dc2626", borderColor: "#fecaca", background: "#fff" }}
+                      >
+                        적용 해제
+                      </button>
+                    )}
+                    {distribution.comparisonCategory && (
                       <span style={{ padding: "5px 8px", border: "1px solid #bfdbfe", borderRadius: 6, background: "#eff6ff", color: "#1d4ed8", fontSize: 11, fontWeight: 900 }}>
                         공동 견적 {comparisonGroupItems.length}건
                       </span>
@@ -943,10 +965,10 @@ export default function DistributionStructureTab({
                   <div style={{ padding: "9px 12px", background: "#f8fafc", color: "#334155", fontSize: 12, fontWeight: 900 }}>
                     제조사 견적 비교 {distribution.comparisonCategory ? `· ${distribution.comparisonCategory}` : "· 미분류"}
                   </div>
-                  <table style={{ width: "100%", minWidth: 900, borderCollapse: "collapse", tableLayout: "fixed" }}>
+                  <table style={{ width: "100%", minWidth: 980, borderCollapse: "collapse", tableLayout: "fixed" }}>
                     <thead>
                       <tr style={{ background: "#eef6ff" }}>
-                        {["제조사", "허가사", "포장단위", "배치 당 포장단위 개수", "포장단위 당 공급단가", "VAT 포함 단가", "최종 유통 원가", "참약사 예상 판매가"].map((header) => (
+                        {["제조사", "허가사", "포장단위", "배치 당 포장단위 개수", "포장단위 당 공급단가", "VAT 포함 단가", "최종 유통 원가", "참약사 예상 판매가", "참약사 예상 마진율"].map((header) => (
                           <th key={header} style={{ padding: "8px 9px", borderBottom: "1px solid #dbe3ee", color: "#475569", fontSize: 11, textAlign: "left" }}>{header}</th>
                         ))}
                       </tr>
@@ -970,6 +992,7 @@ export default function DistributionStructureTab({
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12, fontWeight: 800 }}>{formatWon(amounts.vatUnitPrice)}</td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12, fontWeight: 800 }}>{formatWon(amounts.finalUnitCost)}</td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", color: "#047857", fontSize: 12, fontWeight: 900 }}>{formatWon(expectedSellingPrice)}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", color: "#047857", fontSize: 12, fontWeight: 900 }}>{formatPercent(parseNumber(scenario?.chamyaksaMarginRate))}</td>
                           </tr>
                         );
                       })}
@@ -1140,6 +1163,17 @@ export default function DistributionStructureTab({
           grid-auto-rows: 1fr;
           height: 100%;
         }
+        .supply-summary-header {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: start;
+          gap: 12px;
+          min-width: 0;
+          overflow: hidden;
+        }
+        .supply-summary-actions {
+          max-width: 270px;
+        }
         .decision-grid {
           display: grid;
           grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
@@ -1201,6 +1235,13 @@ export default function DistributionStructureTab({
           }
         }
         @media (max-width: 760px) {
+          .supply-summary-header {
+            grid-template-columns: minmax(0, 1fr);
+          }
+          .supply-summary-actions {
+            max-width: none;
+            justify-content: flex-start !important;
+          }
           .competitor-panel-header {
             align-items: stretch !important;
             flex-direction: column;

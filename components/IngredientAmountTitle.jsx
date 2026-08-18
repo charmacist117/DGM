@@ -33,8 +33,12 @@ export default function IngredientAmountTitle({
       title={text}
       aria-label={text}
       style={{
+        display: "block",
+        boxSizing: "border-box",
+        flex: "1 1 0",
         minWidth: 0,
         width: "100%",
+        maxWidth: "100%",
         overflow: "hidden",
         textOverflow: "ellipsis",
         whiteSpace: "nowrap",
