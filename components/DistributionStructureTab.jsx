@@ -972,10 +972,21 @@ export default function DistributionStructureTab({
                   <div style={{ padding: "9px 12px", background: "#f8fafc", color: "#334155", fontSize: 12, fontWeight: 900 }}>
                     제조사 견적 비교 {distribution.comparisonCategory ? `· ${distribution.comparisonCategory}` : "· 미분류"}
                   </div>
-                  <table style={{ width: "100%", minWidth: 980, borderCollapse: "collapse", tableLayout: "fixed" }}>
+                  <table style={{ width: "100%", minWidth: 900, borderCollapse: "collapse", tableLayout: "fixed" }}>
+                    <colgroup>
+                      <col style={{ width: "13%" }} />
+                      <col style={{ width: "12%" }} />
+                      <col style={{ width: "9%" }} />
+                      <col style={{ width: "13%" }} />
+                      <col style={{ width: "10%" }} />
+                      <col style={{ width: "11%" }} />
+                      <col style={{ width: "12%" }} />
+                      <col style={{ width: "9%" }} />
+                      <col style={{ width: "11%" }} />
+                    </colgroup>
                     <thead>
                       <tr style={{ background: "#eef6ff" }}>
-                        {["제조사", "허가사", "포장단위", "배치 당 포장단위 개수", "포장단위 당 공급단가", "VAT 포함 단가", "최종 유통 원가", "참약사 예상 판매가", "참약사 예상 마진율"].map((header) => (
+                        {["제조사", "허가사", "포장단위", "배치 당 포장단위 개수", "VAT 포함 단가", "최종 유통 원가", "참약사 예상 판매가", "예상 마진율", "약국 판매가"].map((header) => (
                           <th key={header} style={{ padding: "8px 9px", borderBottom: "1px solid #dbe3ee", color: "#475569", fontSize: 11, textAlign: "left" }}>{header}</th>
                         ))}
                       </tr>
@@ -1013,11 +1024,11 @@ export default function DistributionStructureTab({
                             </td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12 }}>{item.packagingUnit || "-"}</td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12 }}>{item.quantity || "-"}</td>
-                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12, fontWeight: 800 }}>{formatWon(amounts.unitPrice)}</td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12, fontWeight: 800 }}>{formatWon(amounts.vatUnitPrice)}</td>
-                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12, fontWeight: 800 }}>{formatWon(amounts.finalUnitCost)}</td>
-                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", color: "#047857", fontSize: 12, fontWeight: 900 }}>{formatWon(expectedSellingPrice)}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", borderLeft: "1px solid #dbeafe", fontSize: 12, fontWeight: 800 }}>{formatWon(amounts.finalUnitCost)}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", borderLeft: "2px solid #bfdbfe", color: "#047857", fontSize: 12, fontWeight: 900 }}>{formatWon(expectedSellingPrice)}</td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", color: "#047857", fontSize: 12, fontWeight: 900 }}>{formatPercent(parseNumber(scenario?.chamyaksaMarginRate))}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", borderLeft: "1px solid #d1fae5", color: "#0f766e", fontSize: 12, fontWeight: 900 }}>{formatWon(parseNumber(scenario?.pharmacySellingPrice))}</td>
                           </tr>
                         );
                       })}
