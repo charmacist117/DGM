@@ -626,10 +626,10 @@ export default function DistributionStructureTab({
                     ],
                     ["최종 유통 원가", formatWon(baseAmounts.finalTotal), `${permitFeeApplied ? (permitFeeRateUnknown ? "VAT 반영 · 허가사 수수료는 공급단가에 포함" : "VAT 및 허가사 수수료 반영") : "VAT 반영"} · 개당: ${formatWon(baseAmounts.finalUnitCost)}`]
                   ].map(([label, value, subtext]) => (
-                    <div key={label} style={{ padding: 13, borderRight: "1px solid #e2e8f0", borderBottom: "1px solid #e2e8f0" }}>
+                    <div key={label} style={{ minWidth: 0, padding: 13, borderRight: "1px solid #e2e8f0", borderBottom: "1px solid #e2e8f0", overflow: "hidden" }}>
                       <div style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>{label}</div>
-                      <div style={{ marginTop: 7, color: "#0f172a", fontSize: 16, fontWeight: 900 }}>{value}</div>
-                      {subtext && <div style={{ marginTop: 4, color: "#64748b", fontSize: 11, whiteSpace: "pre-line" }}>{subtext}</div>}
+                      <div style={{ marginTop: 7, color: "#0f172a", fontSize: 16, fontWeight: 900, overflowWrap: "anywhere" }}>{value}</div>
+                      {subtext && <div style={{ marginTop: 4, color: "#64748b", fontSize: 11, lineHeight: 1.45, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>{subtext}</div>}
                     </div>
                   ))}
                 </div>
@@ -980,7 +980,7 @@ export default function DistributionStructureTab({
         }
         .distribution-layout {
           display: grid;
-          grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+          grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
           gap: 14px;
           align-items: start;
         }
@@ -992,7 +992,7 @@ export default function DistributionStructureTab({
         }
         .decision-grid {
           display: grid;
-          grid-template-columns: minmax(390px, 0.9fr) minmax(540px, 1.1fr);
+          grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
           gap: 14px;
           align-items: stretch;
         }
@@ -1034,7 +1034,7 @@ export default function DistributionStructureTab({
           color: #64748b;
           font-size: 11px;
         }
-        @media (max-width: 1500px) {
+        @media (max-width: 1800px) {
           .decision-grid {
             grid-template-columns: 1fr;
           }

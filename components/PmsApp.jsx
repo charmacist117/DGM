@@ -125,7 +125,7 @@ const DASHBOARD_SUPPLY_COST_BREAKDOWN_SEED_KEY = "pharmadev_dashboard_changelog_
 const DASHBOARD_PROJECT_PROMOTION_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260805_41";
 const DASHBOARD_REVIEW_PROMOTION_WORKFLOW_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260813_42";
 const DASHBOARD_DEVELOPMENT_OVERVIEW_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260814_45";
-const DASHBOARD_PERMIT_COMPANY_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260818_46";
+const DASHBOARD_PERMIT_COMPANY_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260818_47";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -6173,7 +6173,8 @@ export default function PmsApp() {
         changeDate: TODAY,
         changeDateTime: toDashboardDateTimeInput(),
         changes: [
-          "공급단가·유통 구조 설정·시장 규모 분석·프로젝트 추진 시트에 허가사별 조회 및 허가사 미입력 필터를 추가했습니다."
+          "공급단가·유통 구조 설정·시장 규모 분석·프로젝트 추진 시트에 허가사별 조회 및 허가사 미입력 필터를 추가했습니다.",
+          "유통 구조 설정의 상세 표 최소 너비와 반응형 분기점을 조정해 일반 화면에서 공급 요약과 판매가 설정이 잘리지 않도록 개선했습니다."
         ],
         actor: "시스템",
         createdAt: new Date().toISOString()
