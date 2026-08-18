@@ -3008,8 +3008,8 @@ function SupplyPriceTab({
                         {isEditing ? (
                           <div style={{ display: "grid", gap: 6 }}>
                             <div>
-                              <label style={supplyFieldLabelStyle}>{isRawMaterialCategory ? "배치 당 전체 견적단가" : "배치 당 공급단가"}</label>
-                              <input value={item.supplyUnitPrice} onChange={(event) => updateItem(item.id, { supplyUnitPrice: event.target.value })} placeholder={isRawMaterialCategory ? "예: 배치 당 전체 견적단가" : "예: 배치 당 1,250원"} style={supplyCompactInputStyle} />
+                              <label style={supplyFieldLabelStyle}>{isRawMaterialCategory ? "배치 당 전체 견적단가" : "포장단위 당 공급단가"}</label>
+                              <input value={item.supplyUnitPrice} onChange={(event) => updateItem(item.id, { supplyUnitPrice: event.target.value })} placeholder={isRawMaterialCategory ? "예: 배치 당 전체 견적단가" : "예: 포장단위 당 1,250원"} style={supplyCompactInputStyle} />
                             </div>
                             <div>
                               <label style={supplyFieldLabelStyle}>총 견적금액</label>
