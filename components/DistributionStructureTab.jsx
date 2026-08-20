@@ -77,7 +77,8 @@ function formatPercent(value) {
 }
 
 function getItemLabel(item) {
-  return formatIngredientAmountLabel(item, item.manufacturer || "성분 미입력");
+  const ingredients = formatIngredientAmountLabel(item, item.manufacturer || "성분 미입력");
+  return item?.productName ? `${item.productName} · ${ingredients}` : ingredients;
 }
 
 function normalizePricingScenario(value = {}, fallbackId = "pricing_default", fallbackLabel = "기본") {
@@ -85,17 +86,22 @@ function normalizePricingScenario(value = {}, fallbackId = "pricing_default", fa
   return {
     id: source.id ?? fallbackId,
     label: String(source.label || fallbackLabel),
+    scenarioType: source.scenarioType === "bundle" ? "bundle" : "single",
     minimumQuantity: String(source.minimumQuantity ?? source.minQuantity ?? ""),
     chamyaksaMarginRate: String(source.chamyaksaMarginRate ?? ""),
-    pharmacySellingPrice: String(source.pharmacySellingPrice ?? "")
+    pharmacySellingPrice: String(source.pharmacySellingPrice ?? ""),
+    bundleItemIds: (Array.isArray(source.bundleItemIds) ? source.bundleItemIds : []).map(String),
+    bundleSellingPrice: String(source.bundleSellingPrice ?? "")
   };
 }
 
-function createPricingScenario(index = 0) {
+function createPricingScenario(index = 0, scenarioType = "single", selectedItemId = null) {
   return normalizePricingScenario({
     id: `pricing_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    label: index === 0 ? "기본" : `가격대 ${index + 1}`,
-    minimumQuantity: index === 0 ? "" : String(index * 100)
+    label: scenarioType === "bundle" ? `묶음 프로모션 ${index + 1}` : (index === 0 ? "기본" : `가격대 ${index + 1}`),
+    scenarioType,
+    bundleItemIds: selectedItemId === null ? [] : [String(selectedItemId)],
+    minimumQuantity: scenarioType === "bundle" || index === 0 ? "" : String(index * 100)
   });
 }
 
@@ -120,6 +126,7 @@ function getDistribution(item) {
   }
   return {
     pricingScenarios,
+    pharmacySellingPrice: String(source.pharmacySellingPrice ?? pricingScenarios.find((scenario) => scenario.scenarioType !== "bundle")?.pharmacySellingPrice ?? ""),
     competitors: Array.isArray(source.competitors) ? source.competitors : [],
     comparisonCategory: String(source.comparisonCategory || "").trim(),
     isConfigured: typeof source.isConfigured === "boolean"
@@ -251,6 +258,7 @@ export default function DistributionStructureTab({
     if (!query) return structureItems;
     return structureItems.filter((item) => {
       const haystack = [
+        item.productName,
         item.manufacturer,
         item.packagingUnit,
         ...(item.ingredients || []).flatMap((ingredient) => [ingredient.name, ingredient.content])
@@ -304,12 +312,38 @@ export default function DistributionStructureTab({
   const chamyaksaMarginAmount = chamyaksaSellingPrice === null || baseAmounts.finalUnitCost === null
     ? null
     : chamyaksaSellingPrice - baseAmounts.finalUnitCost;
-  const pharmacySellingPrice = parseNumber(activePricingScenario?.pharmacySellingPrice);
+  const appliedQuantity = parseNumber(activePricingScenario?.minimumQuantity);
+  const chamyaksaMarginAmountExcludingVat = chamyaksaMarginAmount === null ? null : chamyaksaMarginAmount / 1.1;
+  const totalChamyaksaMarginAmount = chamyaksaMarginAmount === null || !appliedQuantity
+    ? null
+    : chamyaksaMarginAmount * appliedQuantity;
+  const totalChamyaksaMarginAmountExcludingVat = chamyaksaMarginAmountExcludingVat === null || !appliedQuantity
+    ? null
+    : chamyaksaMarginAmountExcludingVat * appliedQuantity;
+  const pharmacyPurchaseTotal = chamyaksaSellingPrice === null || !appliedQuantity
+    ? null
+    : chamyaksaSellingPrice * appliedQuantity;
+  const pharmacySellingPrice = parseNumber(distribution.pharmacySellingPrice);
   const pharmacyMarginAmount = pharmacySellingPrice === null || chamyaksaSellingPrice === null
     ? null
     : pharmacySellingPrice - chamyaksaSellingPrice;
   const pharmacyMarginRate = pharmacySellingPrice && pharmacyMarginAmount !== null
     ? (pharmacyMarginAmount / pharmacySellingPrice) * 100
+    : null;
+  const bundleCandidateItems = items.filter((item) => item.category === selectedItem?.category);
+  const bundleItemIdSet = new Set((activePricingScenario?.bundleItemIds || []).map(String));
+  const bundleItems = bundleCandidateItems.filter((item) => bundleItemIdSet.has(String(item.id)));
+  const bundleSellingPrice = parseNumber(activePricingScenario?.bundleSellingPrice);
+  const bundleQuantity = appliedQuantity && appliedQuantity > 0 ? appliedQuantity : null;
+  const bundleCostTotal = bundleQuantity && bundleItems.length > 0
+    ? bundleItems.reduce((sum, item) => sum + (getBaseAmounts(item).finalUnitCost || 0), 0) * bundleQuantity
+    : null;
+  const bundleMarginAmount = bundleSellingPrice === null || bundleCostTotal === null
+    ? null
+    : bundleSellingPrice - bundleCostTotal;
+  const bundleMarginAmountExcludingVat = bundleMarginAmount === null ? null : bundleMarginAmount / 1.1;
+  const bundleMarginRate = bundleSellingPrice && bundleMarginAmount !== null
+    ? (bundleMarginAmount / bundleSellingPrice) * 100
     : null;
   const categoryLabelById = Object.fromEntries(categories.map((category) => [category.id, category.label]));
 
@@ -403,6 +437,27 @@ export default function DistributionStructureTab({
     const nextScenario = createPricingScenario(distribution.pricingScenarios.length);
     updateDistribution({ pricingScenarios: [...distribution.pricingScenarios, nextScenario] });
     setActivePricingScenarioId(nextScenario.id);
+  };
+
+  const addBundlePricingScenario = () => {
+    const nextScenario = createPricingScenario(distribution.pricingScenarios.length, "bundle", selectedItem?.id);
+    updateDistribution({ pricingScenarios: [...distribution.pricingScenarios, nextScenario] });
+    setActivePricingScenarioId(nextScenario.id);
+  };
+
+  const toggleBundleItem = (itemId) => {
+    if (!activePricingScenario) return;
+    const id = String(itemId);
+    const selectedId = String(selectedItem?.id || "");
+    const nextIds = new Set((activePricingScenario.bundleItemIds || []).map(String));
+    if (nextIds.has(id)) {
+      if (id === selectedId) return;
+      nextIds.delete(id);
+    } else {
+      nextIds.add(id);
+    }
+    if (selectedId) nextIds.add(selectedId);
+    updatePricingScenario({ bundleItemIds: [...nextIds] });
   };
 
   const removeActivePricingScenario = () => {
@@ -578,7 +633,7 @@ export default function DistributionStructureTab({
               id="distribution-search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="성분명 또는 제조사"
+              placeholder="제품명, 성분명 또는 제조사"
               style={inputStyle}
             />
           </div>
@@ -655,7 +710,7 @@ export default function DistributionStructureTab({
               <section style={panelStyle}>
                 <div className="supply-summary-header" style={{ padding: "13px 15px", borderBottom: "1px solid #cbd5e1", background: "#e8f1fb" }}>
                   <div className="supply-summary-title" style={{ minWidth: 0, maxWidth: "100%", overflow: "hidden" }}>
-                    <IngredientAmountTitle item={selectedItem} fallback={selectedItem.manufacturer || "성분 미입력"} maxFontSize={17} minFontSize={12} />
+                    <IngredientAmountTitle label={getItemLabel(selectedItem)} maxFontSize={17} minFontSize={12} />
                     <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>
                       {selectedItem.manufacturer || "제조사 미입력"} · {categoryLabelById[selectedItem.category] || selectedItem.category}
                     </div>
@@ -776,6 +831,9 @@ export default function DistributionStructureTab({
                       <button type="button" onClick={addPricingScenario} style={{ ...secondaryButtonStyle, minHeight: 32, padding: "5px 9px", fontSize: 12 }}>
                         + 가격대 탭 추가
                       </button>
+                      <button type="button" onClick={addBundlePricingScenario} style={{ ...secondaryButtonStyle, minHeight: 32, padding: "5px 9px", fontSize: 12 }}>
+                        + 묶음 프로모션
+                      </button>
                     </div>
                   </div>
                   <div style={{ marginTop: 4, color: "#475569", fontSize: 12, lineHeight: 1.5 }}>
@@ -790,7 +848,7 @@ export default function DistributionStructureTab({
                         key={scenario.id}
                         type="button"
                         onClick={() => setActivePricingScenarioId(scenario.id)}
-                        title={scenario.minimumQuantity ? `${scenario.minimumQuantity}개 이상 적용` : "기본 가격대"}
+                        title={scenario.minimumQuantity ? `${scenario.minimumQuantity}개 이상 적용` : scenario.scenarioType === "bundle" ? "묶음 프로모션" : "기본 가격대"}
                         style={{
                           minHeight: 32,
                           padding: "5px 10px",
@@ -805,6 +863,7 @@ export default function DistributionStructureTab({
                         }}
                       >
                         {scenario.label || `가격대 ${index + 1}`}
+                        {scenario.scenarioType === "bundle" ? " · 묶음" : ""}
                         {scenario.minimumQuantity ? ` · ${scenario.minimumQuantity}개 이상` : ""}
                       </button>
                     );
@@ -821,17 +880,67 @@ export default function DistributionStructureTab({
                     />
                   </div>
                   <div>
-                    <label style={labelStyle}>적용 물량 (개 이상)</label>
+                    <label style={labelStyle}>{activePricingScenario?.scenarioType === "bundle" ? "제품별 최소 구매수량 (개 이상)" : "적용 물량 (개 이상)"}</label>
                     <input
                       type="number"
                       min="0"
                       step="1"
                       value={activePricingScenario?.minimumQuantity || ""}
                       onChange={(event) => updatePricingScenario({ minimumQuantity: event.target.value })}
-                      placeholder="기본 가격대는 비워두기"
+                      placeholder={activePricingScenario?.scenarioType === "bundle" ? "예: 각 제품 30개" : "기본 가격대는 비워두기"}
                       style={inputStyle}
                     />
                   </div>
+                  {activePricingScenario?.scenarioType === "bundle" ? (
+                    <>
+                      <div style={{ gridColumn: "1 / -1" }}>
+                        <label style={labelStyle}>결합 판매 제품</label>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 7, padding: 9, border: "1px solid #dbe3ee", borderRadius: 6, background: "#f8fafc", maxHeight: 190, overflowY: "auto" }}>
+                          {bundleCandidateItems.map((item) => {
+                            const checked = bundleItemIdSet.has(String(item.id));
+                            const locked = String(item.id) === String(selectedItem?.id);
+                            return (
+                              <label key={item.id} style={{ minWidth: 0, display: "flex", alignItems: "flex-start", gap: 7, padding: "7px 8px", border: `1px solid ${checked ? "#93c5fd" : "#e2e8f0"}`, borderRadius: 6, background: checked ? "#eff6ff" : "#fff", cursor: locked ? "default" : "pointer" }}>
+                                <input type="checkbox" checked={checked} disabled={locked} onChange={() => toggleBundleItem(item.id)} style={{ marginTop: 2 }} />
+                                <span style={{ minWidth: 0 }}>
+                                  <strong title={getItemLabel(item)} style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#0f172a", fontSize: 12 }}>{getItemLabel(item)}</strong>
+                                  <small style={{ color: "#64748b", fontSize: 11 }}>{item.manufacturer || "제조사 미입력"}</small>
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                        <div style={{ marginTop: 5, color: bundleItems.length < 2 ? "#dc2626" : "#64748b", fontSize: 11 }}>
+                          {bundleItems.length < 2 ? "묶음 프로모션에는 2개 이상의 제품을 선택해주세요." : `${bundleItems.length}종을 같은 구매 조건으로 결합합니다.`}
+                        </div>
+                      </div>
+                      <div>
+                        <label style={labelStyle}>묶음 일괄 판매가 (VAT 포함)</label>
+                        <input value={activePricingScenario?.bundleSellingPrice || ""} onChange={(event) => updatePricingScenario({ bundleSellingPrice: event.target.value })} inputMode="numeric" placeholder="예: 3종 합계 120,000원" style={inputStyle} />
+                      </div>
+                      <div className="calculated-cell">
+                        <span>결합 공급 원가 (VAT 포함)</span>
+                        <strong>{formatWon(bundleCostTotal)}</strong>
+                        <small style={{ color: "#64748b", fontWeight: 700 }}>{bundleQuantity ? `${bundleItems.length}종 × 각 ${bundleQuantity.toLocaleString("ko-KR")}개` : "최소 구매수량 입력 시 계산"}</small>
+                      </div>
+                      <div className="calculated-cell">
+                        <span>묶음 총 마진액 (VAT 포함)</span>
+                        <strong>{formatWon(bundleMarginAmount)}</strong>
+                        <small style={{ color: "#64748b", fontWeight: 700 }}>VAT 미포함 {formatWon(bundleMarginAmountExcludingVat)}</small>
+                      </div>
+                      <div className="calculated-cell">
+                        <span>묶음 실질 마진율</span>
+                        <strong>{formatPercent(bundleMarginRate)}</strong>
+                        <small style={{ color: "#64748b", fontWeight: 700 }}>총 마진액 ÷ 묶음 판매가</small>
+                      </div>
+                      <div className="calculated-cell">
+                        <span>약국 구입 총액 (VAT 포함)</span>
+                        <strong>{formatWon(bundleSellingPrice)}</strong>
+                        <small style={{ color: "#64748b", fontWeight: 700 }}>선택 제품 전체 묶음 금액</small>
+                      </div>
+                    </>
+                  ) : (
+                    <>
                   <div>
                     <label style={labelStyle}>참약사 목표 마진율 (판매가 기준, %)</label>
                     <input
@@ -851,6 +960,7 @@ export default function DistributionStructureTab({
                   <div className="calculated-cell">
                     <span>참약사 마진금액 (VAT 포함)</span>
                     <strong>{formatWon(chamyaksaMarginAmount)}</strong>
+                    <small style={{ color: "#64748b", fontWeight: 700 }}>VAT 미포함 {formatWon(chamyaksaMarginAmountExcludingVat)}</small>
                   </div>
                   <div className="calculated-cell">
                     <span>참약사 판매가 (VAT 포함)</span>
@@ -860,8 +970,8 @@ export default function DistributionStructureTab({
                   <div>
                     <label style={labelStyle}>약국 판매가 (VAT 포함)</label>
                     <input
-                      value={activePricingScenario?.pharmacySellingPrice || ""}
-                      onChange={(event) => updatePricingScenario({ pharmacySellingPrice: event.target.value })}
+                      value={distribution.pharmacySellingPrice || ""}
+                      onChange={(event) => updateDistribution({ pharmacySellingPrice: event.target.value })}
                       inputMode="numeric"
                       placeholder="예: 15,000"
                       style={inputStyle}
@@ -879,6 +989,22 @@ export default function DistributionStructureTab({
                       {formatWon(pharmacyMarginAmount)}
                     </strong>
                   </div>
+                  <div className="calculated-cell">
+                    <span>적용 물량 총 마진액 (VAT 포함)</span>
+                    <strong>{formatWon(totalChamyaksaMarginAmount)}</strong>
+                    <small style={{ color: "#64748b", fontWeight: 700 }}>
+                      {appliedQuantity ? `VAT 미포함 ${formatWon(totalChamyaksaMarginAmountExcludingVat)}` : "적용 물량 입력 시 계산"}
+                    </small>
+                  </div>
+                  <div className="calculated-cell">
+                    <span>약국 구입 총액 (VAT 포함)</span>
+                    <strong>{formatWon(pharmacyPurchaseTotal)}</strong>
+                    <small style={{ color: "#64748b", fontWeight: 700 }}>
+                      {appliedQuantity ? `참약사 판매가 × ${appliedQuantity.toLocaleString("ko-KR")}개` : "적용 물량 입력 시 계산"}
+                    </small>
+                  </div>
+                    </>
+                  )}
                   <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <button
                       type="button"
@@ -986,7 +1112,7 @@ export default function DistributionStructureTab({
                     </colgroup>
                     <thead>
                       <tr style={{ background: "#eef6ff" }}>
-                        {["제조사", "허가사", "포장단위", "배치 당 포장단위 개수", "VAT 포함 단가", "최종 유통 원가", "참약사 예상 판매가", "예상 마진율", "약국 판매가"].map((header) => (
+                        {["제품명 / 제조사", "허가사", "포장단위", "배치 당 포장단위 개수", "VAT 포함 단가", "최종 유통 원가", "참약사 예상 판매가", "예상 마진율", "약국 판매가"].map((header) => (
                           <th key={header} style={{ padding: "8px 9px", borderBottom: "1px solid #dbe3ee", color: "#475569", fontSize: 11, textAlign: "left" }}>{header}</th>
                         ))}
                       </tr>
@@ -1003,6 +1129,7 @@ export default function DistributionStructureTab({
                         return (
                           <tr key={item.id} style={{ background: String(item.id) === String(selectedItem.id) ? "#f0f9ff" : "#fff" }}>
                             <td style={{ padding: 6, borderBottom: "1px solid #edf2f7", fontSize: 12, fontWeight: 800 }}>
+                              {item.productName && <div title={item.productName} style={{ margin: "0 4px 2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#0f172a", fontWeight: 900 }}>{item.productName}</div>}
                               <button
                                 type="button"
                                 onClick={() => openComparisonItem(item.id)}
@@ -1028,7 +1155,7 @@ export default function DistributionStructureTab({
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", borderLeft: "1px solid #dbeafe", fontSize: 12, fontWeight: 800 }}>{formatWon(amounts.finalUnitCost)}</td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", borderLeft: "2px solid #bfdbfe", color: "#047857", fontSize: 12, fontWeight: 900 }}>{formatWon(expectedSellingPrice)}</td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", color: "#047857", fontSize: 12, fontWeight: 900 }}>{formatPercent(parseNumber(scenario?.chamyaksaMarginRate))}</td>
-                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", borderLeft: "1px solid #d1fae5", color: "#0f766e", fontSize: 12, fontWeight: 900 }}>{formatWon(parseNumber(scenario?.pharmacySellingPrice))}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", borderLeft: "1px solid #d1fae5", color: "#0f766e", fontSize: 12, fontWeight: 900 }}>{formatWon(parseNumber(itemDistribution.pharmacySellingPrice))}</td>
                           </tr>
                         );
                       })}

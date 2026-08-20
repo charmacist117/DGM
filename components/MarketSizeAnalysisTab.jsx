@@ -75,7 +75,8 @@ const secondaryButtonStyle = {
 };
 
 function getItemLabel(item) {
-  return formatIngredientAmountLabel(item, "성분 미입력");
+  const ingredients = formatIngredientAmountLabel(item, "성분 미입력");
+  return item?.productName ? `${item.productName} · ${ingredients}` : ingredients;
 }
 
 function isDistributionConfigured(item) {
@@ -277,6 +278,7 @@ export default function MarketSizeAnalysisTab({
       : distributionItems.filter((item) => normalizeMarketDecisionStatus(item.marketDecisionStatus) === decisionFilter);
     if (!query) return decisionItems;
     return decisionItems.filter((item) => [
+      item.productName,
       item.manufacturer,
       item.packagingUnit,
       ...(item.ingredients || []).flatMap((ingredient) => [ingredient.name, ingredient.content])
@@ -520,7 +522,7 @@ export default function MarketSizeAnalysisTab({
               id="market-search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="성분명 또는 제조사"
+              placeholder="제품명, 성분명 또는 제조사"
               style={inputStyle}
             />
           </div>
@@ -597,7 +599,7 @@ export default function MarketSizeAnalysisTab({
               <section style={panelStyle}>
                 <div className="market-item-header">
                   <div style={{ minWidth: 0 }}>
-                    <IngredientAmountTitle item={selectedItem} fallback="성분 미입력" maxFontSize={18} minFontSize={12} />
+                    <IngredientAmountTitle label={getItemLabel(selectedItem)} maxFontSize={18} minFontSize={12} />
                     <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>
                       {selectedItem.manufacturer || "제조사 미입력"} · {categoryLabelById[selectedItem.category] || selectedItem.category}
                       {" · "}포장단위 {selectedItem.packagingUnit || "미입력"}

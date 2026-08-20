@@ -28,7 +28,8 @@ const controlStyle = {
 };
 
 function ingredientLabel(item) {
-  return formatIngredientAmountLabel(item, "성분·함량 미입력");
+  const ingredients = formatIngredientAmountLabel(item, "성분·함량 미입력");
+  return item?.productName ? `${item.productName} · ${ingredients}` : ingredients;
 }
 
 function linkedProjectFor(item, projects) {

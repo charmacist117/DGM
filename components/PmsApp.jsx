@@ -929,9 +929,12 @@ function normalizeDistributionPricingScenario(value = {}, fallbackId = "pricing_
   return {
     id: source.id ?? fallbackId,
     label: String(source.label || fallbackLabel),
+    scenarioType: source.scenarioType === "bundle" ? "bundle" : "single",
     minimumQuantity: String(source.minimumQuantity ?? source.minQuantity ?? ""),
     chamyaksaMarginRate: String(source.chamyaksaMarginRate ?? ""),
-    pharmacySellingPrice: String(source.pharmacySellingPrice ?? "")
+    pharmacySellingPrice: String(source.pharmacySellingPrice ?? ""),
+    bundleItemIds: (Array.isArray(source.bundleItemIds) ? source.bundleItemIds : []).map(String),
+    bundleSellingPrice: String(source.bundleSellingPrice ?? "")
   };
 }
 
@@ -955,6 +958,7 @@ function normalizeDistributionStructure(value = {}) {
   }
   return {
     pricingScenarios,
+    pharmacySellingPrice: String(source.pharmacySellingPrice ?? pricingScenarios.find((scenario) => scenario.scenarioType !== "bundle")?.pharmacySellingPrice ?? ""),
     competitors: (Array.isArray(source.competitors) ? source.competitors : [])
       .filter((competitor) => competitor && typeof competitor === "object")
       .map((competitor, index) => normalizeDistributionCompetitor(competitor, `competitor_${index + 1}`)),
@@ -975,6 +979,7 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
   return {
     id,
     category,
+    productName: String(source.productName || source.itemName || ""),
     manufacturer: String(source.manufacturer || ""),
     permitCompany: supportsPermitCompanyFee
       ? String(source.permitCompany || source.licenseCompany || source.approvalCompany || "")
@@ -1034,6 +1039,7 @@ function isSupplyPriceItemEmpty(item = {}) {
     ].some((value) => String(value || "").trim())
   ));
   const fieldHasValue = [
+    item.productName,
     item.manufacturer,
     item.permitCompany,
     item.packagingUnit,
@@ -2256,9 +2262,10 @@ function SupplyPriceTab({
   const query = useMemo(() => search.trim().toLowerCase(), [search]);
   const filteredItems = useMemo(() => {
     const searchedItems = !query ? monthFilteredItems : monthFilteredItems.filter((item) => (
-      editingIds.has(String(item.id)) || isSupplyPriceItemEmpty(item) || (item.ingredients || []).some((ingredient) => (
-        ingredient.name.toLowerCase().includes(query)
-      ))
+      editingIds.has(String(item.id))
+      || isSupplyPriceItemEmpty(item)
+      || String(item.productName || "").toLowerCase().includes(query)
+      || (item.ingredients || []).some((ingredient) => ingredient.name.toLowerCase().includes(query))
     ));
     return [...searchedItems].sort((left, right) => {
       const leftEditing = editingIds.has(String(left.id));
@@ -2345,7 +2352,7 @@ function SupplyPriceTab({
       return;
     }
     const headers = [
-      "카테고리", "제조사", "허가사", "공급 성분", "함량/규격", "원료 원산지", "브랜드/공급처", "kg당 가격대",
+      "카테고리", "제품명", "제조사", "허가사", "공급 성분", "함량/규격", "원료 원산지", "브랜드/공급처", "kg당 가격대",
       "포장단위", "포장형태", "배치 당 포장단위 개수", "최소 주문 배치 수량", "견적 원가 구성", "원가 구성 합계(원)",
       "포장단위당 원가 구성(원)", "배치 당 공급단가", "VAT 포함", "배치 당 VAT 포함 가격",
       "총 금액", "VAT 포함 총금액", "허가사 수수료", "허가사 수수료율(%) / 상태", "수수료 포함 총금액",
@@ -2370,6 +2377,7 @@ function SupplyPriceTab({
         : "";
       return ingredients.map((ingredient) => [
         SUPPLY_PRICE_CATEGORY_LABEL_BY_ID[item.category] || item.category,
+        item.productName,
         item.manufacturer,
         item.permitCompany,
         ingredient.name,
@@ -2667,7 +2675,7 @@ function SupplyPriceTab({
           <div>
             <div style={{ fontSize: 23, fontWeight: 900 }}>공급단가</div>
             <div style={{ fontSize: 15, color: "#64748b", marginTop: 2 }}>
-              {currentCategoryLabel} 공급단가를 건별로 추가하고 성분명 또는 제조사로 검색합니다.
+              {currentCategoryLabel} 공급단가를 건별로 추가하고 제품명·성분명 또는 제조사로 검색합니다.
             </div>
           </div>
           <div style={{ display: "grid", justifyItems: "end", gap: 7 }}>
@@ -2682,8 +2690,8 @@ function SupplyPriceTab({
             <input
               value={ingredientComparisonMode ? ingredientComparisonSearch : search}
               onChange={(event) => ingredientComparisonMode ? setIngredientComparisonSearch(event.target.value) : setSearch(event.target.value)}
-              placeholder={ingredientComparisonMode ? "비교할 특정 원료명 검색" : "성분명 검색"}
-              aria-label={ingredientComparisonMode ? "특정 원료로 검색" : "성분명 검색"}
+              placeholder={ingredientComparisonMode ? "비교할 특정 원료명 검색" : "제품명 또는 성분명 검색"}
+              aria-label={ingredientComparisonMode ? "특정 원료로 검색" : "제품명 또는 성분명 검색"}
               style={{ ...inputStyle, fontSize: 15 }}
             />
             <input
@@ -2893,7 +2901,7 @@ function SupplyPriceTab({
                   </colgroup>
                   <thead>
                     <tr style={supplyHeaderRowStyle}>
-                      {["카테고리", "제조사", "세부 공급내역", isRawMaterialCategory ? "배치 당 전체 견적단가" : "배치 당 공급단가", "VAT 포함", "배치 당 VAT 포함 가격", "관리"].map((header) => (
+                      {["카테고리", "제품 / 제조사", "세부 공급내역", isRawMaterialCategory ? "배치 당 전체 견적단가" : "배치 당 공급단가", "VAT 포함", "배치 당 VAT 포함 가격", "관리"].map((header) => (
                         <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#1e3a8a", borderBottom: "1px solid #bfdbfe", whiteSpace: "nowrap" }}>
                           {header}
                         </th>
@@ -2931,6 +2939,15 @@ function SupplyPriceTab({
                         {isEditing ? (
                           <div style={{ display: "grid", gap: 8 }}>
                             <div>
+                              <label style={supplyFieldLabelStyle}>제품명</label>
+                              <input
+                                value={item.productName}
+                                onChange={(event) => updateItem(item.id, { productName: event.target.value })}
+                                placeholder="제품명"
+                                style={supplyCompactInputStyle}
+                              />
+                            </div>
+                            <div>
                               <label style={supplyFieldLabelStyle}>제조사</label>
                               <input
                                 value={item.manufacturer}
@@ -2957,6 +2974,7 @@ function SupplyPriceTab({
                           </div>
                         ) : (
                           <div style={{ display: "grid", gap: 5 }}>
+                            <div style={{ ...supplyTextCellStyle, fontWeight: 900 }}>{item.productName || "제품명 미입력"}</div>
                             <div style={supplyTextCellStyle}>{item.manufacturer || "-"}</div>
                             {item.permitCompanyFee && (
                               <div style={{ ...supplyTextCellStyle, color: "#64748b", fontSize: 12 }}>

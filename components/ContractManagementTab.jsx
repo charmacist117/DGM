@@ -83,7 +83,7 @@ function contractDisplayTitle(record) {
 function supplyItemLabel(item = {}) {
   const ingredients = formatIngredientAmountLabel(item, "성분 미입력");
   const packageLabel = [item.packagingUnit, item.packagingForm].filter(Boolean).join(" · ");
-  return [ingredients, item.manufacturer, packageLabel].filter(Boolean).join(" | ");
+  return [item.productName, ingredients, item.manufacturer, packageLabel].filter(Boolean).join(" | ");
 }
 
 function toTimestamp(value) {
