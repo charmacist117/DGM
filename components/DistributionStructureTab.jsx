@@ -99,6 +99,71 @@ function downloadReportBlob(blob, fileName) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function getCanvasTextLines(context, value, maxWidth) {
+  const sourceLines = String(value ?? "-").split(/\r?\n/);
+  const lines = [];
+  sourceLines.forEach((sourceLine) => {
+    if (!sourceLine) {
+      lines.push("");
+      return;
+    }
+    let line = "";
+    Array.from(sourceLine).forEach((character) => {
+      const candidate = `${line}${character}`;
+      if (line && context.measureText(candidate).width > maxWidth) {
+        lines.push(line);
+        line = character;
+      } else {
+        line = candidate;
+      }
+    });
+    lines.push(line);
+  });
+  return lines.length > 0 ? lines : ["-"];
+}
+
+function drawCanvasTable(context, { headers, rows, widths, x, y }) {
+  const headerHeight = 46;
+  const lineHeight = 24;
+  const padding = 10;
+  let currentX = x;
+
+  context.textBaseline = "top";
+  context.font = "700 17px 'Malgun Gothic', Arial, sans-serif";
+  headers.forEach((header, index) => {
+    context.fillStyle = "#dbeafe";
+    context.fillRect(currentX, y, widths[index], headerHeight);
+    context.strokeStyle = "#94a3b8";
+    context.strokeRect(currentX, y, widths[index], headerHeight);
+    context.fillStyle = "#0f172a";
+    getCanvasTextLines(context, header, widths[index] - (padding * 2)).slice(0, 2).forEach((line, lineIndex) => {
+      context.fillText(line, currentX + padding, y + padding + (lineIndex * lineHeight));
+    });
+    currentX += widths[index];
+  });
+
+  let currentY = y + headerHeight;
+  rows.forEach((row, rowIndex) => {
+    context.font = "16px 'Malgun Gothic', Arial, sans-serif";
+    const lineSets = row.map((value, index) => getCanvasTextLines(context, value, widths[index] - (padding * 2)));
+    const rowHeight = Math.max(50, Math.max(...lineSets.map((lines) => lines.length)) * lineHeight + (padding * 2));
+    currentX = x;
+    row.forEach((value, index) => {
+      context.fillStyle = rowIndex % 2 === 0 ? "#ffffff" : "#f8fafc";
+      context.fillRect(currentX, currentY, widths[index], rowHeight);
+      context.strokeStyle = "#cbd5e1";
+      context.strokeRect(currentX, currentY, widths[index], rowHeight);
+      context.fillStyle = "#0f172a";
+      lineSets[index].forEach((line, lineIndex) => {
+        context.fillText(line, currentX + padding, currentY + padding + (lineIndex * lineHeight));
+      });
+      currentX += widths[index];
+    });
+    currentY += rowHeight;
+  });
+  return currentY;
+}
+
 function getItemLabel(item) {
   const ingredients = formatIngredientAmountLabel(item, item.manufacturer || "성분 미입력");
   return item?.productName ? `${item.productName} · ${ingredients}` : ingredients;
@@ -158,6 +223,30 @@ function getDistribution(item) {
     configuredAt: String(source.configuredAt || ""),
     updatedAt: String(source.updatedAt || "")
   };
+}
+
+function getPricingScenariosForItem(targetItem, allItems = []) {
+  if (!targetItem) return [];
+  const targetId = String(targetItem.id);
+  const ownScenarios = getDistribution(targetItem).pricingScenarios.map((scenario) => ({
+    ...scenario,
+    _ownerItemId: targetId,
+    _linked: false
+  }));
+  const ownIds = new Set(ownScenarios.map((scenario) => String(scenario.id)));
+  const linkedScenarios = allItems.flatMap((item) => {
+    if (String(item.id) === targetId) return [];
+    return getDistribution(item).pricingScenarios
+      .filter((scenario) => scenario.scenarioType === "bundle"
+        && (scenario.bundleItemIds || []).map(String).includes(targetId)
+        && !ownIds.has(String(scenario.id)))
+      .map((scenario) => ({
+        ...scenario,
+        _ownerItemId: String(item.id),
+        _linked: true
+      }));
+  });
+  return [...ownScenarios, ...linkedScenarios];
 }
 
 function normalizeComparisonCategory(value) {
@@ -300,6 +389,10 @@ export default function DistributionStructureTab({
   const selectedItem = visibleItems.find((item) => String(item.id) === String(selectedItemId)) || visibleItems[0] || null;
   const isEditing = selectedItem && String(editingItemId) === String(selectedItem.id);
   const distribution = getDistribution(selectedItem);
+  const visiblePricingScenarios = useMemo(
+    () => getPricingScenariosForItem(selectedItem, items),
+    [items, selectedItem]
+  );
   const comparisonCategoryOptions = useMemo(() => Array.from(new Set(
     items.map((item) => getDistribution(item).comparisonCategory).filter(Boolean)
   )).sort((left, right) => left.localeCompare(right, "ko")), [items]);
@@ -314,9 +407,9 @@ export default function DistributionStructureTab({
     selectedItem,
     ...comparisonGroupItems.filter((item) => String(item.id) !== String(selectedItem?.id))
   ].filter(Boolean)), [comparisonGroupItems, selectedItem]);
-  const activePricingScenario = distribution.pricingScenarios.find((scenario) => (
+  const activePricingScenario = visiblePricingScenarios.find((scenario) => (
     String(scenario.id) === String(activePricingScenarioId)
-  )) || distribution.pricingScenarios[0];
+  )) || visiblePricingScenarios[0];
   const baseAmounts = getBaseAmounts(selectedItem);
   const hasPermitCompanyFee = selectedItem?.category === "OTC" && selectedItem?.permitCompanyFee;
   const permitFeeRate = parseNumber(selectedItem?.permitCompanyFeeRate);
@@ -372,7 +465,7 @@ export default function DistributionStructureTab({
   const categoryLabelById = Object.fromEntries(categories.map((category) => [category.id, category.label]));
 
   const createDistributionReport = () => {
-    const rows = distribution.pricingScenarios.map((scenario) => {
+    const rows = visiblePricingScenarios.map((scenario) => {
       const quantity = parseNumber(scenario.minimumQuantity);
       if (scenario.scenarioType === "bundle") {
         const selectedIds = new Set((scenario.bundleItemIds || []).map(String));
@@ -417,13 +510,50 @@ export default function DistributionStructureTab({
       row.type, row.label, row.products || "-", row.quantity, formatWon(row.cost), formatWon(row.sellingPrice),
       formatWon(row.margin), formatWon(row.marginExVat), formatPercent(row.marginRate), formatWon(row.pharmacySellingPrice), formatWon(row.purchaseTotal)
     ].map((value) => `<td>${escapeReportMarkup(value)}</td>`).join("")}</tr>`).join("");
-    const competitorRows = sharedCompetitors.flatMap((item) => getDistribution(item).competitors.map((competitor) => (
-      `<tr>${[competitor.date || "-", competitor.productName || "-", competitor.salesChannel || "-", competitor.packagingUnit || "-", getCompetitorPriceTiers(competitor).map((tier) => `${tier.label}: ${formatEnteredPrice(tier.price)}`).join(" / "), competitor.memo || "-"].map((value) => `<td>${escapeReportMarkup(value)}</td>`).join("")}</tr>`
-    ))).join("");
+    const comparisonQuotes = comparisonGroupItems.map((item) => {
+      const itemDistribution = getDistribution(item);
+      const itemPricingScenarios = getPricingScenariosForItem(item, items);
+      const scenario = itemPricingScenarios.find((entry) => String(entry.id) === String(comparisonScenarioByItemId[item.id])) || itemPricingScenarios[0];
+      const amounts = getBaseAmounts(item);
+      const expectedSellingPrice = scenario?.scenarioType === "bundle"
+        ? parseNumber(scenario.bundleSellingPrice)
+        : calculateSellingPriceFromMarginRate(amounts.finalUnitCost, parseNumber(scenario?.chamyaksaMarginRate));
+      return {
+        productName: item.productName || "-",
+        manufacturer: item.manufacturer || "-",
+        permitCompany: item.permitCompany || "-",
+        packagingUnit: item.packagingUnit || "-",
+        quantity: item.quantity || "-",
+        scenario: `${scenario?.label || "기본"}${scenario?.scenarioType === "bundle" ? " (묶음)" : ""}`,
+        vatUnitPrice: amounts.vatUnitPrice,
+        finalUnitCost: amounts.finalUnitCost,
+        expectedSellingPrice,
+        marginRate: scenario?.scenarioType === "bundle" ? "묶음 총액" : formatPercent(parseNumber(scenario?.chamyaksaMarginRate)),
+        pharmacySellingPrice: parseNumber(itemDistribution.pharmacySellingPrice)
+      };
+    });
+    const comparisonQuoteHeaders = ["제품명", "제조사", "허가사", "포장단위", "배치 당 포장단위 개수", "가격대", "VAT 포함 단가", "최종 유통 원가", "참약사 예상 판매가", "예상 마진율", "약국 판매가"];
+    const comparisonQuoteRows = comparisonQuotes.map((quote) => `<tr>${[
+      quote.productName, quote.manufacturer, quote.permitCompany, quote.packagingUnit, quote.quantity, quote.scenario,
+      formatWon(quote.vatUnitPrice), formatWon(quote.finalUnitCost), formatWon(quote.expectedSellingPrice), quote.marginRate, formatWon(quote.pharmacySellingPrice)
+    ].map((value) => `<td>${escapeReportMarkup(value)}</td>`).join("")}</tr>`).join("");
+    const competitors = sharedCompetitors.map((competitor) => ({
+      date: competitor.date || "-",
+      productName: competitor.productName || "-",
+      salesChannel: competitor.salesChannel || "-",
+      packagingUnit: competitor.packagingUnit || "-",
+      prices: getCompetitorPriceTiers(competitor).map((tier) => `${tier.label}: ${formatEnteredPrice(tier.price)}`).join(" / ") || "-",
+      memo: competitor.memo || "-"
+    }));
+    const competitorRows = competitors.map((competitor) => (
+      `<tr>${[competitor.date, competitor.productName, competitor.salesChannel, competitor.packagingUnit, competitor.prices, competitor.memo].map((value) => `<td>${escapeReportMarkup(value)}</td>`).join("")}</tr>`
+    )).join("");
     return {
       title: getItemLabel(selectedItem),
       rows,
-      html: `<div class="report"><h1>유통 구조 정책 보고서</h1><h2>${escapeReportMarkup(getItemLabel(selectedItem))}</h2><p>${escapeReportMarkup(selectedItem.manufacturer || "제조사 미입력")} · ${escapeReportMarkup(categoryLabelById[selectedItem.category] || selectedItem.category)} · 생성 ${escapeReportMarkup(new Date().toLocaleString("ko-KR"))}</p><h3>공급 기준</h3><table><tbody><tr><th>포장단위</th><td>${escapeReportMarkup(selectedItem.packagingUnit || "-")}</td><th>배치 당 포장단위 개수</th><td>${escapeReportMarkup(selectedItem.quantity || "-")}</td><th>최종 유통 원가</th><td>${escapeReportMarkup(formatWon(baseAmounts.finalUnitCost))}</td></tr></tbody></table><h3>가격대 및 묶음 프로모션 전체</h3><table><thead><tr>${headCells.map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${rowHtml}</tbody></table><h3>경쟁제품 비교</h3><table><thead><tr>${["기준일", "경쟁제품명", "판매처", "포장단위", "판매구간 및 단가", "비고"].map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${competitorRows || '<tr><td colspan="6">등록된 경쟁제품 없음</td></tr>'}</tbody></table></div>`
+      comparisonQuotes,
+      competitors,
+      html: `<div class="report"><h1>유통 구조 정책 보고서</h1><h2>${escapeReportMarkup(getItemLabel(selectedItem))}</h2><p>${escapeReportMarkup(selectedItem.manufacturer || "제조사 미입력")} · ${escapeReportMarkup(categoryLabelById[selectedItem.category] || selectedItem.category)} · 생성 ${escapeReportMarkup(new Date().toLocaleString("ko-KR"))}</p><h3>공급 기준</h3><table><tbody><tr><th>포장단위</th><td>${escapeReportMarkup(selectedItem.packagingUnit || "-")}</td><th>배치 당 포장단위 개수</th><td>${escapeReportMarkup(selectedItem.quantity || "-")}</td><th>최종 유통 원가</th><td>${escapeReportMarkup(formatWon(baseAmounts.finalUnitCost))}</td></tr></tbody></table><h3>가격대 및 묶음 프로모션 전체</h3><table><thead><tr>${headCells.map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${rowHtml}</tbody></table><h3>제조사 견적 비교${distribution.comparisonCategory ? ` · ${escapeReportMarkup(distribution.comparisonCategory)}` : ""}</h3><table><thead><tr>${comparisonQuoteHeaders.map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${comparisonQuoteRows}</tbody></table><h3>경쟁제품 비교</h3><table><thead><tr>${["기준일", "경쟁제품명", "판매처", "포장단위", "판매구간 및 단가", "비고"].map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${competitorRows || '<tr><td colspan="6">등록된 경쟁제품 없음</td></tr>'}</tbody></table></div>`
     };
   };
 
@@ -437,26 +567,81 @@ export default function DistributionStructureTab({
   const downloadDistributionImage = async () => {
     if (!selectedItem) return;
     const report = createDistributionReport();
-    const width = 1600;
-    const height = Math.max(900, 520 + (report.rows.length * 88) + (sharedCompetitors.length * 55));
-    const css = `.report{box-sizing:border-box;width:${width}px;min-height:${height}px;padding:38px;background:#fff;font-family:Arial,'Malgun Gothic',sans-serif;color:#0f172a}.report h1{margin:0;font-size:30px}.report h2{margin:12px 0 4px;font-size:22px}.report p{color:#475569}.report h3{margin:25px 0 8px;font-size:17px}.report table{border-collapse:collapse;width:100%;table-layout:fixed}.report th,.report td{border:1px solid #94a3b8;padding:9px 7px;font-size:12px;text-align:left;vertical-align:top;word-break:break-word}.report th{background:#dbeafe;font-weight:800}`;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml"><style>${css}</style>${report.html}</div></foreignObject></svg>`;
-    const imageUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
     try {
-      const image = new Image();
-      image.src = imageUrl;
-      await image.decode();
+      const width = 2200;
+      const margin = 40;
       const canvas = document.createElement("canvas");
       canvas.width = width;
-      canvas.height = height;
-      canvas.getContext("2d").drawImage(image, 0, 0);
-      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+      canvas.height = Math.max(2200, 1250 + (report.rows.length * 260) + (report.comparisonQuotes.length * 180) + (report.competitors.length * 160));
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = "#0f172a";
+      context.textBaseline = "top";
+      context.font = "700 38px 'Malgun Gothic', Arial, sans-serif";
+      context.fillText("유통 구조 정책 보고서", margin, margin);
+      context.font = "700 28px 'Malgun Gothic', Arial, sans-serif";
+      context.fillText(report.title, margin, 102);
+      context.font = "18px 'Malgun Gothic', Arial, sans-serif";
+      context.fillStyle = "#475569";
+      context.fillText(`${selectedItem.manufacturer || "제조사 미입력"} · ${categoryLabelById[selectedItem.category] || selectedItem.category} · 생성 ${new Date().toLocaleString("ko-KR")}`, margin, 148);
+
+      context.fillStyle = "#0f172a";
+      context.font = "700 22px 'Malgun Gothic', Arial, sans-serif";
+      context.fillText("공급 기준", margin, 198);
+      let y = drawCanvasTable(context, {
+        headers: ["포장단위", "배치 당 포장단위 개수", "최종 유통 원가"],
+        rows: [[selectedItem.packagingUnit || "-", selectedItem.quantity || "-", formatWon(baseAmounts.finalUnitCost)]],
+        widths: [650, 750, 720],
+        x: margin,
+        y: 232
+      });
+
+      context.fillStyle = "#0f172a";
+      context.font = "700 22px 'Malgun Gothic', Arial, sans-serif";
+      context.fillText("가격대 및 묶음 프로모션 전체", margin, y + 34);
+      y = drawCanvasTable(context, {
+        headers: ["구분", "가격대", "적용 제품", "적용 물량", "공급 원가", "참약사/묶음 판매가", "마진액 VAT 포함", "마진액 VAT 미포함", "마진율", "약국 판매가", "약국 구입 총액"],
+        rows: report.rows.map((row) => [
+          row.type, row.label, row.products || "-", row.quantity, formatWon(row.cost), formatWon(row.sellingPrice),
+          formatWon(row.margin), formatWon(row.marginExVat), formatPercent(row.marginRate), formatWon(row.pharmacySellingPrice), formatWon(row.purchaseTotal)
+        ]),
+        widths: [125, 150, 350, 130, 155, 190, 170, 180, 115, 155, 200],
+        x: margin,
+        y: y + 70
+      });
+
+      context.fillStyle = "#0f172a";
+      context.font = "700 22px 'Malgun Gothic', Arial, sans-serif";
+      context.fillText(`제조사 견적 비교${distribution.comparisonCategory ? ` · ${distribution.comparisonCategory}` : ""}`, margin, y + 34);
+      y = drawCanvasTable(context, {
+        headers: ["제품명/제조사", "허가사", "포장단위", "배치 수량", "가격대", "VAT 포함", "최종 원가", "예상 판매가", "마진율", "약국 판매가"],
+        rows: report.comparisonQuotes.map((quote) => [`${quote.productName}\n${quote.manufacturer}`, quote.permitCompany, quote.packagingUnit, quote.quantity, quote.scenario, formatWon(quote.vatUnitPrice), formatWon(quote.finalUnitCost), formatWon(quote.expectedSellingPrice), quote.marginRate, formatWon(quote.pharmacySellingPrice)]),
+        widths: [330, 210, 180, 180, 220, 190, 190, 210, 160, 230], x: margin, y: y + 70
+      });
+      context.fillStyle = "#0f172a";
+      context.font = "700 22px 'Malgun Gothic', Arial, sans-serif";
+      context.fillText("경쟁제품 비교", margin, y + 34);
+      y = drawCanvasTable(context, {
+        headers: ["기준일", "경쟁제품명", "판매처", "포장단위", "판매구간 및 단가", "비고"],
+        rows: report.competitors.length > 0
+          ? report.competitors.map((competitor) => [competitor.date, competitor.productName, competitor.salesChannel, competitor.packagingUnit, competitor.prices, competitor.memo])
+          : [["-", "등록된 경쟁제품 없음", "-", "-", "-", "-"]],
+        widths: [220, 420, 320, 260, 520, 380],
+        x: margin,
+        y: y + 70
+      });
+
+      const output = document.createElement("canvas");
+      output.width = width;
+      output.height = Math.ceil(y + margin);
+      output.getContext("2d").drawImage(canvas, 0, 0, width, output.height, 0, 0, width, output.height);
+      const blob = await new Promise((resolve) => output.toBlob(resolve, "image/png"));
       if (!blob) throw new Error("이미지 생성 실패");
       downloadReportBlob(blob, `${reportFileName(report.title)}_유통구조.png`);
-    } catch {
-      window.alert("이미지를 생성하지 못했습니다. Excel 다운로드를 이용해주세요.");
-    } finally {
-      URL.revokeObjectURL(imageUrl);
+    } catch (error) {
+      console.error("유통 구조 이미지 저장 실패", error);
+      window.alert("이미지를 생성하지 못했습니다. 잠시 후 다시 시도해주세요.");
     }
   };
 
@@ -539,10 +724,18 @@ export default function DistributionStructureTab({
 
   const updatePricingScenario = (patch) => {
     if (!activePricingScenario) return;
-    updateDistribution({
-      pricingScenarios: distribution.pricingScenarios.map((scenario) => (
+    const ownerId = String(activePricingScenario._ownerItemId || selectedItem?.id || "");
+    const ownerItem = items.find((item) => String(item.id) === ownerId);
+    if (!ownerItem) return;
+    const ownerDistribution = getDistribution(ownerItem);
+    onUpdateItem?.(ownerItem.id, {
+      distributionStructure: {
+        ...ownerDistribution,
+        pricingScenarios: ownerDistribution.pricingScenarios.map((scenario) => (
         String(scenario.id) === String(activePricingScenario.id) ? { ...scenario, ...patch } : scenario
-      ))
+        )),
+        updatedAt: new Date().toISOString()
+      }
     });
   };
 
@@ -561,29 +754,38 @@ export default function DistributionStructureTab({
   const toggleBundleItem = (itemId) => {
     if (!activePricingScenario) return;
     const id = String(itemId);
-    const selectedId = String(selectedItem?.id || "");
+    const ownerId = String(activePricingScenario._ownerItemId || selectedItem?.id || "");
     const nextIds = new Set((activePricingScenario.bundleItemIds || []).map(String));
     if (nextIds.has(id)) {
-      if (id === selectedId) return;
+      if (id === ownerId) return;
       nextIds.delete(id);
     } else {
       nextIds.add(id);
     }
-    if (selectedId) nextIds.add(selectedId);
+    if (ownerId) nextIds.add(ownerId);
     updatePricingScenario({ bundleItemIds: [...nextIds] });
   };
 
   const removeActivePricingScenario = () => {
-    if (!activePricingScenario || distribution.pricingScenarios.length <= 1) {
+    const ownerId = String(activePricingScenario?._ownerItemId || selectedItem?.id || "");
+    const ownerItem = items.find((item) => String(item.id) === ownerId);
+    const ownerDistribution = getDistribution(ownerItem);
+    if (!activePricingScenario || !ownerItem || (activePricingScenario.scenarioType !== "bundle" && ownerDistribution.pricingScenarios.length <= 1)) {
       window.alert("가격대 탭은 최소 1개가 필요합니다.");
       return;
     }
     if (!window.confirm(`"${activePricingScenario.label || "가격대"}" 탭을 삭제하시겠습니까?`)) return;
-    const nextScenarios = distribution.pricingScenarios.filter((scenario) => (
+    const nextScenarios = ownerDistribution.pricingScenarios.filter((scenario) => (
       String(scenario.id) !== String(activePricingScenario.id)
     ));
-    updateDistribution({ pricingScenarios: nextScenarios });
-    setActivePricingScenarioId(nextScenarios[0]?.id || null);
+    onUpdateItem?.(ownerItem.id, {
+      distributionStructure: {
+        ...ownerDistribution,
+        pricingScenarios: nextScenarios,
+        updatedAt: new Date().toISOString()
+      }
+    });
+    setActivePricingScenarioId(distribution.pricingScenarios[0]?.id || null);
   };
 
   const resetDistributionStructure = () => {
@@ -956,7 +1158,7 @@ export default function DistributionStructureTab({
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 12px", borderBottom: "1px solid #dbe3ee", background: "#f8fafc", overflowX: "auto" }}>
-                  {distribution.pricingScenarios.map((scenario, index) => {
+                  {visiblePricingScenarios.map((scenario, index) => {
                     const active = String(scenario.id) === String(activePricingScenario?.id);
                     return (
                       <button
@@ -978,6 +1180,7 @@ export default function DistributionStructureTab({
                         }}
                       >
                         {scenario.label || `가격대 ${index + 1}`}
+                        {scenario._linked ? " · 연결" : ""}
                         {scenario.scenarioType === "bundle" ? " · 묶음" : ""}
                         {scenario.minimumQuantity ? ` · ${scenario.minimumQuantity}개 이상` : ""}
                       </button>
@@ -1013,7 +1216,7 @@ export default function DistributionStructureTab({
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 7, padding: 9, border: "1px solid #dbe3ee", borderRadius: 6, background: "#f8fafc", maxHeight: 190, overflowY: "auto" }}>
                           {bundleCandidateItems.map((item) => {
                             const checked = bundleItemIdSet.has(String(item.id));
-                            const locked = String(item.id) === String(selectedItem?.id);
+                            const locked = String(item.id) === String(activePricingScenario?._ownerItemId || selectedItem?.id);
                             return (
                               <label key={item.id} style={{ minWidth: 0, display: "flex", alignItems: "flex-start", gap: 7, padding: "7px 8px", border: `1px solid ${checked ? "#93c5fd" : "#e2e8f0"}`, borderRadius: 6, background: checked ? "#eff6ff" : "#fff", cursor: locked ? "default" : "pointer" }}>
                                 <input type="checkbox" checked={checked} disabled={locked} onChange={() => toggleBundleItem(item.id)} style={{ marginTop: 2 }} />
@@ -1139,13 +1342,13 @@ export default function DistributionStructureTab({
                     <button
                       type="button"
                       onClick={removeActivePricingScenario}
-                      disabled={distribution.pricingScenarios.length <= 1}
+                      disabled={activePricingScenario?.scenarioType !== "bundle" && getDistribution(items.find((item) => String(item.id) === String(activePricingScenario?._ownerItemId || selectedItem?.id))).pricingScenarios.length <= 1}
                       style={{
                         ...secondaryButtonStyle,
-                        color: distribution.pricingScenarios.length <= 1 ? "#94a3b8" : "#dc2626",
-                        borderColor: distribution.pricingScenarios.length <= 1 ? "#e2e8f0" : "#fecaca",
-                        cursor: distribution.pricingScenarios.length <= 1 ? "not-allowed" : "pointer",
-                        opacity: distribution.pricingScenarios.length <= 1 ? 0.65 : 1
+                        color: activePricingScenario?.scenarioType !== "bundle" && getDistribution(items.find((item) => String(item.id) === String(activePricingScenario?._ownerItemId || selectedItem?.id))).pricingScenarios.length <= 1 ? "#94a3b8" : "#dc2626",
+                        borderColor: activePricingScenario?.scenarioType !== "bundle" && getDistribution(items.find((item) => String(item.id) === String(activePricingScenario?._ownerItemId || selectedItem?.id))).pricingScenarios.length <= 1 ? "#e2e8f0" : "#fecaca",
+                        cursor: activePricingScenario?.scenarioType !== "bundle" && getDistribution(items.find((item) => String(item.id) === String(activePricingScenario?._ownerItemId || selectedItem?.id))).pricingScenarios.length <= 1 ? "not-allowed" : "pointer",
+                        opacity: activePricingScenario?.scenarioType !== "bundle" && getDistribution(items.find((item) => String(item.id) === String(activePricingScenario?._ownerItemId || selectedItem?.id))).pricingScenarios.length <= 1 ? 0.65 : 1
                       }}
                     >
                       현재 가격대 탭 삭제
@@ -1236,7 +1439,8 @@ export default function DistributionStructureTab({
                     <tbody>
                       {comparisonGroupItems.map((item) => {
                         const itemDistribution = getDistribution(item);
-                        const scenario = itemDistribution.pricingScenarios.find((entry) => String(entry.id) === String(comparisonScenarioByItemId[item.id])) || itemDistribution.pricingScenarios[0];
+                        const itemPricingScenarios = getPricingScenariosForItem(item, items);
+                        const scenario = itemPricingScenarios.find((entry) => String(entry.id) === String(comparisonScenarioByItemId[item.id])) || itemPricingScenarios[0];
                         const amounts = getBaseAmounts(item);
                         const expectedSellingPrice = scenario?.scenarioType === "bundle"
                           ? parseNumber(scenario.bundleSellingPrice)
@@ -1268,7 +1472,7 @@ export default function DistributionStructureTab({
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12 }}>{item.quantity || "-"}</td>
                             <td style={{ padding: 6, borderBottom: "1px solid #edf2f7" }}>
                               <select value={scenario?.id || ""} onChange={(event) => setComparisonScenarioByItemId((current) => ({ ...current, [item.id]: event.target.value }))} style={{ ...inputStyle, minHeight: 30, padding: "4px 6px", fontSize: 11 }} aria-label={`${item.productName || item.manufacturer || "견적"} 가격대`}>
-                                {itemDistribution.pricingScenarios.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}{entry.scenarioType === "bundle" ? " (묶음)" : ""}</option>)}
+                                {itemPricingScenarios.map((entry) => <option key={`${entry._ownerItemId}_${entry.id}`} value={entry.id}>{entry.label}{entry.scenarioType === "bundle" ? " (묶음)" : ""}</option>)}
                               </select>
                             </td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12, fontWeight: 800 }}>{formatWon(amounts.vatUnitPrice)}</td>
