@@ -76,6 +76,29 @@ function formatPercent(value) {
   return `${new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(value)}%`;
 }
 
+function escapeReportMarkup(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function reportFileName(value) {
+  return String(value || "유통구조").replace(/[\\/:*?"<>|]/g, "_").slice(0, 80);
+}
+
+function downloadReportBlob(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function getItemLabel(item) {
   const ingredients = formatIngredientAmountLabel(item, item.manufacturer || "성분 미입력");
   return item?.productName ? `${item.productName} · ${ingredients}` : ingredients;
@@ -228,6 +251,7 @@ export default function DistributionStructureTab({
   const [editingItemId, setEditingItemId] = useState(null);
   const [activePricingScenarioId, setActivePricingScenarioId] = useState(null);
   const [comparisonCategoryDraft, setComparisonCategoryDraft] = useState("");
+  const [comparisonScenarioByItemId, setComparisonScenarioByItemId] = useState({});
   const query = search.trim().toLowerCase();
   const categoryItems = useMemo(() => (
     selectedCategory === "all" ? items : items.filter((item) => item.category === selectedCategory)
@@ -346,6 +370,95 @@ export default function DistributionStructureTab({
     ? (bundleMarginAmount / bundleSellingPrice) * 100
     : null;
   const categoryLabelById = Object.fromEntries(categories.map((category) => [category.id, category.label]));
+
+  const createDistributionReport = () => {
+    const rows = distribution.pricingScenarios.map((scenario) => {
+      const quantity = parseNumber(scenario.minimumQuantity);
+      if (scenario.scenarioType === "bundle") {
+        const selectedIds = new Set((scenario.bundleItemIds || []).map(String));
+        const selectedProducts = items.filter((item) => selectedIds.has(String(item.id)));
+        const cost = quantity
+          ? selectedProducts.reduce((sum, item) => sum + (getBaseAmounts(item).finalUnitCost || 0), 0) * quantity
+          : null;
+        const sellingPrice = parseNumber(scenario.bundleSellingPrice);
+        const margin = sellingPrice !== null && cost !== null ? sellingPrice - cost : null;
+        return {
+          type: "묶음 프로모션",
+          label: scenario.label,
+          products: selectedProducts.map(getItemLabel).join(" + "),
+          quantity: quantity ? `각 ${quantity.toLocaleString("ko-KR")}개` : "-",
+          cost,
+          sellingPrice,
+          margin,
+          marginExVat: margin === null ? null : margin / 1.1,
+          marginRate: sellingPrice && margin !== null ? (margin / sellingPrice) * 100 : null,
+          pharmacySellingPrice: null,
+          purchaseTotal: sellingPrice
+        };
+      }
+      const sellingPrice = calculateSellingPriceFromMarginRate(baseAmounts.finalUnitCost, parseNumber(scenario.chamyaksaMarginRate));
+      const margin = sellingPrice !== null && baseAmounts.finalUnitCost !== null ? sellingPrice - baseAmounts.finalUnitCost : null;
+      return {
+        type: "일반 가격대",
+        label: scenario.label,
+        products: getItemLabel(selectedItem),
+        quantity: quantity ? `${quantity.toLocaleString("ko-KR")}개 이상` : "기본",
+        cost: baseAmounts.finalUnitCost,
+        sellingPrice,
+        margin,
+        marginExVat: margin === null ? null : margin / 1.1,
+        marginRate: parseNumber(scenario.chamyaksaMarginRate),
+        pharmacySellingPrice,
+        purchaseTotal: sellingPrice !== null && quantity ? sellingPrice * quantity : null
+      };
+    });
+    const headCells = ["구분", "가격대", "적용 제품", "적용 물량", "공급 원가(VAT 포함)", "참약사/묶음 판매가", "마진액(VAT 포함)", "마진액(VAT 미포함)", "마진율", "약국 판매가", "약국 구입 총액"];
+    const rowHtml = rows.map((row) => `<tr>${[
+      row.type, row.label, row.products || "-", row.quantity, formatWon(row.cost), formatWon(row.sellingPrice),
+      formatWon(row.margin), formatWon(row.marginExVat), formatPercent(row.marginRate), formatWon(row.pharmacySellingPrice), formatWon(row.purchaseTotal)
+    ].map((value) => `<td>${escapeReportMarkup(value)}</td>`).join("")}</tr>`).join("");
+    const competitorRows = sharedCompetitors.flatMap((item) => getDistribution(item).competitors.map((competitor) => (
+      `<tr>${[competitor.date || "-", competitor.productName || "-", competitor.salesChannel || "-", competitor.packagingUnit || "-", getCompetitorPriceTiers(competitor).map((tier) => `${tier.label}: ${formatEnteredPrice(tier.price)}`).join(" / "), competitor.memo || "-"].map((value) => `<td>${escapeReportMarkup(value)}</td>`).join("")}</tr>`
+    ))).join("");
+    return {
+      title: getItemLabel(selectedItem),
+      rows,
+      html: `<div class="report"><h1>유통 구조 정책 보고서</h1><h2>${escapeReportMarkup(getItemLabel(selectedItem))}</h2><p>${escapeReportMarkup(selectedItem.manufacturer || "제조사 미입력")} · ${escapeReportMarkup(categoryLabelById[selectedItem.category] || selectedItem.category)} · 생성 ${escapeReportMarkup(new Date().toLocaleString("ko-KR"))}</p><h3>공급 기준</h3><table><tbody><tr><th>포장단위</th><td>${escapeReportMarkup(selectedItem.packagingUnit || "-")}</td><th>배치 당 포장단위 개수</th><td>${escapeReportMarkup(selectedItem.quantity || "-")}</td><th>최종 유통 원가</th><td>${escapeReportMarkup(formatWon(baseAmounts.finalUnitCost))}</td></tr></tbody></table><h3>가격대 및 묶음 프로모션 전체</h3><table><thead><tr>${headCells.map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${rowHtml}</tbody></table><h3>경쟁제품 비교</h3><table><thead><tr>${["기준일", "경쟁제품명", "판매처", "포장단위", "판매구간 및 단가", "비고"].map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${competitorRows || '<tr><td colspan="6">등록된 경쟁제품 없음</td></tr>'}</tbody></table></div>`
+    };
+  };
+
+  const downloadDistributionExcel = () => {
+    if (!selectedItem) return;
+    const report = createDistributionReport();
+    const css = `<style>body{font-family:Arial,'Malgun Gothic',sans-serif;color:#0f172a}h1{font-size:22px}h2{font-size:17px}h3{margin-top:20px;font-size:14px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #94a3b8;padding:7px;font-size:11px;text-align:left;vertical-align:top}th{background:#dbeafe;font-weight:700}</style>`;
+    downloadReportBlob(new Blob([`\uFEFF<html><head><meta charset="utf-8">${css}</head><body>${report.html}</body></html>`], { type: "application/vnd.ms-excel;charset=utf-8" }), `${reportFileName(report.title)}_유통구조.xls`);
+  };
+
+  const downloadDistributionImage = async () => {
+    if (!selectedItem) return;
+    const report = createDistributionReport();
+    const width = 1600;
+    const height = Math.max(900, 520 + (report.rows.length * 88) + (sharedCompetitors.length * 55));
+    const css = `.report{box-sizing:border-box;width:${width}px;min-height:${height}px;padding:38px;background:#fff;font-family:Arial,'Malgun Gothic',sans-serif;color:#0f172a}.report h1{margin:0;font-size:30px}.report h2{margin:12px 0 4px;font-size:22px}.report p{color:#475569}.report h3{margin:25px 0 8px;font-size:17px}.report table{border-collapse:collapse;width:100%;table-layout:fixed}.report th,.report td{border:1px solid #94a3b8;padding:9px 7px;font-size:12px;text-align:left;vertical-align:top;word-break:break-word}.report th{background:#dbeafe;font-weight:800}`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml"><style>${css}</style>${report.html}</div></foreignObject></svg>`;
+    const imageUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+    try {
+      const image = new Image();
+      image.src = imageUrl;
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d").drawImage(image, 0, 0);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!blob) throw new Error("이미지 생성 실패");
+      downloadReportBlob(blob, `${reportFileName(report.title)}_유통구조.png`);
+    } catch {
+      window.alert("이미지를 생성하지 못했습니다. Excel 다운로드를 이용해주세요.");
+    } finally {
+      URL.revokeObjectURL(imageUrl);
+    }
+  };
 
   useEffect(() => {
     setComparisonCategoryDraft(distribution.comparisonCategory);
@@ -808,7 +921,9 @@ export default function DistributionStructureTab({
                 <div style={{ padding: "12px 15px", borderBottom: "1px solid #cbd5e1" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                     <div style={{ color: "#0f172a", fontSize: 16, fontWeight: 900 }}>판매가 및 마진 설정</div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7, flexWrap: "wrap" }}>
+                      <button type="button" onClick={downloadDistributionExcel} style={{ ...secondaryButtonStyle, minHeight: 32, padding: "5px 9px", fontSize: 12 }}>Excel 다운로드</button>
+                      <button type="button" onClick={downloadDistributionImage} style={{ ...secondaryButtonStyle, minHeight: 32, padding: "5px 9px", fontSize: 12 }}>이미지 저장</button>
                       <button
                         type="button"
                         onClick={completeDistributionStructure}
@@ -1100,19 +1215,20 @@ export default function DistributionStructureTab({
                   </div>
                   <table style={{ width: "100%", minWidth: 900, borderCollapse: "collapse", tableLayout: "fixed" }}>
                     <colgroup>
-                      <col style={{ width: "13%" }} />
                       <col style={{ width: "12%" }} />
-                      <col style={{ width: "9%" }} />
-                      <col style={{ width: "13%" }} />
+                      <col style={{ width: "10%" }} />
+                      <col style={{ width: "8%" }} />
                       <col style={{ width: "10%" }} />
                       <col style={{ width: "11%" }} />
-                      <col style={{ width: "12%" }} />
+                      <col style={{ width: "10%" }} />
+                      <col style={{ width: "10%" }} />
+                      <col style={{ width: "10%" }} />
                       <col style={{ width: "9%" }} />
-                      <col style={{ width: "11%" }} />
+                      <col style={{ width: "10%" }} />
                     </colgroup>
                     <thead>
                       <tr style={{ background: "#eef6ff" }}>
-                        {["제품명 / 제조사", "허가사", "포장단위", "배치 당 포장단위 개수", "VAT 포함 단가", "최종 유통 원가", "참약사 예상 판매가", "예상 마진율", "약국 판매가"].map((header) => (
+                        {["제품명 / 제조사", "허가사", "포장단위", "배치 당 포장단위 개수", "가격대", "VAT 포함 단가", "최종 유통 원가", "참약사 예상 판매가", "예상 마진율", "약국 판매가"].map((header) => (
                           <th key={header} style={{ padding: "8px 9px", borderBottom: "1px solid #dbe3ee", color: "#475569", fontSize: 11, textAlign: "left" }}>{header}</th>
                         ))}
                       </tr>
@@ -1120,12 +1236,11 @@ export default function DistributionStructureTab({
                     <tbody>
                       {comparisonGroupItems.map((item) => {
                         const itemDistribution = getDistribution(item);
-                        const scenario = itemDistribution.pricingScenarios[0];
+                        const scenario = itemDistribution.pricingScenarios.find((entry) => String(entry.id) === String(comparisonScenarioByItemId[item.id])) || itemDistribution.pricingScenarios[0];
                         const amounts = getBaseAmounts(item);
-                        const expectedSellingPrice = calculateSellingPriceFromMarginRate(
-                          amounts.finalUnitCost,
-                          parseNumber(scenario?.chamyaksaMarginRate)
-                        );
+                        const expectedSellingPrice = scenario?.scenarioType === "bundle"
+                          ? parseNumber(scenario.bundleSellingPrice)
+                          : calculateSellingPriceFromMarginRate(amounts.finalUnitCost, parseNumber(scenario?.chamyaksaMarginRate));
                         return (
                           <tr key={item.id} style={{ background: String(item.id) === String(selectedItem.id) ? "#f0f9ff" : "#fff" }}>
                             <td style={{ padding: 6, borderBottom: "1px solid #edf2f7", fontSize: 12, fontWeight: 800 }}>
@@ -1151,10 +1266,15 @@ export default function DistributionStructureTab({
                             </td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12 }}>{item.packagingUnit || "-"}</td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12 }}>{item.quantity || "-"}</td>
+                            <td style={{ padding: 6, borderBottom: "1px solid #edf2f7" }}>
+                              <select value={scenario?.id || ""} onChange={(event) => setComparisonScenarioByItemId((current) => ({ ...current, [item.id]: event.target.value }))} style={{ ...inputStyle, minHeight: 30, padding: "4px 6px", fontSize: 11 }} aria-label={`${item.productName || item.manufacturer || "견적"} 가격대`}>
+                                {itemDistribution.pricingScenarios.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}{entry.scenarioType === "bundle" ? " (묶음)" : ""}</option>)}
+                              </select>
+                            </td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", fontSize: 12, fontWeight: 800 }}>{formatWon(amounts.vatUnitPrice)}</td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", borderLeft: "1px solid #dbeafe", fontSize: 12, fontWeight: 800 }}>{formatWon(amounts.finalUnitCost)}</td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", borderLeft: "2px solid #bfdbfe", color: "#047857", fontSize: 12, fontWeight: 900 }}>{formatWon(expectedSellingPrice)}</td>
-                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", color: "#047857", fontSize: 12, fontWeight: 900 }}>{formatPercent(parseNumber(scenario?.chamyaksaMarginRate))}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", color: "#047857", fontSize: 12, fontWeight: 900 }}>{scenario?.scenarioType === "bundle" ? "묶음 총액" : formatPercent(parseNumber(scenario?.chamyaksaMarginRate))}</td>
                             <td style={{ padding: 9, borderBottom: "1px solid #edf2f7", borderLeft: "1px solid #d1fae5", color: "#0f766e", fontSize: 12, fontWeight: 900 }}>{formatWon(parseNumber(itemDistribution.pharmacySellingPrice))}</td>
                           </tr>
                         );
