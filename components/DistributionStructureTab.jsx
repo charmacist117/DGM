@@ -1285,6 +1285,13 @@ export default function DistributionStructureTab({
                     <strong>{formatWon(chamyaksaSellingPrice)}</strong>
                     <small style={{ color: "#64748b", fontWeight: 700 }}>약국 사입 금액</small>
                   </div>
+                  <div className="calculated-cell">
+                    <span>적용물량 참약사 총 마진액 (VAT 포함)</span>
+                    <strong>{formatWon(totalChamyaksaMarginAmount)}</strong>
+                    <small style={{ color: "#64748b", fontWeight: 700 }}>
+                      {appliedQuantity ? `VAT 미포함 ${formatWon(totalChamyaksaMarginAmountExcludingVat)}` : "적용 물량 입력 시 계산"}
+                    </small>
+                  </div>
                   <div>
                     <label style={labelStyle}>약국 판매가 (VAT 포함)</label>
                     <input
@@ -1306,13 +1313,6 @@ export default function DistributionStructureTab({
                     <strong style={{ color: pharmacyMarginAmount !== null && pharmacyMarginAmount < 0 ? "#dc2626" : "#0f172a" }}>
                       {formatWon(pharmacyMarginAmount)}
                     </strong>
-                  </div>
-                  <div className="calculated-cell">
-                    <span>적용 물량 총 마진액 (VAT 포함)</span>
-                    <strong>{formatWon(totalChamyaksaMarginAmount)}</strong>
-                    <small style={{ color: "#64748b", fontWeight: 700 }}>
-                      {appliedQuantity ? `VAT 미포함 ${formatWon(totalChamyaksaMarginAmountExcludingVat)}` : "적용 물량 입력 시 계산"}
-                    </small>
                   </div>
                   <div className="calculated-cell">
                     <span>약국 구입 총액 (VAT 포함)</span>
