@@ -4495,9 +4495,22 @@ function DashboardChangeLogSection({ entries, isAdmin, onAdd, onUpdate, onDelete
   const [createDraft, setCreateDraft] = useState({ changeDate: toDashboardDateTimeInput().slice(0, 10), changes: "" });
   const [editingId, setEditingId] = useState(null);
   const [editDraft, setEditDraft] = useState({ changeDate: "", changes: "" });
+  const [isSectionExpanded, setIsSectionExpanded] = useState(false);
+  const [expandedEntryIds, setExpandedEntryIds] = useState(() => new Set());
+
+  const toggleEntry = (entryId) => {
+    setExpandedEntryIds((current) => {
+      const next = new Set(current);
+      const key = String(entryId);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const openCreate = () => {
     setCreateDraft({ changeDate: toDashboardDateTimeInput().slice(0, 10), changes: "" });
+    setIsSectionExpanded(true);
     setIsCreating(true);
   };
 
@@ -4518,6 +4531,7 @@ function DashboardChangeLogSection({ entries, isAdmin, onAdd, onUpdate, onDelete
 
   const startEdit = (entry) => {
     setEditingId(entry.id);
+    setExpandedEntryIds((current) => new Set([...current, String(entry.id)]));
     setEditDraft({
       changeDate: getDashboardChangeDay(entry),
       changes: (entry.changes || []).join("\n")
@@ -4567,19 +4581,34 @@ function DashboardChangeLogSection({ entries, isAdmin, onAdd, onUpdate, onDelete
 
   return (
     <section style={{ background: "#fff", border: "1px solid #cbd5e1", borderRadius: 8, overflow: "hidden" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 15px", background: "#f8fafc", borderBottom: "1px solid #dbe3ee" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 13px", background: "#f8fafc", borderBottom: isSectionExpanded ? "1px solid #dbe3ee" : 0 }}>
         <div>
-          <div style={{ color: "#0f172a", fontSize: 16, fontWeight: 900 }}>제품개발 대시보드 변경사항</div>
-          <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>같은 날짜의 업데이트 내용을 하루 한 건으로 모아 확인합니다.</div>
+          <div style={{ color: "#0f172a", fontSize: 15, fontWeight: 900 }}>제품개발 대시보드 변경사항</div>
+          <div style={{ marginTop: 2, color: "#64748b", fontSize: 11 }}>
+            {sortedEntries.length > 0
+              ? `최근 ${formatDashboardChangeDay(sortedEntries[0])} · ${sortedEntries.length}일 기록`
+              : "등록된 변경사항 없음"}
+          </div>
         </div>
-        {isAdmin && !isCreating && (
-          <button onClick={openCreate} style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#0f172a", cursor: "pointer", fontSize: 12, fontWeight: 800 }}>
-            + 변경사항 기록
+        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          {isAdmin && !isCreating && isSectionExpanded && (
+            <button onClick={openCreate} style={{ padding: "6px 9px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#0f172a", cursor: "pointer", fontSize: 11, fontWeight: 800 }}>
+              + 기록
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setIsSectionExpanded((current) => !current)}
+            aria-expanded={isSectionExpanded}
+            title={isSectionExpanded ? "변경사항 접기" : "변경사항 펼치기"}
+            style={{ width: 30, height: 30, borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#334155", cursor: "pointer", fontSize: 16, fontWeight: 900 }}
+          >
+            {isSectionExpanded ? "▴" : "▾"}
           </button>
-        )}
+        </div>
       </div>
 
-      {isAdmin && isCreating && (
+      {isSectionExpanded && isAdmin && isCreating && (
         <div style={{ padding: 14, background: "#f8fafc", borderBottom: "1px solid #dbe3ee" }}>
           {formFields(createDraft, setCreateDraft)}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 7, marginTop: 10 }}>
@@ -4589,40 +4618,54 @@ function DashboardChangeLogSection({ entries, isAdmin, onAdd, onUpdate, onDelete
         </div>
       )}
 
-      <div>
+      {isSectionExpanded && <div>
         {sortedEntries.map((entry) => {
           const editing = String(editingId) === String(entry.id);
+          const expanded = expandedEntryIds.has(String(entry.id));
           return (
-            <div key={entry.id} style={{ padding: "13px 15px", borderBottom: "1px solid #e2e8f0" }}>
+            <div key={entry.id} style={{ borderBottom: "1px solid #e2e8f0" }}>
               {editing ? (
-                <>
+                <div style={{ padding: "12px 14px" }}>
                   {formFields(editDraft, setEditDraft)}
                   <div style={{ display: "flex", justifyContent: "flex-end", gap: 7, marginTop: 10 }}>
                     <button onClick={() => setEditingId(null)} style={subtleButton}>취소</button>
                     <button onClick={() => submitEdit(entry)} style={primaryButton}>수정 완료</button>
                   </div>
-                </>
+                </div>
               ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "130px minmax(0, 1fr) auto", gap: 14, alignItems: "start" }}>
-                  <div style={{ color: "#0f172a", fontSize: 13, fontWeight: 900, whiteSpace: "nowrap" }}>{formatDashboardChangeDay(entry)}</div>
-                  <ul style={{ margin: 0, paddingLeft: 18, color: "#334155", fontSize: 13, lineHeight: 1.65 }}>
-                    {(entry.changes || []).map((change, index) => <li key={`${entry.id}_${index}`}>{change}</li>)}
-                  </ul>
-                  {isAdmin && (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button onClick={() => startEdit(entry)} style={subtleButton}>수정</button>
-                      <button
-                        onClick={() => {
-                          if (!window.confirm("이 날짜의 변경사항 기록을 모두 삭제하시겠습니까?")) return;
-                          (entry.sourceIds || [entry.id]).forEach((sourceId) => onDelete?.(sourceId));
-                        }}
-                        style={{ ...subtleButton, borderColor: "#fecaca", color: "#dc2626" }}
-                      >
-                        삭제
-                      </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => toggleEntry(entry.id)}
+                    aria-expanded={expanded}
+                    style={{ width: "100%", display: "grid", gridTemplateColumns: "130px minmax(0, 1fr) auto", gap: 12, alignItems: "center", padding: "9px 14px", border: 0, background: expanded ? "#f8fafc" : "#fff", color: "#0f172a", cursor: "pointer", textAlign: "left" }}
+                  >
+                    <span style={{ fontSize: 12, fontWeight: 900, whiteSpace: "nowrap" }}>{formatDashboardChangeDay(entry)}</span>
+                    <span style={{ color: "#64748b", fontSize: 11, fontWeight: 800 }}>변경 {(entry.changes || []).length}건</span>
+                    <span aria-hidden="true" style={{ color: "#64748b", fontSize: 14 }}>{expanded ? "▴" : "▾"}</span>
+                  </button>
+                  {expanded && (
+                    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 12, alignItems: "start", padding: "4px 14px 12px 26px", background: "#f8fafc" }}>
+                      <ul style={{ margin: 0, paddingLeft: 16, color: "#334155", fontSize: 12, lineHeight: 1.55 }}>
+                        {(entry.changes || []).map((change, index) => <li key={`${entry.id}_${index}`}>{change}</li>)}
+                      </ul>
+                      {isAdmin && (
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button onClick={() => startEdit(entry)} style={subtleButton}>수정</button>
+                          <button
+                            onClick={() => {
+                              if (!window.confirm("이 날짜의 변경사항 기록을 모두 삭제하시겠습니까?")) return;
+                              (entry.sourceIds || [entry.id]).forEach((sourceId) => onDelete?.(sourceId));
+                            }}
+                            style={{ ...subtleButton, borderColor: "#fecaca", color: "#dc2626" }}
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
-                </div>
+                </>
               )}
             </div>
           );
@@ -4630,7 +4673,7 @@ function DashboardChangeLogSection({ entries, isAdmin, onAdd, onUpdate, onDelete
         {sortedEntries.length === 0 && (
           <div style={{ padding: 18, color: "#94a3b8", fontSize: 12, textAlign: "center" }}>아직 등록된 대시보드 변경사항이 없습니다.</div>
         )}
-      </div>
+      </div>}
     </section>
   );
 }
