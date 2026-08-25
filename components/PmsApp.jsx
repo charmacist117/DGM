@@ -3630,7 +3630,7 @@ function CommunicationTab({ project, onSaveLog }) {
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
           <div style={{ fontWeight: 800 }}>소통 히스토리 ({logs.length}건)</div>
-          <div style={{ fontSize: 12, color: "#64748b" }}>CSV는 최상단 데이터 이전 탭에서 일괄 내보내기</div>
+          <div style={{ fontSize: 12, color: "#64748b" }}>CSV는 환경설정 &gt; 데이터 이전에서 일괄 내보내기</div>
         </div>
 
         <div style={{ display: "grid", gap: 10 }}>
@@ -3775,7 +3775,7 @@ function DecisionTab({ project, onSaveLog }) {
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
           <div style={{ fontWeight: 800 }}>의사결정 아카이브 ({logs.length}건)</div>
-          <div style={{ fontSize: 12, color: "#64748b" }}>CSV는 최상단 데이터 이전 탭에서 일괄 내보내기</div>
+          <div style={{ fontSize: 12, color: "#64748b" }}>CSV는 환경설정 &gt; 데이터 이전에서 일괄 내보내기</div>
         </div>
         <div style={{ display: "grid", gap: 10 }}>
           {[...logs].reverse().map((item) => (
@@ -3798,6 +3798,107 @@ function DecisionTab({ project, onSaveLog }) {
           {logs.length === 0 && <div style={{ color: "#94a3b8", textAlign: "center", padding: 24 }}>기록이 없습니다.</div>}
         </div>
       </div>
+    </div>
+  );
+}
+
+function formatStorageBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) return "-";
+  if (bytes < 1024) return `${Math.round(bytes).toLocaleString()} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let amount = bytes;
+  let unit = -1;
+  do {
+    amount /= 1024;
+    unit += 1;
+  } while (amount >= 1024 && unit < units.length - 1);
+  return `${amount >= 100 ? amount.toFixed(0) : amount.toFixed(1)} ${units[unit]}`;
+}
+
+function ServerStatusTab() {
+  const [status, setStatus] = useState({ loading: true, data: null, error: "" });
+
+  const refresh = async () => {
+    setStatus((previous) => ({ ...previous, loading: true, error: "" }));
+    const startedAt = Date.now();
+    try {
+      const response = await fetch("/api/system/status", { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.ok) throw new Error(payload?.message || "서버 현황을 불러오지 못했습니다.");
+      setStatus({ loading: false, data: { ...payload, clientLatencyMs: Date.now() - startedAt }, error: "" });
+    } catch (error) {
+      setStatus({ loading: false, data: null, error: String(error?.message || error) });
+    }
+  };
+
+  useEffect(() => { refresh(); }, []);
+
+  const data = status.data;
+  const storage = data?.storage || {};
+  const usagePercent = Number.isFinite(Number(storage.usagePercent)) ? Number(storage.usagePercent) : null;
+  const panel = { background: "#fff", border: "1px solid #dbe3ee", borderRadius: 8, overflow: "hidden" };
+  const cell = { padding: 14, minHeight: 104, borderRight: "1px solid #e2e8f0" };
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <div style={{ ...panel, padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 900 }}>운영 서비스 상태</div>
+          <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>비밀키와 접속 주소는 노출하지 않고 실제 연결 여부와 사용량만 조회합니다.</div>
+        </div>
+        <button type="button" onClick={refresh} disabled={status.loading} style={subtleButton}>{status.loading ? "조회 중" : "새로고침"}</button>
+      </div>
+
+      {status.error && <div style={{ padding: 12, border: "1px solid #fecaca", borderRadius: 8, background: "#fef2f2", color: "#b91c1c", fontSize: 12, fontWeight: 800 }}>{status.error}</div>}
+      {!data && status.loading && <div style={{ ...panel, padding: 28, color: "#64748b", textAlign: "center" }}>현재 서버와 저장소를 확인하고 있습니다.</div>}
+
+      {data && <>
+        <div className="server-status-summary-grid" style={{ ...panel, display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
+          {[
+            ["애플리케이션 서버", data.application?.status === "online" ? "정상" : "확인 필요", `${data.application?.platform || "-"} · ${data.application?.environment || "-"}`],
+            ["데이터 저장소", storage.status === "online" ? "연결됨" : "확인 필요", storage.provider || "-"],
+            ["현재 사용량", formatStorageBytes(storage.usedBytes), storage.usedLabel || "저장소 실사용량"],
+            ["남은 여유공간", storage.remainingBytes == null ? "한도 확인 필요" : formatStorageBytes(storage.remainingBytes), storage.limitBytes == null ? "요금제 한도 미연결" : `총 ${formatStorageBytes(storage.limitBytes)}`]
+          ].map(([label, value, note], index) => (
+            <div key={label} style={{ ...cell, borderRight: index === 3 ? 0 : cell.borderRight }}>
+              <div style={{ fontSize: 11, color: "#64748b", fontWeight: 800 }}>{label}</div>
+              <div style={{ marginTop: 8, fontSize: 20, fontWeight: 900, color: value === "정상" || value === "연결됨" ? "#047857" : "#0f172a" }}>{value}</div>
+              <div style={{ marginTop: 5, fontSize: 11, color: "#64748b" }}>{note}</div>
+            </div>
+          ))}
+        </div>
+
+        {usagePercent != null && <div style={{ ...panel, padding: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 800 }}><span>저장공간 사용률</span><span>{usagePercent.toFixed(1)}%</span></div>
+          <div style={{ marginTop: 8, height: 10, borderRadius: 999, background: "#e2e8f0", overflow: "hidden" }}><div style={{ width: `${Math.min(100, Math.max(0, usagePercent))}%`, height: "100%", background: usagePercent >= 85 ? "#dc2626" : usagePercent >= 70 ? "#d97706" : "#0ea5e9" }} /></div>
+        </div>}
+
+        <div className="server-status-detail-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.15fr) minmax(0, .85fr)", gap: 14 }}>
+          <div style={panel}>
+            <div style={{ padding: "11px 14px", background: "#eef6ff", borderBottom: "1px solid #dbe3ee", fontWeight: 900 }}>연결 서비스</div>
+            {(data.services || []).map((service) => (
+              <div className="server-status-service-row" key={service.id} style={{ padding: "11px 14px", borderBottom: "1px solid #eef2f7", display: "grid", gridTemplateColumns: "150px 90px minmax(0, 1fr)", gap: 10, alignItems: "center", fontSize: 12 }}>
+                <strong>{service.name}</strong>
+                <span style={{ color: service.status === "online" ? "#047857" : service.status === "unused" ? "#64748b" : "#b45309", fontWeight: 900 }}>{service.label}</span>
+                <span style={{ color: "#64748b" }}>{service.detail}</span>
+              </div>
+            ))}
+          </div>
+          <div style={panel}>
+            <div style={{ padding: "11px 14px", background: "#eef6ff", borderBottom: "1px solid #dbe3ee", fontWeight: 900 }}>운영 데이터 건수</div>
+            <div style={{ padding: 14, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+              {Object.entries(data.counts || {}).map(([label, value]) => <div key={label} style={{ padding: 10, border: "1px solid #e2e8f0", borderRadius: 6, background: "#f8fafc" }}><div style={{ fontSize: 11, color: "#64748b" }}>{label}</div><div style={{ marginTop: 4, fontSize: 17, fontWeight: 900 }}>{Number(value || 0).toLocaleString()}건</div></div>)}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ ...panel, padding: 14, fontSize: 12, color: "#475569", lineHeight: 1.7 }}>
+          <strong>한도 조회 안내</strong><br />
+          {storage.limitMessage || "저장소 제공 한도 정보가 없어 현재 사용량만 표시합니다."}
+          <div style={{ marginTop: 5, color: "#64748b" }}>마지막 확인: {data.checkedAt ? new Date(data.checkedAt).toLocaleString() : "-"} · 응답 {data.clientLatencyMs}ms</div>
+        </div>
+      </>}
     </div>
   );
 }
@@ -4403,7 +4504,7 @@ function AdvisorTab({ project, onSaveLog }) {
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
           <div style={{ fontSize: 15, fontWeight: 800 }}>자문약사 기록 ({logs.length}건)</div>
-          <div style={{ fontSize: 12, color: "#64748b" }}>CSV는 최상단 데이터 이전 탭에서 일괄 내보내기</div>
+          <div style={{ fontSize: 12, color: "#64748b" }}>CSV는 환경설정 &gt; 데이터 이전에서 일괄 내보내기</div>
         </div>
         <div style={{ display: "grid", gap: 8 }}>
           {[...logs].reverse().map((log) => (
@@ -4883,6 +4984,7 @@ export default function PmsApp() {
   } = useProjectsStore();
   const [userRole, setUserRole] = useState(ROLE_GUEST);
   const [moduleTab, setModuleTab] = useState("development");
+  const [settingsSection, setSettingsSection] = useState("server");
   const [supplyCategory, setSupplyCategory] = useState("all");
   const [developmentStageFilter, setDevelopmentStageFilter] = useState("all");
   const [selectedDistributionItemId, setSelectedDistributionItemId] = useState(null);
@@ -6672,7 +6774,7 @@ export default function PmsApp() {
             ["promotion", "프로젝트 추진"],
             ["schedule", "제품일정관리 및 간트차트"],
             ["contract", "계약 관리"],
-            ["transfer", "데이터 이전"]
+            ["transfer", "환경설정"]
           ].map(([id, label]) => (
             <button
               key={id}
@@ -6724,6 +6826,8 @@ export default function PmsApp() {
         contractRecords={contractRecords}
         contractParentScope={contractParentScope}
         setContractParentScope={setContractParentScope}
+        settingsSection={settingsSection}
+        setSettingsSection={setSettingsSection}
         reorderProject={reorderProject}
         selectedId={selectedId}
         openProject={openProject}
@@ -6842,15 +6946,15 @@ export default function PmsApp() {
           <>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12 }}>
               <div>
-                <div style={{ fontSize: 22, fontWeight: 900 }}>데이터 이전</div>
-                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>온라인과 오프라인 저장소 사이에서 전체 운영 데이터를 이동합니다.</div>
+                <div style={{ fontSize: 22, fontWeight: 900 }}>{settingsSection === "server" ? "현재 서버 조회" : "데이터 이전"}</div>
+                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{settingsSection === "server" ? "연결된 운영 서비스와 저장공간 사용 현황을 확인합니다." : "온라인과 오프라인 저장소 사이에서 전체 운영 데이터를 이동합니다."}</div>
               </div>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
                 <SyncBadge syncState={syncState} />
                 <div style={{ fontSize: 11, fontWeight: 800, color: "#0f172a", background: "#e2e8f0", borderRadius: 999, padding: "3px 9px" }}>{roleLabel}</div>
               </div>
             </div>
-            <BackupTab
+            {settingsSection === "server" ? <ServerStatusTab /> : <BackupTab
               projects={projects}
               adminLogs={adminLogs}
               supplyPriceItems={supplyPriceItems}
@@ -6858,7 +6962,7 @@ export default function PmsApp() {
               marketAnalysisDefaults={marketAnalysisDefaults}
               isAdmin={isAdmin}
               onRestore={applyRestoredData}
-            />
+            />}
           </>
         ) : isHome ? (
           <>
@@ -7471,7 +7575,13 @@ export default function PmsApp() {
         </main>
       </div>
       <style jsx global>{`
+        @media (max-width: 1100px) {
+          .server-status-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+          .server-status-detail-grid { grid-template-columns: 1fr !important; }
+        }
         @media (max-width: 720px) {
+          .server-status-summary-grid { grid-template-columns: 1fr !important; }
+          .server-status-service-row { grid-template-columns: 1fr !important; gap: 4px !important; }
           .pms-body-layout {
             display: block !important;
             min-height: 0 !important;

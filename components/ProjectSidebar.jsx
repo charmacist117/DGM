@@ -49,6 +49,8 @@ export default function ProjectSidebar({
   contractRecords = [],
   contractParentScope = "all",
   setContractParentScope,
+  settingsSection = "server",
+  setSettingsSection,
   reorderProject,
   selectedId,
   openProject,
@@ -143,7 +145,7 @@ export default function ProjectSidebar({
                   : (isContractMode
                       ? "모계약 탐색 및 계약 범위"
                       : (isTransferMode
-                      ? "전체 백업 및 복원"
+                      ? "서버 및 백업 설정"
                       : (isStandaloneHomeMode
                         ? "시스템 업데이트 안내"
                         : (isDevelopmentOverviewMode ? "전 과정 진척 현황" : "제품일정 및 간트 관리")))))))}
@@ -364,9 +366,37 @@ export default function ProjectSidebar({
           })}
         </div>
       ) : isTransferMode ? (
-        <div style={{ flex: 1, minHeight: 0, border: "1px solid rgba(148, 163, 184, .28)", borderRadius: 8, background: "rgba(30, 41, 59, .62)", padding: 12 }}>
-          <div style={{ fontSize: 12, fontWeight: 900, color: "#f8fafc", marginBottom: 6 }}>데이터 이전</div>
-          <div style={{ fontSize: 11, lineHeight: 1.6, color: "#94a3b8" }}>프로젝트, 이력, 공급단가를 하나의 백업 파일로 관리합니다.</div>
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ border: "1px solid rgba(148, 163, 184, .28)", borderRadius: 8, background: "rgba(30, 41, 59, .62)", padding: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 900, color: "#f8fafc", marginBottom: 6 }}>환경설정</div>
+            <div style={{ fontSize: 11, lineHeight: 1.6, color: "#94a3b8" }}>서버 상태를 확인하고 운영 데이터를 백업·복원합니다.</div>
+          </div>
+          {[
+            ["server", "현재 서버 조회", "연결 상태와 저장공간 확인"],
+            ["transfer", "데이터 이전", "전체·탭별 백업 및 복원"]
+          ].map(([id, label, description]) => {
+            const active = settingsSection === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setSettingsSection?.(id)}
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  border: active ? "1px solid #7dd3fc" : "1px solid rgba(148, 163, 184, .28)",
+                  borderRadius: 8,
+                  background: active ? "#e0f2fe" : "rgba(30, 41, 59, .62)",
+                  color: active ? "#0f172a" : "#f8fafc",
+                  padding: "10px 12px",
+                  cursor: "pointer"
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 900 }}>{label}</div>
+                <div style={{ marginTop: 3, fontSize: 10, color: active ? "#0369a1" : "#94a3b8" }}>{description}</div>
+              </button>
+            );
+          })}
         </div>
       ) : isStandaloneHomeMode ? (
         <div style={{ flex: 1, minHeight: 0, border: "1px solid rgba(148, 163, 184, .28)", borderRadius: 8, background: "rgba(30, 41, 59, .62)", padding: 12 }}>
