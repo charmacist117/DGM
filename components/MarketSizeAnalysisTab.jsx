@@ -111,6 +111,91 @@ function formatDecimal(value, digits = 2, suffix = "") {
   return `${value.toLocaleString("ko-KR", { maximumFractionDigits: digits })}${suffix}`;
 }
 
+function escapeReportMarkup(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function reportFileName(value) {
+  return String(value || "시장규모분석").replace(/[\\/:*?"<>|]/g, "_").slice(0, 80);
+}
+
+function downloadReportBlob(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function getCanvasTextLines(context, value, maxWidth) {
+  const lines = [];
+  String(value ?? "-").split(/\r?\n/).forEach((sourceLine) => {
+    if (!sourceLine) {
+      lines.push("");
+      return;
+    }
+    let line = "";
+    Array.from(sourceLine).forEach((character) => {
+      const candidate = `${line}${character}`;
+      if (line && context.measureText(candidate).width > maxWidth) {
+        lines.push(line);
+        line = character;
+      } else {
+        line = candidate;
+      }
+    });
+    lines.push(line);
+  });
+  return lines.length > 0 ? lines : ["-"];
+}
+
+function drawCanvasTable(context, { headers, rows, widths, x, y }) {
+  const headerHeight = 46;
+  const lineHeight = 24;
+  const padding = 10;
+  let currentX = x;
+  context.textBaseline = "top";
+  context.font = "700 17px 'Malgun Gothic', Arial, sans-serif";
+  headers.forEach((header, index) => {
+    context.fillStyle = "#dbeafe";
+    context.fillRect(currentX, y, widths[index], headerHeight);
+    context.strokeStyle = "#94a3b8";
+    context.strokeRect(currentX, y, widths[index], headerHeight);
+    context.fillStyle = "#0f172a";
+    getCanvasTextLines(context, header, widths[index] - (padding * 2)).slice(0, 2).forEach((line, lineIndex) => {
+      context.fillText(line, currentX + padding, y + padding + (lineIndex * lineHeight));
+    });
+    currentX += widths[index];
+  });
+  let currentY = y + headerHeight;
+  rows.forEach((row, rowIndex) => {
+    context.font = "16px 'Malgun Gothic', Arial, sans-serif";
+    const lineSets = row.map((value, index) => getCanvasTextLines(context, value, widths[index] - (padding * 2)));
+    const rowHeight = Math.max(50, Math.max(...lineSets.map((lines) => lines.length)) * lineHeight + (padding * 2));
+    currentX = x;
+    row.forEach((value, index) => {
+      context.fillStyle = rowIndex % 2 === 0 ? "#ffffff" : "#f8fafc";
+      context.fillRect(currentX, currentY, widths[index], rowHeight);
+      context.strokeStyle = "#cbd5e1";
+      context.strokeRect(currentX, currentY, widths[index], rowHeight);
+      context.fillStyle = "#0f172a";
+      lineSets[index].forEach((line, lineIndex) => {
+        context.fillText(line, currentX + padding, currentY + padding + (lineIndex * lineHeight));
+      });
+      currentX += widths[index];
+    });
+    currentY += rowHeight;
+  });
+  return currentY;
+}
+
 function toDateInputValue(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -388,6 +473,136 @@ export default function MarketSizeAnalysisTab({
         ? `${growthRateYears}개년 성장률 · Year 1 YTD 기준`
         : `${growthRateYears}개년 성장률 · 연간 ${formatPeriodDate(annualPeriodStart)} 시작`);
 
+  const createMarketAnalysisReport = () => {
+    if (!selectedItem) return null;
+    const pairRows = (entries) => {
+      const rows = [];
+      for (let index = 0; index < entries.length; index += 2) {
+        rows.push([...(entries[index] || ["-", "-"]), ...(entries[index + 1] || ["-", "-"])]);
+      }
+      return rows;
+    };
+    const marketMetrics = [
+      ["기준 시장 규모", formatCompactWon(calculations.latestYear?.totalKrw)],
+      ["평균 시장 규모", formatCompactWon(calculations.averageMarketKrw)],
+      [`${growthRateYears || "-"}개년 연평균 성장률`, formatDecimal(selectedGrowthRate, 2, "%")],
+      ["전국 예상 공급수량", formatCount(calculations.marketUnitCount)],
+      ["참약사 약국 점유율", formatDecimal(calculations.pharmacyShareRate, 2, "%")],
+      ["침투 예상 가맹약국", formatCount(calculations.activeChainPharmacies, "개소")],
+      ["전체 약국 중 침투 예상 참약사 약국 점유율", formatDecimal(calculations.penetratedChamyaksaPharmacyShareRate, 2, "%")],
+      ["연간 예상 소진수량", formatCount(calculations.annualDemandUnits)],
+      ["침투 약국당 연간 수량", formatCount(calculations.annualUnitsPerActivePharmacy)]
+    ];
+    const conditions = [
+      ["기준 달러환율", formatDecimal(Number(workingAnalysis.exchangeRate), 2, "원")],
+      ["전국 약국 수", formatCount(calculations.nationwidePharmacyCount, "개소")],
+      ["참약사 약국 수", formatCount(calculations.chamyaksaPharmacyCount, "개소")],
+      ["가맹약국 예상 침투율", formatDecimal(calculations.penetrationRate, 2, "%")],
+      ["참약사 판매가 조정률", formatDecimal(Number(workingAnalysis.chamyaksaSellingPriceAdjustmentRate), 2, "%")],
+      ["제조사 판매가 조정률", formatDecimal(Number(workingAnalysis.manufacturerSellingPriceAdjustmentRate), 2, "%")],
+      ["시장 환산 평균 공급단가", formatWon(calculations.adjustedUnitCost)],
+      ["연 금융비용 이자율", formatDecimal(calculations.annualInterestRate, 2, "%")]
+    ];
+    const batchMetrics = [
+      ["공급단가 최소 주문 수량", formatCount(planningBatchFinance.minimumOrderQuantity)],
+      ["연간 필요 배치", formatDecimal(planningBatchFinance.exactBatches, 2, "배치")],
+      ["주문 수량 소진 예상기간", formatDecimal(planningBatchFinance.depletionMonthsPerBatch, 1, "개월")],
+      ["최소 주문 필요자금", formatCompactWon(planningBatchFinance.batchCapital)],
+      ["평균 재고자금", formatCompactWon(planningBatchFinance.averageInventoryCapital)],
+      ["연간 금융 기회비용", formatWon(planningBatchFinance.annualFinanceCost)],
+      ["총 금융 기회비용", formatWon(planningBatchFinance.totalFinanceCost)]
+    ];
+    const scenarioMetrics = [
+      ["기준 공급 원가", formatWon(calculations.manufacturerAdjustedUnitCost)],
+      ["참약사 예상 판매가", formatWon(calculations.chamyaksaSellingPrice)],
+      ["참약사 예상 마진율", formatDecimal(calculations.chamyaksaExpectedMarginRate, 2, "%")],
+      ["개당 예상 매출총이익", formatWon(calculations.marginPerUnit)],
+      ["총 매출총이익", formatCompactWon(planningTotalExpectedGrossProfit)],
+      ["총 금융비용 차감 기댓값", formatCompactWon(planningTotalExpectedProfitAfterFinance)]
+    ];
+    const yearRows = calculations.yearResults.map((entry) => [
+      entry.year ?? "-",
+      workingAnalysis.marketYears.find((year) => String(year.id) === String(entry.id))?.productionThousandKrw || "-",
+      workingAnalysis.marketYears.find((year) => String(year.id) === String(entry.id))?.importUsd || "-",
+      formatCompactWon(entry.totalKrw || null),
+      entry.includeInGrowthRate ? "포함" : "제외"
+    ]);
+    const forecastRows = scenarioForecasts.map((forecast, index) => [
+      `Year ${index + 1}${index === 0 && yearOneMode === "ytd" ? " YTD" : ""}`,
+      `${formatPeriodDate(forecast.periodStart)}~${formatPeriodDate(forecast.periodEnd)}`,
+      formatCount(forecast.value),
+      formatCompactWon(forecast.expectedRevenue),
+      formatCompactWon(forecast.expectedGrossProfit),
+      formatCompactWon(forecast.expectedProfitAfterFinance)
+    ]);
+    const htmlRows = (rows) => rows.map((row) => `<tr>${row.map((value) => `<td>${escapeReportMarkup(value)}</td>`).join("")}</tr>`).join("");
+    const htmlTable = (headers, rows) => `<table><thead><tr>${headers.map((value) => `<th>${escapeReportMarkup(value)}</th>`).join("")}</tr></thead><tbody>${htmlRows(rows)}</tbody></table>`;
+    return {
+      title: getItemLabel(selectedItem),
+      yearRows,
+      conditionRows: pairRows(conditions),
+      marketMetricRows: pairRows(marketMetrics),
+      forecastRows,
+      batchMetricRows: pairRows(batchMetrics),
+      scenarioMetricRows: pairRows(scenarioMetrics),
+      html: `<div class="report"><h1>시장 규모 분석 보고서</h1><h2>${escapeReportMarkup(getItemLabel(selectedItem))}</h2><p>${escapeReportMarkup(selectedItem.manufacturer || "제조사 미입력")} · ${escapeReportMarkup(categoryLabelById[selectedItem.category] || selectedItem.category)} · 검토결과 ${escapeReportMarkup(marketDecisionLabel(selectedItem.marketDecisionStatus))} · 생성 ${escapeReportMarkup(new Date().toLocaleString("ko-KR"))}</p><h3>최근 5개년 시장 실적</h3>${htmlTable(["연도", "생산실적(천원)", "수입실적(USD)", "합산 시장규모", "성장률 포함"], yearRows)}<h3>분석 조건</h3>${htmlTable(["조건", "값", "조건", "값"], pairRows(conditions))}<h3>시장 환산 및 약국 침투</h3>${htmlTable(["지표", "값", "지표", "값"], pairRows(marketMetrics))}<h3>성장률 반영 예상 소진 및 손익</h3>${htmlTable(["기간", "기준일", "예상 소진수량", "기대 매출", "매출총이익", "금융비용 차감"], forecastRows)}<h3>배치 소진 및 금융비용</h3>${htmlTable(["지표", "값", "지표", "값"], pairRows(batchMetrics))}<h3>조정 시나리오 기댓값</h3>${htmlTable(["지표", "값", "지표", "값"], pairRows(scenarioMetrics))}</div>`
+    };
+  };
+
+  const downloadMarketAnalysisExcel = () => {
+    const report = createMarketAnalysisReport();
+    if (!report) return;
+    const css = `<style>body{font-family:Arial,'Malgun Gothic',sans-serif;color:#0f172a}h1{font-size:22px}h2{font-size:17px}h3{margin-top:20px;font-size:14px}table{border-collapse:collapse;width:100%;margin-bottom:12px}th,td{border:1px solid #94a3b8;padding:7px;font-size:11px;text-align:left;vertical-align:top}th{background:#dbeafe;font-weight:700}</style>`;
+    downloadReportBlob(new Blob([`\uFEFF<html><head><meta charset="utf-8">${css}</head><body>${report.html}</body></html>`], { type: "application/vnd.ms-excel;charset=utf-8" }), `${reportFileName(report.title)}_시장규모분석.xls`);
+  };
+
+  const downloadMarketAnalysisImage = async () => {
+    const report = createMarketAnalysisReport();
+    if (!report) return;
+    try {
+      const width = 2200;
+      const margin = 40;
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = 5200;
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = "#0f172a";
+      context.textBaseline = "top";
+      context.font = "700 38px 'Malgun Gothic', Arial, sans-serif";
+      context.fillText("시장 규모 분석 보고서", margin, margin);
+      context.font = "700 27px 'Malgun Gothic', Arial, sans-serif";
+      getCanvasTextLines(context, report.title, width - (margin * 2)).slice(0, 2).forEach((line, index) => context.fillText(line, margin, 102 + (index * 34)));
+      context.font = "18px 'Malgun Gothic', Arial, sans-serif";
+      context.fillStyle = "#475569";
+      context.fillText(`${selectedItem.manufacturer || "제조사 미입력"} · ${categoryLabelById[selectedItem.category] || selectedItem.category} · 검토결과 ${marketDecisionLabel(selectedItem.marketDecisionStatus)} · 생성 ${new Date().toLocaleString("ko-KR")}`, margin, 178);
+      let y = 228;
+      const drawSection = (title, headers, rows, widths) => {
+        context.fillStyle = "#0f172a";
+        context.font = "700 22px 'Malgun Gothic', Arial, sans-serif";
+        context.fillText(title, margin, y);
+        y = drawCanvasTable(context, { headers, rows, widths, x: margin, y: y + 36 }) + 34;
+      };
+      drawSection("최근 5개년 시장 실적", ["연도", "생산실적(천원)", "수입실적(USD)", "합산 시장규모", "성장률 포함"], report.yearRows, [260, 500, 500, 560, 300]);
+      drawSection("분석 조건", ["조건", "값", "조건", "값"], report.conditionRows, [480, 580, 480, 580]);
+      drawSection("시장 환산 및 약국 침투", ["지표", "값", "지표", "값"], report.marketMetricRows, [560, 500, 560, 500]);
+      drawSection("성장률 반영 예상 소진 및 손익", ["기간", "기준일", "예상 소진수량", "기대 매출", "매출총이익", "금융비용 차감"], report.forecastRows, [240, 460, 340, 360, 360, 360]);
+      drawSection("배치 소진 및 금융비용", ["지표", "값", "지표", "값"], report.batchMetricRows, [560, 500, 560, 500]);
+      drawSection("조정 시나리오 기댓값", ["지표", "값", "지표", "값"], report.scenarioMetricRows, [560, 500, 560, 500]);
+      const output = document.createElement("canvas");
+      output.width = width;
+      output.height = Math.ceil(y + margin);
+      output.getContext("2d").drawImage(canvas, 0, 0, width, output.height, 0, 0, width, output.height);
+      const blob = await new Promise((resolve) => output.toBlob(resolve, "image/png"));
+      if (!blob) throw new Error("이미지 생성 실패");
+      downloadReportBlob(blob, `${reportFileName(report.title)}_시장규모분석.png`);
+    } catch (error) {
+      console.error("시장 규모 분석 이미지 저장 실패", error);
+      window.alert("이미지를 생성하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    }
+  };
+
   useEffect(() => {
     setEditingItemId(null);
     setDraft(null);
@@ -609,6 +824,8 @@ export default function MarketSizeAnalysisTab({
                     </div>
                   </div>
                   <div className="market-actions">
+                    <button type="button" onClick={downloadMarketAnalysisExcel} style={secondaryButtonStyle}>Excel 다운로드</button>
+                    <button type="button" onClick={downloadMarketAnalysisImage} style={secondaryButtonStyle}>이미지 저장</button>
                     <label className="market-decision-control">
                       <span>검토결과</span>
                       <select
@@ -815,7 +1032,7 @@ export default function MarketSizeAnalysisTab({
                     })}
                   </div>
                 </div>
-                <div className="metric-grid">
+                <div className="metric-grid market-overview-grid">
                   <Metric
                     label="기준 시장 규모"
                     value={formatCompactWon(calculations.latestYear?.totalKrw)}
@@ -852,10 +1069,15 @@ export default function MarketSizeAnalysisTab({
                     formula="참약사 약국 수 × 가맹약국 예상 침투율"
                   />
                   <Metric
+                    label="전체 약국 중 침투 예상 참약사 약국 점유율"
+                    value={formatDecimal(calculations.penetratedChamyaksaPharmacyShareRate, 2, "%")}
+                    formula="침투 예상 가맹약국 수 ÷ 전국 약국 수 × 100"
+                  />
+                  <Metric
                     label="연간 예상 소진수량"
                     value={formatCount(calculations.annualDemandUnits)}
                     tone="positive"
-                    formula="전국 예상 공급수량 × 참약사 약국 점유율 × 가맹약국 예상 침투율"
+                    formula="전국 예상 공급수량 × 전체 약국 중 침투 예상 참약사 약국 점유율"
                   />
                   <Metric
                     label="침투 약국당 연간 수량"
@@ -1182,6 +1404,7 @@ export default function MarketSizeAnalysisTab({
         .growth-period-control button { min-height: 30px; padding: 5px 10px; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; color: #475569; cursor: pointer; font-size: 12px; font-weight: 900; white-space: nowrap; }
         .growth-period-control button.segment-active { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; }
         .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .market-overview-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         .metric-grid-compact { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         .scenario-metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
         .scenario-total-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid #cbd5e1; background: #f8fafc; }
