@@ -373,6 +373,7 @@ export default function ProjectSidebar({
           </div>
           {[
             ["server", "현재 서버 조회", "연결 상태와 저장공간 확인"],
+            ...(isAdmin ? [["accounts", "접속 계정", "ADMIN 전용 계정·인증코드 확인"]] : []),
             ["transfer", "데이터 이전", "전체·탭별 백업 및 복원"]
           ].map(([id, label, description]) => {
             const active = settingsSection === id;

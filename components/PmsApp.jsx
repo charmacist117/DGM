@@ -81,6 +81,11 @@ const LEGACY_SAMPLE_TASK_ID = "sample";
 const LEGACY_QUALITY_TASK_ID = "quality";
 const ROLE_ADMIN = "admin";
 const ROLE_GUEST = "guest";
+const SETTINGS_SECTION_META = {
+  server: { title: "현재 서버 조회", description: "연결된 운영 서비스와 저장공간 사용 현황을 확인합니다." },
+  accounts: { title: "접속 계정 관리", description: "ADMIN 전용 로그인 계정과 인증코드 설정 방법을 확인합니다." },
+  transfer: { title: "데이터 이전", description: "온라인과 오프라인 저장소 사이에서 전체 운영 데이터를 이동합니다." }
+};
 const DASHBOARD_CHANGE_NOTICE_TYPE = "dashboard_change_notice";
 const DASHBOARD_CHANGELOG_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_1";
 const DASHBOARD_PRICING_TABS_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260724_2";
@@ -126,6 +131,7 @@ const DASHBOARD_PROJECT_PROMOTION_SEED_KEY = "pharmadev_dashboard_changelog_seed
 const DASHBOARD_REVIEW_PROMOTION_WORKFLOW_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260813_42";
 const DASHBOARD_DEVELOPMENT_OVERVIEW_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260814_45";
 const DASHBOARD_PERMIT_COMPANY_FILTER_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260818_54";
+const DASHBOARD_ACCESS_ACCOUNT_SETTINGS_SEED_KEY = "pharmadev_dashboard_changelog_seed_20260825_55";
 
 const PHASE_TEMPLATE_BY_ID = Object.fromEntries(PHASES.map((phase) => [phase.id, phase]));
 const PHASE_ID_SET = new Set(PHASES.map((phase) => phase.id));
@@ -3903,6 +3909,193 @@ function ServerStatusTab() {
   );
 }
 
+function AccessAccountSettingsTab({ isAdmin }) {
+  const [activeTab, setActiveTab] = useState("accounts");
+  const [state, setState] = useState({ loading: true, data: null, error: "" });
+  const [revealed, setRevealed] = useState(false);
+  const [notice, setNotice] = useState("");
+  const hideTimerRef = useRef(null);
+
+  const clearRevealTimer = () => {
+    if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = null;
+  };
+
+  const hidePasswords = () => {
+    clearRevealTimer();
+    setRevealed(false);
+    setState((previous) => ({
+      ...previous,
+      data: previous.data ? {
+        ...previous.data,
+        accounts: (previous.data.accounts || []).map(({ password, ...account }) => account)
+      } : previous.data
+    }));
+  };
+
+  const loadAccounts = async ({ reveal = false } = {}) => {
+    setState((previous) => ({ ...previous, loading: true, error: "" }));
+    try {
+      const response = await fetch(`/api/system/access-accounts${reveal ? "?reveal=1" : ""}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.ok) throw new Error(payload?.message || "접속 계정 정보를 불러오지 못했습니다.");
+      setState({ loading: false, data: payload, error: "" });
+      setRevealed(reveal);
+      clearRevealTimer();
+      if (reveal) {
+        hideTimerRef.current = window.setTimeout(() => {
+          setRevealed(false);
+          setState((previous) => ({
+            ...previous,
+            data: previous.data ? {
+              ...previous.data,
+              accounts: (previous.data.accounts || []).map(({ password, ...account }) => account)
+            } : previous.data
+          }));
+        }, 30_000);
+      }
+    } catch (error) {
+      setState({ loading: false, data: null, error: String(error?.message || error) });
+      setRevealed(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAdmin) loadAccounts();
+    return clearRevealTimer;
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (activeTab !== "accounts") hidePasswords();
+  }, [activeTab]);
+
+  const copyPassword = async (account) => {
+    if (!account?.password) return;
+    try {
+      await navigator.clipboard.writeText(account.password);
+      setNotice(`${account.id} 인증코드를 클립보드에 복사했습니다.`);
+      window.setTimeout(() => setNotice(""), 2500);
+    } catch {
+      setNotice("클립보드 복사에 실패했습니다. 브라우저 권한을 확인해주세요.");
+    }
+  };
+
+  const panelStyle = { background: "#fff", border: "1px solid #dbe3ee", borderRadius: 8, overflow: "hidden" };
+  const tabButton = (active) => ({
+    border: active ? "1px solid #2563eb" : "1px solid #cbd5e1",
+    borderRadius: 6,
+    background: active ? "#eff6ff" : "#fff",
+    color: active ? "#1d4ed8" : "#334155",
+    padding: "8px 13px",
+    fontSize: 12,
+    fontWeight: 900,
+    cursor: "pointer"
+  });
+
+  if (!isAdmin) {
+    return <div style={{ ...panelStyle, padding: 24, color: "#b91c1c", fontWeight: 800 }}>ADMIN 계정에서만 접속 계정 정보를 확인할 수 있습니다.</div>;
+  }
+
+  const data = state.data;
+  const accounts = data?.accounts || [];
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <div style={{ ...panelStyle, padding: 14 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" onClick={() => setActiveTab("accounts")} style={tabButton(activeTab === "accounts")}>계정 현황</button>
+          <button type="button" onClick={() => setActiveTab("help")} style={tabButton(activeTab === "help")}>추가·수정 도움말</button>
+        </div>
+      </div>
+
+      {activeTab === "accounts" ? (
+        <div style={panelStyle}>
+          <div style={{ padding: 14, background: "#eef6ff", borderBottom: "1px solid #dbe3ee", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 900 }}>현재 접속 계정</div>
+              <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>ADMIN 화면에서만 조회됩니다. 로그인 화면에는 ID 대신 인증코드만 입력합니다.</div>
+            </div>
+            {!data?.authenticationDisabled && (
+              <button type="button" disabled={state.loading} onClick={() => revealed ? hidePasswords() : loadAccounts({ reveal: true })} style={subtleButton}>
+                {revealed ? "비밀번호 숨기기" : "비밀번호 보기 (30초)"}
+              </button>
+            )}
+          </div>
+
+          {state.loading && !data && <div style={{ padding: 28, textAlign: "center", color: "#64748b" }}>계정 설정을 확인하고 있습니다.</div>}
+          {state.error && <div style={{ padding: 14, background: "#fef2f2", color: "#b91c1c", fontSize: 12, fontWeight: 800 }}>{state.error}</div>}
+          {data?.authenticationDisabled ? (
+            <div style={{ padding: 18, lineHeight: 1.8 }}>
+              <div style={{ fontSize: 14, fontWeight: 900 }}>PC 로컬 모드: ADMIN 자동 접속</div>
+              <div style={{ marginTop: 5, color: "#475569", fontSize: 12 }}>PC판은 로컬 파일 모드에서 로그인 인증을 사용하지 않으며 ADMIN 권한으로 자동 접속합니다. 따라서 표시하거나 수정할 로그인 비밀번호가 없습니다.</div>
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760, fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: "#f8fafc", color: "#475569", textAlign: "left" }}>
+                    {["ID", "권한", "환경변수", "설정 상태", "현재 PW", "관리"].map((label) => <th key={label} style={{ padding: "10px 12px", borderBottom: "1px solid #dbe3ee" }}>{label}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {accounts.map((account) => (
+                    <tr key={account.id}>
+                      <td style={{ padding: 12, borderBottom: "1px solid #eef2f7", fontWeight: 900 }}>{account.id}</td>
+                      <td style={{ padding: 12, borderBottom: "1px solid #eef2f7" }}>{account.roleLabel}</td>
+                      <td style={{ padding: 12, borderBottom: "1px solid #eef2f7", fontFamily: "monospace" }}>{account.envKey || "-"}</td>
+                      <td style={{ padding: 12, borderBottom: "1px solid #eef2f7", color: account.configured ? "#047857" : "#b91c1c", fontWeight: 900 }}>{account.configured ? "설정됨" : "미설정"}</td>
+                      <td style={{ padding: 12, borderBottom: "1px solid #eef2f7", fontFamily: "monospace", wordBreak: "break-all" }}>
+                        {account.configured ? (revealed && account.password ? account.password : "•".repeat(Math.min(Math.max(account.passwordLength || 8, 8), 16))) : "-"}
+                      </td>
+                      <td style={{ padding: 12, borderBottom: "1px solid #eef2f7" }}>
+                        <button type="button" disabled={!revealed || !account.password} onClick={() => copyPassword(account)} style={subtleButton}>복사</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {notice && <div style={{ padding: "10px 14px", background: "#ecfdf5", color: "#047857", fontSize: 12, fontWeight: 800 }}>{notice}</div>}
+          <div style={{ padding: 14, background: "#fff7ed", borderTop: "1px solid #fed7aa", color: "#9a3412", fontSize: 11, lineHeight: 1.7 }}>
+            비밀번호는 브라우저 저장소나 백업 파일에 보관하지 않습니다. 보기 후 30초가 지나면 화면 상태에서도 제거됩니다.
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 14 }}>
+          <div style={{ ...panelStyle, padding: 16 }}>
+            <div style={{ fontSize: 15, fontWeight: 900 }}>웹 버전 계정 추가·수정</div>
+            <ol style={{ margin: "10px 0 0", paddingLeft: 22, color: "#334155", fontSize: 12, lineHeight: 1.9 }}>
+              <li>Vercel 프로젝트의 <strong>Settings → Environment Variables</strong>로 이동합니다.</li>
+              <li>관리자 코드는 <code>APP_ADMIN_PASSWORD</code>, 매니저 코드는 <code>APP_USER_PASSWORD</code>를 추가하거나 수정합니다.</li>
+              <li>운영 환경은 <strong>Production</strong>에 적용하고 저장한 뒤 최신 커밋을 재배포합니다.</li>
+              <li>재배포 후 기존 세션에서 로그아웃하고 새 인증코드로 로그인해 확인합니다.</li>
+            </ol>
+            <div style={{ marginTop: 12, padding: 11, borderRadius: 6, background: "#f8fafc", color: "#475569", fontSize: 11, lineHeight: 1.7 }}>
+              현재 구조는 ADMIN 1개와 MANAGER 1개의 공용 인증코드를 지원합니다. 미설정 역할을 추가하는 것은 환경변수 등록으로 가능하지만, 개인별 ID를 3개 이상 운영하려면 사용자 테이블과 비밀번호 해시 저장 방식으로 인증 구조를 확장해야 합니다.
+            </div>
+          </div>
+
+          <div style={{ ...panelStyle, padding: 16 }}>
+            <div style={{ fontSize: 15, fontWeight: 900 }}>PC 버전</div>
+            <div style={{ marginTop: 8, color: "#334155", fontSize: 12, lineHeight: 1.8 }}>
+              PC판은 <code>PMS_STORAGE_DRIVER=local-file</code>일 때 인증을 생략하고 ADMIN으로 자동 접속합니다. 비밀번호를 추가하려면 단순 환경변수 입력이 아니라 데스크톱 실행기의 인증 생략 정책을 변경해야 합니다.
+            </div>
+          </div>
+
+          <div style={{ ...panelStyle, padding: 16, borderColor: "#fed7aa", background: "#fff7ed" }}>
+            <div style={{ fontSize: 14, fontWeight: 900, color: "#9a3412" }}>보안 주의사항</div>
+            <div style={{ marginTop: 7, color: "#9a3412", fontSize: 12, lineHeight: 1.8 }}>
+              인증코드를 소스 코드, GitHub, 문서, 백업 파일에 입력하지 마세요. <code>AUTH_SECRET</code>은 충분히 긴 무작위 값으로 유지하고, 변경하면 기존 로그인 세션이 모두 종료됩니다. 인증코드가 노출되었다면 즉시 환경변수에서 교체하고 재배포하세요.
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function BackupTab({ projects, adminLogs, supplyPriceItems, contractRecords, marketAnalysisDefaults, onRestore, isAdmin }) {
   const fullBackupInputRef = useRef(null);
   const moduleBackupInputRefs = useRef({});
@@ -5002,6 +5195,7 @@ export default function PmsApp() {
   });
   const isAdmin = canManage(userRole);
   const roleLabel = isAdmin ? "ADMIN" : "MANAGER";
+  const settingsMeta = SETTINGS_SECTION_META[settingsSection] || SETTINGS_SECTION_META.server;
   const normalizedSupplyPriceItems = useMemo(
     () => normalizeSupplyPriceItems(supplyPriceItems),
     [supplyPriceItems]
@@ -6352,6 +6546,31 @@ export default function PmsApp() {
     });
   }, [setAdminLogs, syncState.status]);
 
+  useEffect(() => {
+    if (syncState.status === "loading" || typeof window === "undefined") return;
+    if (window.localStorage.getItem(DASHBOARD_ACCESS_ACCOUNT_SETTINGS_SEED_KEY)) return;
+    window.localStorage.setItem(DASHBOARD_ACCESS_ACCOUNT_SETTINGS_SEED_KEY, "1");
+    setAdminLogs((previous) => {
+      const nextRevision = (previous || []).filter((log) => log.type === DASHBOARD_CHANGE_NOTICE_TYPE)
+        .reduce((highest, log) => Math.max(highest, Math.floor(dashboardRevisionOrder(log.revision))), 0) + 1;
+      return normalizeAdminLogs([...(previous || []), {
+        id: "dashboard_change_20260825_access_account_settings",
+        type: DASHBOARD_CHANGE_NOTICE_TYPE,
+        projectName: "제품개발 대시보드",
+        revision: String(nextRevision),
+        changeDate: TODAY,
+        changeDateTime: toDashboardDateTimeInput(),
+        changes: [
+          "환경설정에 ADMIN 전용 접속 계정 현황과 웹·PC 계정 추가·수정 도움말을 추가했습니다.",
+          "인증코드는 기본 마스킹하고 명시적으로 조회한 경우에도 30초 뒤 자동으로 화면에서 제거되도록 보안을 강화했습니다."
+        ],
+        actor: "시스템",
+        createdAt: new Date().toISOString()
+      }]);
+    });
+  }, [setAdminLogs, syncState.status]);
+
+
   const addDashboardChange = ({ changeDateTime, revision, changes }) => {
     if (!isAdmin) {
       window.alert("변경사항 기록은 ADMIN만 추가할 수 있습니다.");
@@ -6946,15 +7165,15 @@ export default function PmsApp() {
           <>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12 }}>
               <div>
-                <div style={{ fontSize: 22, fontWeight: 900 }}>{settingsSection === "server" ? "현재 서버 조회" : "데이터 이전"}</div>
-                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{settingsSection === "server" ? "연결된 운영 서비스와 저장공간 사용 현황을 확인합니다." : "온라인과 오프라인 저장소 사이에서 전체 운영 데이터를 이동합니다."}</div>
+                <div style={{ fontSize: 22, fontWeight: 900 }}>{settingsMeta.title}</div>
+                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{settingsMeta.description}</div>
               </div>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
                 <SyncBadge syncState={syncState} />
                 <div style={{ fontSize: 11, fontWeight: 800, color: "#0f172a", background: "#e2e8f0", borderRadius: 999, padding: "3px 9px" }}>{roleLabel}</div>
               </div>
             </div>
-            {settingsSection === "server" ? <ServerStatusTab /> : <BackupTab
+            {settingsSection === "server" ? <ServerStatusTab /> : settingsSection === "accounts" ? <AccessAccountSettingsTab isAdmin={isAdmin} /> : <BackupTab
               projects={projects}
               adminLogs={adminLogs}
               supplyPriceItems={supplyPriceItems}
