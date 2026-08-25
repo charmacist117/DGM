@@ -46,6 +46,83 @@ function formatCompactWon(value) {
   return formatWon(value);
 }
 
+function reportFileName(value) {
+  return String(value || "프로젝트추진").replace(/[\\/:*?"<>|]/g, "_").slice(0, 80);
+}
+
+function downloadReportBlob(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function getCanvasTextLines(context, value, maxWidth) {
+  const lines = [];
+  String(value ?? "-").split(/\r?\n/).forEach((sourceLine) => {
+    if (!sourceLine) {
+      lines.push("");
+      return;
+    }
+    let line = "";
+    Array.from(sourceLine).forEach((character) => {
+      const candidate = `${line}${character}`;
+      if (line && context.measureText(candidate).width > maxWidth) {
+        lines.push(line);
+        line = character;
+      } else {
+        line = candidate;
+      }
+    });
+    lines.push(line);
+  });
+  return lines.length > 0 ? lines : ["-"];
+}
+
+function drawCanvasTable(context, { headers, rows, widths, x, y }) {
+  const headerHeight = 48;
+  const lineHeight = 25;
+  const padding = 11;
+  let currentX = x;
+  context.textBaseline = "top";
+  context.font = "700 17px 'Malgun Gothic', Arial, sans-serif";
+  headers.forEach((header, index) => {
+    context.fillStyle = "#dbeafe";
+    context.fillRect(currentX, y, widths[index], headerHeight);
+    context.strokeStyle = "#94a3b8";
+    context.strokeRect(currentX, y, widths[index], headerHeight);
+    context.fillStyle = "#0f172a";
+    getCanvasTextLines(context, header, widths[index] - (padding * 2)).slice(0, 2).forEach((line, lineIndex) => {
+      context.fillText(line, currentX + padding, y + padding + (lineIndex * lineHeight));
+    });
+    currentX += widths[index];
+  });
+  let currentY = y + headerHeight;
+  rows.forEach((row, rowIndex) => {
+    context.font = "16px 'Malgun Gothic', Arial, sans-serif";
+    const lineSets = row.map((value, index) => getCanvasTextLines(context, value, widths[index] - (padding * 2)));
+    const rowHeight = Math.max(52, Math.max(...lineSets.map((lines) => lines.length)) * lineHeight + (padding * 2));
+    currentX = x;
+    row.forEach((value, index) => {
+      context.fillStyle = rowIndex % 2 === 0 ? "#ffffff" : "#f8fafc";
+      context.fillRect(currentX, currentY, widths[index], rowHeight);
+      context.strokeStyle = "#cbd5e1";
+      context.strokeRect(currentX, currentY, widths[index], rowHeight);
+      context.fillStyle = "#0f172a";
+      lineSets[index].forEach((line, lineIndex) => {
+        context.fillText(line, currentX + padding, currentY + padding + (lineIndex * lineHeight));
+      });
+      currentX += widths[index];
+    });
+    currentY += rowHeight;
+  });
+  return currentY;
+}
+
 function readinessBadge(ready, label) {
   return <span style={{ padding: "3px 7px", borderRadius: 999, fontSize: 11, fontWeight: 800, background: ready ? "#ecfdf5" : "#f1f5f9", color: ready ? "#047857" : "#64748b", border: `1px solid ${ready ? "#a7f3d0" : "#cbd5e1"}` }}>{label} {ready ? "완료" : "미완료"}</span>;
 }
@@ -190,6 +267,103 @@ export default function ProjectPromotionTab({ items = [], projects = [], marketA
     setLinkingProject(false);
   };
 
+  const downloadExecutiveReportImage = async () => {
+    if (!selectedItem) return;
+    try {
+      const width = 2200;
+      const margin = 50;
+      const followUps = [...promotion.followUps].reverse();
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = Math.max(6000, 2600 + (scenarios.length * 150) + (followUps.length * 360));
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.textBaseline = "top";
+      context.fillStyle = "#0f172a";
+      context.font = "700 40px 'Malgun Gothic', Arial, sans-serif";
+      context.fillText("프로젝트 추진 경영진 보고", margin, margin);
+
+      context.font = "700 28px 'Malgun Gothic', Arial, sans-serif";
+      const titleLines = getCanvasTextLines(context, itemLabel(selectedItem), width - (margin * 2)).slice(0, 3);
+      titleLines.forEach((line, index) => context.fillText(line, margin, 112 + (index * 36)));
+      let y = 112 + (titleLines.length * 36) + 16;
+      context.font = "18px 'Malgun Gothic', Arial, sans-serif";
+      context.fillStyle = "#475569";
+      context.fillText(`${selectedItem.manufacturer || "제조사 미입력"} · ${selectedItem.category} · 허가사 ${selectedItem.category === "OTC" ? (selectedItem.permitCompany || "미입력") : "해당 없음"} · 생성 ${new Date().toLocaleString("ko-KR")}`, margin, y);
+      y += 58;
+
+      const drawSection = (title, headers, rows, widths) => {
+        context.fillStyle = "#0f172a";
+        context.font = "700 23px 'Malgun Gothic', Arial, sans-serif";
+        context.fillText(title, margin, y);
+        y = drawCanvasTable(context, { headers, rows, widths, x: margin, y: y + 38 }) + 34;
+      };
+
+      drawSection("추진 판단 요약", ["항목", "내용", "항목", "내용"], [[
+        "시장 검토결과", marketDecisionLabel(selectedItem.marketDecisionStatus),
+        "최종 진행", promotionProgressLabel(promotion.progressDecision)
+      ], [
+        "경영진 최종 결정", promotionFinalDecisionLabel(promotion.finalDecision),
+        "예상 출시일", promotion.expectedLaunchDate || "미입력"
+      ], [
+        "연결 프로젝트", linkedProject?.name || "미연결",
+        "총 예상비용", formatWon(totalCost)
+      ]], [380, 670, 380, 670]);
+
+      drawSection("공급단가 및 초기 비용", ["포장단위", "배치 당 포장단위 개수", "최종 공급원가 (VAT 포함)", "최소 주문 배치", "최소 주문 생산비", "추가 예상비용"], [[
+        selectedItem.packagingUnit || "-",
+        selectedItem.quantity ? `${Number(selectedItem.quantity).toLocaleString("ko-KR")}개` : "-",
+        formatWon(cost.finalUnitCost),
+        `${cost.minimumOrderBatches || "-"}배치`,
+        formatWon(cost.initialProductionCost),
+        formatWon(numberValue(promotion.additionalExpectedCost))
+      ]], [300, 390, 380, 300, 380, 350]);
+
+      const scenarioRows = scenarios.map((scenario) => {
+        const isBundle = scenario.scenarioType === "bundle";
+        const sellingPrice = isBundle
+          ? numberValue(scenario.bundleSellingPrice)
+          : calculateSellingPriceFromMarginRate(cost.finalUnitCost, scenario.chamyaksaMarginRate);
+        return [
+          isBundle ? "묶음 프로모션" : "일반 가격대",
+          scenario.label || "기본",
+          numberValue(scenario.minimumQuantity) !== null ? `${numberValue(scenario.minimumQuantity).toLocaleString("ko-KR")}개 이상` : "기본",
+          isBundle ? "묶음 기준" : (scenario.chamyaksaMarginRate ? `${scenario.chamyaksaMarginRate}%` : "-"),
+          formatWon(sellingPrice),
+          selectedItem.distributionStructure?.pharmacySellingPrice ? `${Number(String(selectedItem.distributionStructure.pharmacySellingPrice).replace(/,/g, "")).toLocaleString("ko-KR")}원` : "-"
+        ];
+      });
+      drawSection("유통 구조 및 판매가", ["구분", "가격대", "적용 물량", "참약사 마진율", "참약사 판매가", "약국 판매가"], scenarioRows.length > 0 ? scenarioRows : [["-", "등록된 가격대 없음", "-", "-", "-", "-"]], [320, 400, 320, 340, 360, 360]);
+
+      drawSection("시장 규모 핵심지표", ["지표", "값", "지표", "값"], [[
+        "기준 시장 규모", formatCompactWon(market?.latestYear?.totalKrw),
+        "5개년 연평균 성장률", Number.isFinite(market?.cagr5Year) ? `${market.cagr5Year.toFixed(2)}%` : "-"
+      ], [
+        "연간 예상 소진수량", Number.isFinite(market?.annualDemandUnits) ? `${Math.round(market.annualDemandUnits).toLocaleString("ko-KR")}개` : "-",
+        "연간 필요 배치", Number.isFinite(market?.exactBatches) ? `${market.exactBatches.toFixed(2)}배치` : "-"
+      ], [
+        "연간 기대 매출총이익", formatCompactWon(market?.expectedGrossProfit),
+        "금융비용 차감 기댓값", formatCompactWon(market?.expectedProfitAfterFinance)
+      ]], [430, 620, 430, 620]);
+
+      drawSection("추진 메모 및 F/U", ["일시", "구분", "내용"], followUps.length > 0
+        ? followUps.map((entry) => [formatDateTime(entry.createdAt), promotionProgressLabel(entry.status), entry.note || "별도 F/U 내용 없음"])
+        : [[promotion.updatedAt ? formatDateTime(promotion.updatedAt) : "-", promotionProgressLabel(promotion.progressDecision), promotion.costMemo || "등록된 F/U 내용 없음"]], [420, 330, 1350]);
+
+      const output = document.createElement("canvas");
+      output.width = width;
+      output.height = Math.ceil(y + margin);
+      output.getContext("2d").drawImage(canvas, 0, 0, width, output.height, 0, 0, width, output.height);
+      const blob = await new Promise((resolve) => output.toBlob(resolve, "image/png"));
+      if (!blob) throw new Error("이미지 생성 실패");
+      downloadReportBlob(blob, `${reportFileName(itemLabel(selectedItem))}_프로젝트추진_경영진보고.png`);
+    } catch (error) {
+      console.error("프로젝트 추진 경영진 보고 이미지 저장 실패", error);
+      window.alert("경영진 보고 이미지를 생성하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    }
+  };
+
   return <div style={{ display: "grid", gap: 14 }}>
     <section style={{ ...panelStyle, padding: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}><div><div style={{ fontSize: 23, fontWeight: 900 }}>프로젝트 추진</div><div style={{ marginTop: 4, color: "#64748b", fontSize: 13 }}>시장 검토결과가 ‘진행 추진’이고 선행 분석이 완료된 품목만 관리합니다.</div></div><div style={{ textAlign: "right", color: "#047857", fontSize: 12, fontWeight: 800 }}>{syncState?.message || "변경 내용 자동 저장"}<div style={{ marginTop: 6, color: "#475569" }}>추진 대상 {eligibleItems.length}건</div></div></div>
@@ -208,7 +382,7 @@ export default function ProjectPromotionTab({ items = [], projects = [], marketA
       </aside>
 
       <main style={{ minWidth: 0 }}>{!selectedItem ? <section style={{ ...panelStyle, padding: 32, textAlign: "center", color: "#64748b" }}>시장 검토결과가 ‘진행 추진’인 품목이 없습니다.</section> : <div style={{ display: "grid", gap: 12 }}>
-        <section style={panelStyle}><div style={{ padding: 14, background: "#ecfdf5", borderBottom: "1px solid #cbd5e1", display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}><div style={{ minWidth: 0, flex: "1 1 440px" }}><IngredientAmountTitle item={selectedItem} fallback="성분 미입력" maxFontSize={18} minFontSize={12} /><div style={{ marginTop: 4, color: "#475569", fontSize: 12 }}>{selectedItem.manufacturer || "제조사 미입력"} · {selectedItem.category} · 허가사 {selectedItem.category === "OTC" ? (selectedItem.permitCompany || "미입력") : "해당 없음"}</div></div><div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}><span style={marketDecisionBadgeStyle(selectedItem.marketDecisionStatus)}>시장 검토 · {marketDecisionLabel(selectedItem.marketDecisionStatus)}</span><span style={promotionProgressBadgeStyle(promotion.progressDecision)}>최종 진행 · {promotionProgressLabel(promotion.progressDecision)}</span><button type="button" onClick={() => { setDraft(promotion); setEditing(true); }} style={buttonStyle}>추진 계획 설정</button>{isAdmin && promotion.updatedAt && <button type="button" onClick={deletePlan} style={{ ...buttonStyle, borderColor: "#fca5a5", color: "#dc2626", background: "#fff" }}>추진 계획 삭제</button>}</div></div>
+        <section style={panelStyle}><div style={{ padding: 14, background: "#ecfdf5", borderBottom: "1px solid #cbd5e1", display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}><div style={{ minWidth: 0, flex: "1 1 440px" }}><IngredientAmountTitle item={selectedItem} fallback="성분 미입력" maxFontSize={18} minFontSize={12} /><div style={{ marginTop: 4, color: "#475569", fontSize: 12 }}>{selectedItem.manufacturer || "제조사 미입력"} · {selectedItem.category} · 허가사 {selectedItem.category === "OTC" ? (selectedItem.permitCompany || "미입력") : "해당 없음"}</div></div><div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}><span style={marketDecisionBadgeStyle(selectedItem.marketDecisionStatus)}>시장 검토 · {marketDecisionLabel(selectedItem.marketDecisionStatus)}</span><span style={promotionProgressBadgeStyle(promotion.progressDecision)}>최종 진행 · {promotionProgressLabel(promotion.progressDecision)}</span><button type="button" onClick={downloadExecutiveReportImage} style={{ ...buttonStyle, borderColor: "#2563eb", color: "#1d4ed8", background: "#eff6ff" }}>경영진 보고 이미지</button><button type="button" onClick={() => { setDraft(promotion); setEditing(true); }} style={buttonStyle}>추진 계획 설정</button>{isAdmin && promotion.updatedAt && <button type="button" onClick={deletePlan} style={{ ...buttonStyle, borderColor: "#fca5a5", color: "#dc2626", background: "#fff" }}>추진 계획 삭제</button>}</div></div>
           <div className="promotion-summary-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}><SummaryCell label="제조사" value={selectedItem.manufacturer || "미입력"} /><SummaryCell label="허가사" value={selectedItem.category === "OTC" ? (selectedItem.permitCompany || "미입력") : "해당 없음"} /><SummaryCell label="예상 출시일" value={promotion.expectedLaunchDate || "미입력"} /><SummaryCell label="총 예상비용" value={formatWon(totalCost)} /></div>
         </section>
 
@@ -218,7 +392,7 @@ export default function ProjectPromotionTab({ items = [], projects = [], marketA
 
         {promotion.followUps.length > 0 && <section style={panelStyle}><div style={{ padding: "10px 13px", background: "#f1f5f9", borderBottom: "1px solid #cbd5e1", fontWeight: 900 }}>후속 진행 F/U 이력</div><div style={{ display: "grid" }}>{[...promotion.followUps].reverse().map((entry) => <div key={entry.id || `${entry.createdAt}-${entry.status}`} style={{ display: "grid", gridTemplateColumns: "110px 170px minmax(0, 1fr)", gap: 12, padding: "10px 13px", borderBottom: "1px solid #e2e8f0", alignItems: "start" }}><span style={promotionProgressBadgeStyle(entry.status)}>{promotionProgressLabel(entry.status)}</span><time style={{ color: "#64748b", fontSize: 12 }}>{formatDateTime(entry.createdAt)}</time><div style={{ color: "#334155", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{entry.note || "별도 F/U 내용 없음"}</div></div>)}</div></section>}
 
-        <section style={panelStyle}><div style={{ padding: "10px 13px", background: "#dbeafe", borderBottom: "1px solid #bfdbfe", fontWeight: 900 }}>공급단가</div><div className="promotion-data-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}><SummaryCell label="배치 당 공급단가" value={formatWon(numberValue(selectedItem.supplyUnitPrice))} /><SummaryCell label="배치 당 포장단위 개수" value={selectedItem.quantity ? `${Number(selectedItem.quantity).toLocaleString("ko-KR")}개` : "-"} /><SummaryCell label="최소 주문 배치" value={`${cost.minimumOrderBatches || "-"}배치`} /><SummaryCell label="최소 주문 기준 생산비" value={formatWon(cost.initialProductionCost)} subtext="VAT·허가사 수수료 반영" /></div><div style={{ padding: "9px 13px", borderTop: "1px solid #e2e8f0" }}><button onClick={() => onOpenSupply?.(selectedItem.id)} style={buttonStyle}>공급단가 원문 보기</button></div></section>
+        <section style={panelStyle}><div style={{ padding: "10px 13px", background: "#dbeafe", borderBottom: "1px solid #bfdbfe", fontWeight: 900 }}>공급단가 <span style={{ marginLeft: 6, color: "#475569", fontSize: 11 }}>VAT·허가사 수수료 포함 기준</span></div><div className="promotion-data-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}><SummaryCell label="최종 공급원가 (VAT 포함)" value={formatWon(cost.finalUnitCost)} subtext="개당 기준" /><SummaryCell label="배치 당 포장단위 개수" value={selectedItem.quantity ? `${Number(selectedItem.quantity).toLocaleString("ko-KR")}개` : "-"} /><SummaryCell label="최소 주문 배치" value={`${cost.minimumOrderBatches || "-"}배치`} /><SummaryCell label="최소 주문 기준 생산비" value={formatWon(cost.initialProductionCost)} subtext="VAT·허가사 수수료 포함" /></div><div style={{ padding: "9px 13px", borderTop: "1px solid #e2e8f0" }}><button onClick={() => onOpenSupply?.(selectedItem.id)} style={buttonStyle}>공급단가 원문 보기</button></div></section>
 
         <section style={panelStyle}><div style={{ padding: "10px 13px", background: "#dbeafe", borderBottom: "1px solid #bfdbfe", fontWeight: 900 }}>유통 구조 설정</div><div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}><thead><tr>{["가격대", "적용 물량", "참약사 마진율", "참약사 판매가", "약국 판매가"].map((header) => <th key={header} style={{ padding: 9, background: "#f8fafc", borderBottom: "1px solid #e2e8f0", textAlign: "left" }}>{header}</th>)}</tr></thead><tbody>{scenarios.map((scenario) => <tr key={scenario.id}><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{scenario.label || "기본"}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{scenario.minimumQuantity || "기본"}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{scenario.chamyaksaMarginRate ? `${scenario.chamyaksaMarginRate}%` : "-"}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", fontWeight: 800 }}>{formatWon(calculateSellingPriceFromMarginRate(cost.finalUnitCost, scenario.chamyaksaMarginRate))}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{selectedItem.distributionStructure?.pharmacySellingPrice ? `${Number(String(selectedItem.distributionStructure.pharmacySellingPrice).replace(/,/g, "")).toLocaleString("ko-KR")}원` : "-"}</td></tr>)}{scenarios.length === 0 && <tr><td colSpan={5} style={{ padding: 18, textAlign: "center", color: "#94a3b8" }}>등록된 가격대가 없습니다.</td></tr>}</tbody></table></div><div style={{ padding: "9px 13px" }}><button onClick={() => onOpenDistribution?.(selectedItem.id)} style={buttonStyle}>유통 구조 원문 보기</button></div></section>
 

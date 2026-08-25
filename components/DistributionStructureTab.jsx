@@ -275,11 +275,15 @@ function getBaseAmounts(item) {
   const unitPrice = parseNumber(item?.supplyUnitPrice);
   const quantity = parseNumber(item?.quantity);
   const permitFeeRate = parseNumber(item?.permitCompanyFeeRate);
+  const hasPermitFee = item?.category === "OTC" && item?.permitCompanyFee;
   const permitFeeRateUnknown = item?.category === "OTC" && item?.permitCompanyFee && item?.permitCompanyFeeRateUnknown;
   const hasKnownPermitFee = item?.category === "OTC" && item?.permitCompanyFee && !permitFeeRateUnknown && permitFeeRate !== null;
+  const permitFeeMultiplier = hasKnownPermitFee ? 1 + (permitFeeRate / 100) : 1;
   const finalUnitCost = unitPrice === null
     ? null
-    : unitPrice * 1.1 * (hasKnownPermitFee ? 1 + (permitFeeRate / 100) : 1);
+    : unitPrice * 1.1 * permitFeeMultiplier;
+  const permitFeeUnitPrice = !hasPermitFee || unitPrice === null ? null : unitPrice * permitFeeMultiplier;
+  const permitFeeSupplyTotal = permitFeeUnitPrice === null || quantity === null ? null : permitFeeUnitPrice * quantity;
 
   return {
     unitPrice,
@@ -287,6 +291,10 @@ function getBaseAmounts(item) {
     vatUnitPrice: unitPrice === null ? null : unitPrice * 1.1,
     supplyTotal: unitPrice === null || quantity === null ? null : unitPrice * quantity,
     vatTotal: unitPrice === null || quantity === null ? null : unitPrice * quantity * 1.1,
+    permitFeeUnitPrice,
+    permitFeeSupplyTotal,
+    permitFeeVatUnitPrice: hasPermitFee ? finalUnitCost : null,
+    permitFeeVatTotal: hasPermitFee && finalUnitCost !== null && quantity !== null ? finalUnitCost * quantity : null,
     finalUnitCost,
     finalTotal: finalUnitCost === null || quantity === null ? null : finalUnitCost * quantity
   };
@@ -1096,26 +1104,51 @@ export default function DistributionStructureTab({
                   </div>
                 </div>
                 <div className="base-grid">
-                  {[
-                    ["포장단위", selectedItem.packagingUnit || "-", selectedItem.packagingForm ? `포장형태: ${selectedItem.packagingForm}` : ""],
-                    ["배치 당 포장단위 개수", selectedItem.quantity || "-", ""],
-                    ["배치 당 공급단가", formatWon(baseAmounts.unitPrice), `총 금액: ${formatWon(baseAmounts.supplyTotal)}`],
-                    ["배치 당 VAT 포함 가격", formatWon(baseAmounts.vatUnitPrice), `VAT 포함 총금액: ${formatWon(baseAmounts.vatTotal)}`],
-                    [
-                      "허가사 수수료",
-                      permitFeeStatus,
-                      hasPermitCompanyFee
-                        ? `허가사: ${selectedItem.permitCompany || "미입력"}${permitFeeRateUnknown ? "\n공급단가에 포함" : ""}`
-                        : ""
-                    ],
-                    ["최종 유통 원가", formatWon(baseAmounts.finalTotal), `${permitFeeApplied ? (permitFeeRateUnknown ? "VAT 반영 · 허가사 수수료는 공급단가에 포함" : "VAT 및 허가사 수수료 반영") : "VAT 반영"} · 개당: ${formatWon(baseAmounts.finalUnitCost)}`]
-                  ].map(([label, value, subtext]) => (
-                    <div key={label} style={{ minWidth: 0, padding: 13, borderRight: "1px solid #e2e8f0", borderBottom: "1px solid #e2e8f0", overflow: "hidden" }}>
-                      <div style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>{label}</div>
-                      <div style={{ marginTop: 7, color: "#0f172a", fontSize: 16, fontWeight: 900, overflowWrap: "anywhere" }}>{value}</div>
-                      {subtext && <div style={{ marginTop: 4, color: "#64748b", fontSize: 11, lineHeight: 1.45, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>{subtext}</div>}
+                  <div style={{ minWidth: 0, padding: 13, borderRight: "1px solid #e2e8f0", borderBottom: "1px solid #e2e8f0", overflow: "hidden" }}>
+                    <div style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>포장단위</div>
+                    <div style={{ marginTop: 7, color: "#0f172a", fontSize: 16, fontWeight: 900 }}>{selectedItem.packagingUnit || "-"}</div>
+                    {selectedItem.packagingForm && <div style={{ marginTop: 4, color: "#64748b", fontSize: 11 }}>포장형태: {selectedItem.packagingForm}</div>}
+                  </div>
+                  <div style={{ minWidth: 0, padding: 13, borderRight: "1px solid #e2e8f0", borderBottom: "1px solid #e2e8f0", overflow: "hidden" }}>
+                    <div style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>배치 당 포장단위 개수</div>
+                    <div style={{ marginTop: 7, color: "#0f172a", fontSize: 16, fontWeight: 900 }}>{selectedItem.quantity || "-"}</div>
+                  </div>
+                  <div className="fee-projection-cell">
+                    <div className="fee-projection-title">배치 당 공급단가</div>
+                    <div className="fee-projection-section">
+                      <div className="fee-projection-label">기본</div>
+                      <div className="fee-projection-value">{formatWon(baseAmounts.unitPrice)}</div>
+                      <div className="fee-projection-note">총 금액: {formatWon(baseAmounts.supplyTotal)}</div>
                     </div>
-                  ))}
+                    <div className="fee-projection-section fee-projection-adjusted">
+                      <div className="fee-projection-label">허가사 수수료 반영 시</div>
+                      <div className="fee-projection-value">{formatWon(baseAmounts.permitFeeUnitPrice)}</div>
+                      <div className="fee-projection-note">총 금액: {formatWon(baseAmounts.permitFeeSupplyTotal)}{permitFeeRateUnknown ? " · 공급단가에 포함" : ""}</div>
+                    </div>
+                  </div>
+                  <div className="fee-projection-cell">
+                    <div className="fee-projection-title">배치 당 VAT 포함 가격</div>
+                    <div className="fee-projection-section">
+                      <div className="fee-projection-label">기본</div>
+                      <div className="fee-projection-value">{formatWon(baseAmounts.vatUnitPrice)}</div>
+                      <div className="fee-projection-note">VAT 포함 총금액: {formatWon(baseAmounts.vatTotal)}</div>
+                    </div>
+                    <div className="fee-projection-section fee-projection-adjusted">
+                      <div className="fee-projection-label">허가사 수수료 반영 시</div>
+                      <div className="fee-projection-value">{formatWon(baseAmounts.permitFeeVatUnitPrice)}</div>
+                      <div className="fee-projection-note">총 금액: {formatWon(baseAmounts.permitFeeVatTotal)}{permitFeeRateUnknown ? " · 공급단가에 포함" : ""}</div>
+                    </div>
+                  </div>
+                  <div style={{ minWidth: 0, padding: 13, borderRight: "1px solid #e2e8f0", borderBottom: "1px solid #e2e8f0", overflow: "hidden" }}>
+                    <div style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>허가사 수수료</div>
+                    <div style={{ marginTop: 7, color: "#0f172a", fontSize: 16, fontWeight: 900 }}>{permitFeeStatus}</div>
+                    {hasPermitCompanyFee && <div style={{ marginTop: 4, color: "#64748b", fontSize: 11, lineHeight: 1.45, whiteSpace: "pre-line" }}>허가사: {selectedItem.permitCompany || "미입력"}{permitFeeRateUnknown ? "\n공급단가에 포함" : ""}</div>}
+                  </div>
+                  <div style={{ minWidth: 0, padding: 13, borderRight: "1px solid #e2e8f0", borderBottom: "1px solid #e2e8f0", overflow: "hidden" }}>
+                    <div style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>최종 유통 원가</div>
+                    <div style={{ marginTop: 7, color: "#0f172a", fontSize: 16, fontWeight: 900, overflowWrap: "anywhere" }}>{formatWon(baseAmounts.finalTotal)}</div>
+                    <div style={{ marginTop: 4, color: "#64748b", fontSize: 11, lineHeight: 1.45, overflowWrap: "anywhere" }}>{permitFeeApplied ? (permitFeeRateUnknown ? "VAT 반영 · 허가사 수수료는 공급단가에 포함" : "VAT 및 허가사 수수료 반영") : "VAT 반영"} · 개당: {formatWon(baseAmounts.finalUnitCost)}</div>
+                  </div>
                 </div>
               </section>
 
@@ -1649,6 +1682,47 @@ export default function DistributionStructureTab({
           grid-template-columns: repeat(3, minmax(0, 1fr));
           grid-auto-rows: 1fr;
           height: 100%;
+        }
+        .fee-projection-cell {
+          min-width: 0;
+          display: grid;
+          grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
+          border-right: 1px solid #e2e8f0;
+          border-bottom: 1px solid #e2e8f0;
+          overflow: hidden;
+        }
+        .fee-projection-title {
+          padding: 13px 13px 5px;
+          color: #64748b;
+          font-size: 12px;
+          font-weight: 800;
+        }
+        .fee-projection-section {
+          min-width: 0;
+          padding: 7px 13px 10px;
+        }
+        .fee-projection-adjusted {
+          border-top: 1px solid #dbe3ee;
+          background: #f8fafc;
+        }
+        .fee-projection-label {
+          color: #64748b;
+          font-size: 10px;
+          font-weight: 800;
+        }
+        .fee-projection-value {
+          margin-top: 4px;
+          color: #0f172a;
+          font-size: 16px;
+          font-weight: 900;
+          overflow-wrap: anywhere;
+        }
+        .fee-projection-note {
+          margin-top: 3px;
+          color: #64748b;
+          font-size: 11px;
+          line-height: 1.4;
+          overflow-wrap: anywhere;
         }
         .supply-summary-header {
           display: grid;
