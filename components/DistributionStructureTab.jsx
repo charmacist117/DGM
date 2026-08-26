@@ -274,6 +274,7 @@ function mergeCompetitors(items = []) {
 function getBaseAmounts(item) {
   const unitPrice = parseNumber(item?.supplyUnitPrice);
   const quantity = parseNumber(item?.quantity);
+  const minimumOrderBatches = Math.max(1, Math.ceil(parseNumber(item?.minimumOrderBatchQuantity) ?? 1));
   const permitFeeRate = parseNumber(item?.permitCompanyFeeRate);
   const hasPermitFee = item?.category === "OTC" && item?.permitCompanyFee;
   const permitFeeRateUnknown = item?.category === "OTC" && item?.permitCompanyFee && item?.permitCompanyFeeRateUnknown;
@@ -284,10 +285,13 @@ function getBaseAmounts(item) {
     : unitPrice * 1.1 * permitFeeMultiplier;
   const permitFeeUnitPrice = !hasPermitFee || unitPrice === null ? null : unitPrice * permitFeeMultiplier;
   const permitFeeSupplyTotal = permitFeeUnitPrice === null || quantity === null ? null : permitFeeUnitPrice * quantity;
+  const finalTotal = finalUnitCost === null || quantity === null ? null : finalUnitCost * quantity;
 
   return {
     unitPrice,
     quantity,
+    minimumOrderBatches,
+    minimumOrderQuantity: quantity === null ? null : quantity * minimumOrderBatches,
     vatUnitPrice: unitPrice === null ? null : unitPrice * 1.1,
     supplyTotal: unitPrice === null || quantity === null ? null : unitPrice * quantity,
     vatTotal: unitPrice === null || quantity === null ? null : unitPrice * quantity * 1.1,
@@ -296,7 +300,8 @@ function getBaseAmounts(item) {
     permitFeeVatUnitPrice: hasPermitFee ? finalUnitCost : null,
     permitFeeVatTotal: hasPermitFee && finalUnitCost !== null && quantity !== null ? finalUnitCost * quantity : null,
     finalUnitCost,
-    finalTotal: finalUnitCost === null || quantity === null ? null : finalUnitCost * quantity
+    finalTotal,
+    minimumOrderFinalTotal: finalTotal === null ? null : finalTotal * minimumOrderBatches
   };
 }
 
@@ -540,7 +545,7 @@ export default function DistributionStructureTab({
         pharmacySellingPrice: parseNumber(itemDistribution.pharmacySellingPrice)
       };
     });
-    const comparisonQuoteHeaders = ["제품명", "제조사", "허가사", "포장단위", "배치 당 포장단위 개수", "가격대", "VAT 포함 단가", "최종 유통 원가", "참약사 예상 판매가", "예상 마진율", "약국 판매가"];
+    const comparisonQuoteHeaders = ["제품명", "제조사", "허가사", "포장단위", "배치 당 포장단위 개수", "가격대", "VAT 포함 단가", "최종 공급사 판매가", "참약사 예상 판매가", "예상 마진율", "약국 판매가"];
     const comparisonQuoteRows = comparisonQuotes.map((quote) => `<tr>${[
       quote.productName, quote.manufacturer, quote.permitCompany, quote.packagingUnit, quote.quantity, quote.scenario,
       formatWon(quote.vatUnitPrice), formatWon(quote.finalUnitCost), formatWon(quote.expectedSellingPrice), quote.marginRate, formatWon(quote.pharmacySellingPrice)
@@ -561,7 +566,7 @@ export default function DistributionStructureTab({
       rows,
       comparisonQuotes,
       competitors,
-      html: `<div class="report"><h1>유통 구조 정책 보고서</h1><h2>${escapeReportMarkup(getItemLabel(selectedItem))}</h2><p>${escapeReportMarkup(selectedItem.manufacturer || "제조사 미입력")} · ${escapeReportMarkup(categoryLabelById[selectedItem.category] || selectedItem.category)} · 생성 ${escapeReportMarkup(new Date().toLocaleString("ko-KR"))}</p><h3>공급 기준</h3><table><tbody><tr><th>포장단위</th><td>${escapeReportMarkup(selectedItem.packagingUnit || "-")}</td><th>배치 당 포장단위 개수</th><td>${escapeReportMarkup(selectedItem.quantity || "-")}</td><th>최종 유통 원가</th><td>${escapeReportMarkup(formatWon(baseAmounts.finalUnitCost))}</td></tr></tbody></table><h3>가격대 및 묶음 프로모션 전체</h3><table><thead><tr>${headCells.map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${rowHtml}</tbody></table><h3>제조사 견적 비교${distribution.comparisonCategory ? ` · ${escapeReportMarkup(distribution.comparisonCategory)}` : ""}</h3><table><thead><tr>${comparisonQuoteHeaders.map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${comparisonQuoteRows}</tbody></table><h3>경쟁제품 비교</h3><table><thead><tr>${["기준일", "경쟁제품명", "판매처", "포장단위", "판매구간 및 단가", "비고"].map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${competitorRows || '<tr><td colspan="6">등록된 경쟁제품 없음</td></tr>'}</tbody></table></div>`
+      html: `<div class="report"><h1>유통 구조 정책 보고서</h1><h2>${escapeReportMarkup(getItemLabel(selectedItem))}</h2><p>${escapeReportMarkup(selectedItem.manufacturer || "제조사 미입력")} · ${escapeReportMarkup(categoryLabelById[selectedItem.category] || selectedItem.category)} · 생성 ${escapeReportMarkup(new Date().toLocaleString("ko-KR"))}</p><h3>공급 기준</h3><table><tbody><tr><th>포장단위</th><td>${escapeReportMarkup(selectedItem.packagingUnit || "-")}</td><th>배치 당 포장단위 개수</th><td>${escapeReportMarkup(baseAmounts.quantity === null ? "-" : `${baseAmounts.quantity.toLocaleString("ko-KR")}개`)}</td><th>최소 주문단위</th><td>${escapeReportMarkup(baseAmounts.minimumOrderQuantity === null ? "-" : `${baseAmounts.minimumOrderQuantity.toLocaleString("ko-KR")}개 (${baseAmounts.minimumOrderBatches}배치)`)}</td><th>최종 공급사 판매가</th><td>${escapeReportMarkup(formatWon(baseAmounts.finalUnitCost))}</td><th>최소 주문 총액</th><td>${escapeReportMarkup(formatWon(baseAmounts.minimumOrderFinalTotal))}</td></tr></tbody></table><h3>가격대 및 묶음 프로모션 전체</h3><table><thead><tr>${headCells.map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${rowHtml}</tbody></table><h3>제조사 견적 비교${distribution.comparisonCategory ? ` · ${escapeReportMarkup(distribution.comparisonCategory)}` : ""}</h3><table><thead><tr>${comparisonQuoteHeaders.map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${comparisonQuoteRows}</tbody></table><h3>경쟁제품 비교</h3><table><thead><tr>${["기준일", "경쟁제품명", "판매처", "포장단위", "판매구간 및 단가", "비고"].map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${competitorRows || '<tr><td colspan="6">등록된 경쟁제품 없음</td></tr>'}</tbody></table></div>`
     };
   };
 
@@ -598,9 +603,9 @@ export default function DistributionStructureTab({
       context.font = "700 22px 'Malgun Gothic', Arial, sans-serif";
       context.fillText("공급 기준", margin, 198);
       let y = drawCanvasTable(context, {
-        headers: ["포장단위", "배치 당 포장단위 개수", "최종 유통 원가"],
-        rows: [[selectedItem.packagingUnit || "-", selectedItem.quantity || "-", formatWon(baseAmounts.finalUnitCost)]],
-        widths: [650, 750, 720],
+        headers: ["포장단위", "배치 당 포장단위 개수", "최소 주문단위", "최종 공급사 판매가", "최소 주문 총액"],
+        rows: [[selectedItem.packagingUnit || "-", baseAmounts.quantity === null ? "-" : `${baseAmounts.quantity.toLocaleString("ko-KR")}개`, baseAmounts.minimumOrderQuantity === null ? "-" : `${baseAmounts.minimumOrderQuantity.toLocaleString("ko-KR")}개 (${baseAmounts.minimumOrderBatches}배치)`, formatWon(baseAmounts.finalUnitCost), formatWon(baseAmounts.minimumOrderFinalTotal)]],
+        widths: [360, 430, 500, 430, 400],
         x: margin,
         y: 232
       });
@@ -1109,9 +1114,17 @@ export default function DistributionStructureTab({
                     <div style={{ marginTop: 7, color: "#0f172a", fontSize: 16, fontWeight: 900 }}>{selectedItem.packagingUnit || "-"}</div>
                     {selectedItem.packagingForm && <div style={{ marginTop: 4, color: "#64748b", fontSize: 11 }}>포장형태: {selectedItem.packagingForm}</div>}
                   </div>
-                  <div style={{ minWidth: 0, padding: 13, borderRight: "1px solid #e2e8f0", borderBottom: "1px solid #e2e8f0", overflow: "hidden" }}>
-                    <div style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>배치 당 포장단위 개수</div>
-                    <div style={{ marginTop: 7, color: "#0f172a", fontSize: 16, fontWeight: 900 }}>{selectedItem.quantity || "-"}</div>
+                  <div className="fee-projection-cell">
+                    <div className="fee-projection-title">배치 당 포장단위 개수</div>
+                    <div className="fee-projection-section">
+                      <div className="fee-projection-label">1배치 기준</div>
+                      <div className="fee-projection-value">{baseAmounts.quantity === null ? "-" : `${baseAmounts.quantity.toLocaleString("ko-KR")}개`}</div>
+                    </div>
+                    <div className="fee-projection-section fee-projection-adjusted">
+                      <div className="fee-projection-label">최소 주문단위</div>
+                      <div className="fee-projection-value">{baseAmounts.minimumOrderQuantity === null ? "-" : `${baseAmounts.minimumOrderQuantity.toLocaleString("ko-KR")}개`}</div>
+                      <div className="fee-projection-note">최소 주문 {baseAmounts.minimumOrderBatches}배치</div>
+                    </div>
                   </div>
                   <div className="fee-projection-cell">
                     <div className="fee-projection-title">배치 당 공급단가</div>
@@ -1144,10 +1157,18 @@ export default function DistributionStructureTab({
                     <div style={{ marginTop: 7, color: "#0f172a", fontSize: 16, fontWeight: 900 }}>{permitFeeStatus}</div>
                     {hasPermitCompanyFee && <div style={{ marginTop: 4, color: "#64748b", fontSize: 11, lineHeight: 1.45, whiteSpace: "pre-line" }}>허가사: {selectedItem.permitCompany || "미입력"}{permitFeeRateUnknown ? "\n공급단가에 포함" : ""}</div>}
                   </div>
-                  <div style={{ minWidth: 0, padding: 13, borderRight: "1px solid #e2e8f0", borderBottom: "1px solid #e2e8f0", overflow: "hidden" }}>
-                    <div style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>최종 유통 원가</div>
-                    <div style={{ marginTop: 7, color: "#0f172a", fontSize: 16, fontWeight: 900, overflowWrap: "anywhere" }}>{formatWon(baseAmounts.finalTotal)}</div>
-                    <div style={{ marginTop: 4, color: "#64748b", fontSize: 11, lineHeight: 1.45, overflowWrap: "anywhere" }}>{permitFeeApplied ? (permitFeeRateUnknown ? "VAT 반영 · 허가사 수수료는 공급단가에 포함" : "VAT 및 허가사 수수료 반영") : "VAT 반영"} · 개당: {formatWon(baseAmounts.finalUnitCost)}</div>
+                  <div className="fee-projection-cell">
+                    <div className="fee-projection-title">최종 공급사 판매가</div>
+                    <div className="fee-projection-section">
+                      <div className="fee-projection-label">1배치 기준</div>
+                      <div className="fee-projection-value">{formatWon(baseAmounts.finalTotal)}</div>
+                      <div className="fee-projection-note">개당: {formatWon(baseAmounts.finalUnitCost)}</div>
+                    </div>
+                    <div className="fee-projection-section fee-projection-adjusted">
+                      <div className="fee-projection-label">최소 주문단위</div>
+                      <div className="fee-projection-value">{formatWon(baseAmounts.minimumOrderFinalTotal)}</div>
+                      <div className="fee-projection-note">{baseAmounts.minimumOrderBatches}배치 · {permitFeeApplied ? (permitFeeRateUnknown ? "VAT 반영 · 허가사 수수료 포함" : "VAT·허가사 수수료 반영") : "VAT 반영"}</div>
+                    </div>
                   </div>
                 </div>
               </section>
@@ -1464,7 +1485,7 @@ export default function DistributionStructureTab({
                     </colgroup>
                     <thead>
                       <tr style={{ background: "#eef6ff" }}>
-                        {["제품명 / 제조사", "허가사", "포장단위", "배치 당 포장단위 개수", "가격대", "VAT 포함 단가", "최종 유통 원가", "참약사 예상 판매가", "예상 마진율", "약국 판매가"].map((header) => (
+                        {["제품명 / 제조사", "허가사", "포장단위", "배치 당 포장단위 개수", "가격대", "VAT 포함 단가", "최종 공급사 판매가", "참약사 예상 판매가", "예상 마진율", "약국 판매가"].map((header) => (
                           <th key={header} style={{ padding: "8px 9px", borderBottom: "1px solid #dbe3ee", color: "#475569", fontSize: 11, textAlign: "left" }}>{header}</th>
                         ))}
                       </tr>
