@@ -173,7 +173,7 @@ function normalizePricingScenario(value = {}, fallbackId = "pricing_default", fa
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return {
     id: source.id ?? fallbackId,
-    label: String(source.label || fallbackLabel),
+    label: String(source.label ?? fallbackLabel),
     scenarioType: source.scenarioType === "bundle" ? "bundle" : "single",
     minimumQuantity: String(source.minimumQuantity ?? source.minQuantity ?? ""),
     chamyaksaMarginRate: String(source.chamyaksaMarginRate ?? ""),
