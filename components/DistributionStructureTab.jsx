@@ -1540,15 +1540,15 @@ export default function DistributionStructureTab({
                     </tbody>
                   </table>
                 </div>
-                <div>
-                  <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", minWidth: isEditing ? 1080 : 860, borderCollapse: "collapse", tableLayout: "fixed" }}>
                     <colgroup>
+                      <col style={{ width: isEditing ? "15%" : "11%" }} />
+                      <col style={{ width: isEditing ? "18%" : "23%" }} />
+                      <col style={{ width: isEditing ? "13%" : "16%" }} />
                       <col style={{ width: "10%" }} />
-                      <col style={{ width: isEditing ? "21%" : "24%" }} />
-                      <col style={{ width: isEditing ? "14%" : "16%" }} />
-                      <col style={{ width: "11%" }} />
-                      <col style={{ width: "22%" }} />
-                      <col style={{ width: isEditing ? "16%" : "17%" }} />
+                      <col style={{ width: isEditing ? "23%" : "22%" }} />
+                      <col style={{ width: isEditing ? "15%" : "18%" }} />
                       {isEditing && <col style={{ width: "6%" }} />}
                     </colgroup>
                     <thead>
@@ -1569,7 +1569,14 @@ export default function DistributionStructureTab({
                                 value={competitor.date || ""}
                                 onChange={(value) => updateCompetitor(competitor.id, { date: value })}
                                 aria-label={`${competitor.productName || "경쟁제품"} 기준일`}
-                                style={inputStyle}
+                                style={{
+                                  ...inputStyle,
+                                  minHeight: 36,
+                                  padding: "6px 7px",
+                                  fontSize: 12,
+                                  gridTemplateColumns: "minmax(42px, 1.35fr) 7px minmax(22px, .7fr) 7px minmax(22px, .7fr)",
+                                  gap: 1
+                                }}
                               />
                             ) : (
                               <div style={labelStyle}>{competitor.date || "-"}</div>

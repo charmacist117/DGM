@@ -23,6 +23,8 @@ import {
   permitCompanyFilterOptions
 } from "@/lib/pms/permitCompanyFilter";
 
+const MARKET_ANALYSIS_CLIPBOARD_KEY = "dgm-market-analysis-clipboard-v1";
+
 const panelStyle = {
   background: "#fff",
   border: "1px solid #cbd5e1",
@@ -340,6 +342,7 @@ export default function MarketSizeAnalysisTab({
   ));
   const [showDefaultsModal, setShowDefaultsModal] = useState(false);
   const [defaultsDraft, setDefaultsDraft] = useState(() => normalizeMarketAnalysisDefaults(marketAnalysisDefaults));
+  const [analysisClipboard, setAnalysisClipboard] = useState(null);
   const query = search.trim().toLowerCase();
   const categoryLabelById = Object.fromEntries(categories.map((category) => [category.id, category.label]));
   const categoryItems = useMemo(() => (
@@ -353,6 +356,16 @@ export default function MarketSizeAnalysisTab({
     if (permitCompanyFilter === "all" || permitCompanyFilter === MISSING_PERMIT_COMPANY_FILTER) return;
     if (!permitCompanyOptions.includes(permitCompanyFilter)) setPermitCompanyFilter("all");
   }, [permitCompanyFilter, permitCompanyOptions]);
+  useEffect(() => {
+    try {
+      const stored = window.sessionStorage.getItem(MARKET_ANALYSIS_CLIPBOARD_KEY);
+      if (!stored) return;
+      const parsed = JSON.parse(stored);
+      if (parsed?.version === 1 && parsed.analysis) setAnalysisClipboard(parsed);
+    } catch {
+      window.sessionStorage.removeItem(MARKET_ANALYSIS_CLIPBOARD_KEY);
+    }
+  }, []);
   const visibleItems = useMemo(() => {
     const permitCompanyItems = categoryItems.filter((item) => matchesPermitCompanyFilter(item, permitCompanyFilter));
     const distributionItems = showConfiguredDistributionOnly
@@ -614,6 +627,48 @@ export default function MarketSizeAnalysisTab({
     setDraft(applyMarketAnalysisDefaults(selectedItem.marketSizeAnalysis, normalizedDefaults));
   };
 
+  const copyAnalysis = () => {
+    if (!selectedItem || (!savedAnalysis.updatedAt && !isEditing)) {
+      window.alert("복사할 시장 규모 분석 자료가 없습니다.");
+      return;
+    }
+    const normalized = normalizeMarketSizeAnalysis(workingAnalysis);
+    const payload = {
+      version: 1,
+      sourceItemId: String(selectedItem.id),
+      sourceLabel: getItemLabel(selectedItem),
+      copiedAt: new Date().toISOString(),
+      analysis: {
+        ...normalized,
+        pricingScenarioId: "",
+        updatedAt: ""
+      }
+    };
+    setAnalysisClipboard(payload);
+    window.sessionStorage.setItem(MARKET_ANALYSIS_CLIPBOARD_KEY, JSON.stringify(payload));
+    window.alert(`"${payload.sourceLabel}"의 시장 규모 분석 자료를 복사했습니다.`);
+  };
+
+  const pasteAnalysis = () => {
+    if (!selectedItem || !analysisClipboard?.analysis) {
+      window.alert("먼저 복사할 시장 규모 분석 자료를 선택해주세요.");
+      return;
+    }
+    const targetLabel = getItemLabel(selectedItem);
+    if (!window.confirm(
+      `"${analysisClipboard.sourceLabel || "복사한 품목"}"의 시장 분석 자료를\n"${targetLabel}"에 붙여넣으시겠습니까?\n\n대상 품목의 유통 가격대 선택과 검토결과는 유지됩니다.`
+    )) return;
+    const targetAnalysis = normalizeMarketSizeAnalysis(selectedItem.marketSizeAnalysis);
+    const copiedAnalysis = normalizeMarketSizeAnalysis(analysisClipboard.analysis);
+    setEditingItemId(selectedItem.id);
+    setDraft({
+      ...copiedAnalysis,
+      pricingScenarioId: targetAnalysis.pricingScenarioId,
+      updatedAt: targetAnalysis.updatedAt
+    });
+    window.alert("분석 자료를 붙여넣었습니다. 내용을 확인한 뒤 저장해주세요.");
+  };
+
   const updateDraft = (patch) => {
     setDraft((previous) => ({
       ...normalizeMarketSizeAnalysis(previous),
@@ -824,6 +879,20 @@ export default function MarketSizeAnalysisTab({
                     </div>
                   </div>
                   <div className="market-actions">
+                    <button type="button" onClick={copyAnalysis} style={secondaryButtonStyle}>분석 복사</button>
+                    <button
+                      type="button"
+                      onClick={pasteAnalysis}
+                      disabled={!analysisClipboard}
+                      title={analysisClipboard?.sourceLabel ? `복사 원본: ${analysisClipboard.sourceLabel}` : "복사된 분석 자료 없음"}
+                      style={{
+                        ...secondaryButtonStyle,
+                        opacity: analysisClipboard ? 1 : 0.55,
+                        cursor: analysisClipboard ? "pointer" : "not-allowed"
+                      }}
+                    >
+                      분석 붙여넣기
+                    </button>
                     <button type="button" onClick={downloadMarketAnalysisExcel} style={secondaryButtonStyle}>Excel 다운로드</button>
                     <button type="button" onClick={downloadMarketAnalysisImage} style={secondaryButtonStyle}>이미지 저장</button>
                     <label className="market-decision-control">
