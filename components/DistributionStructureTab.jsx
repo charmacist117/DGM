@@ -492,8 +492,8 @@ export default function DistributionStructureTab({
     ? null
     : bundleSellingPrice - bundleCostTotal;
   const bundleMarginAmountExcludingVat = bundleMarginAmount === null ? null : bundleMarginAmount / 1.1;
-  const bundleMarginAmountPerUnit = bundleMarginAmount !== null && bundleTotalUnits
-    ? bundleMarginAmount / bundleTotalUnits
+  const bundleSellingPricePerUnit = bundleSellingPrice !== null && bundleTotalUnits
+    ? bundleSellingPrice / bundleTotalUnits
     : null;
   const bundleMarginRate = bundleSellingPrice && bundleMarginAmount !== null
     ? (bundleMarginAmount / bundleSellingPrice) * 100
@@ -1456,14 +1456,14 @@ export default function DistributionStructureTab({
                         <small style={{ color: "#64748b", fontWeight: 700 }}>VAT 미포함 {formatWon(bundleMarginAmountExcludingVat)}</small>
                       </div>
                       <div className="calculated-cell">
-                        <span>묶음 개당 마진액 (VAT 포함)</span>
-                        <strong>{formatWon(bundleMarginAmountPerUnit)}</strong>
-                        <small style={{ color: "#64748b", fontWeight: 700 }}>묶음 총 마진액 ÷ 묶음 총 판매수량</small>
-                      </div>
-                      <div className="calculated-cell">
                         <span>참약사 묶음 실질 마진율</span>
                         <strong>{formatPercent(bundleMarginRate)}</strong>
                         <small style={{ color: "#64748b", fontWeight: 700 }}>총 마진액 ÷ 묶음 판매가</small>
+                      </div>
+                      <div className="calculated-cell">
+                        <span>묶음 개당 판매가 (VAT 포함)</span>
+                        <strong>{formatWon(bundleSellingPricePerUnit)}</strong>
+                        <small style={{ color: "#64748b", fontWeight: 700 }}>묶음 일괄 판매가 ÷ 묶음 총 판매수량</small>
                       </div>
                       <div>
                         <label style={labelStyle}>묶음 일괄 판매가 (약국 구입 총액, VAT 포함)</label>
