@@ -352,6 +352,7 @@ export default function DistributionStructureTab({
   const [structureStatusFilter, setStructureStatusFilter] = useState("all");
   const [editingItemId, setEditingItemId] = useState(null);
   const [activePricingScenarioId, setActivePricingScenarioId] = useState(null);
+  const [draggedPricingScenarioId, setDraggedPricingScenarioId] = useState(null);
   const [comparisonCategoryDraft, setComparisonCategoryDraft] = useState("");
   const [comparisonScenarioByItemId, setComparisonScenarioByItemId] = useState({});
   const query = search.trim().toLowerCase();
@@ -468,10 +469,19 @@ export default function DistributionStructureTab({
   const bundleCostTotal = bundleQuantity && bundleItems.length > 0
     ? bundleItems.reduce((sum, item) => sum + (getBaseAmounts(item).finalUnitCost || 0), 0) * bundleQuantity
     : null;
+  const bundleTotalUnits = bundleQuantity && bundleItems.length > 0
+    ? bundleQuantity * bundleItems.length
+    : null;
+  const bundleCostPerUnit = bundleCostTotal !== null && bundleTotalUnits
+    ? bundleCostTotal / bundleTotalUnits
+    : null;
   const bundleMarginAmount = bundleSellingPrice === null || bundleCostTotal === null
     ? null
     : bundleSellingPrice - bundleCostTotal;
   const bundleMarginAmountExcludingVat = bundleMarginAmount === null ? null : bundleMarginAmount / 1.1;
+  const bundleMarginAmountPerUnit = bundleMarginAmount !== null && bundleTotalUnits
+    ? bundleMarginAmount / bundleTotalUnits
+    : null;
   const bundleMarginRate = bundleSellingPrice && bundleMarginAmount !== null
     ? (bundleMarginAmount / bundleSellingPrice) * 100
     : null;
@@ -750,6 +760,31 @@ export default function DistributionStructureTab({
         updatedAt: new Date().toISOString()
       }
     });
+  };
+
+  const reorderPricingScenarios = (draggedId, targetId) => {
+    if (!draggedId || !targetId || String(draggedId) === String(targetId)) return;
+    const draggedScenario = visiblePricingScenarios.find((scenario) => String(scenario.id) === String(draggedId));
+    const targetScenario = visiblePricingScenarios.find((scenario) => String(scenario.id) === String(targetId));
+    const ownerId = String(draggedScenario?._ownerItemId || selectedItem?.id || "");
+    if (!draggedScenario || !targetScenario || ownerId !== String(targetScenario._ownerItemId || selectedItem?.id || "")) return;
+    const ownerItem = items.find((item) => String(item.id) === ownerId);
+    if (!ownerItem) return;
+    const ownerDistribution = getDistribution(ownerItem);
+    const sourceIndex = ownerDistribution.pricingScenarios.findIndex((scenario) => String(scenario.id) === String(draggedId));
+    const targetIndex = ownerDistribution.pricingScenarios.findIndex((scenario) => String(scenario.id) === String(targetId));
+    if (sourceIndex < 0 || targetIndex < 0) return;
+    const nextScenarios = [...ownerDistribution.pricingScenarios];
+    const [movedScenario] = nextScenarios.splice(sourceIndex, 1);
+    nextScenarios.splice(targetIndex, 0, movedScenario);
+    onUpdateItem?.(ownerItem.id, {
+      distributionStructure: {
+        ...ownerDistribution,
+        pricingScenarios: nextScenarios,
+        updatedAt: new Date().toISOString()
+      }
+    });
+    setActivePricingScenarioId(movedScenario.id);
   };
 
   const addPricingScenario = () => {
@@ -1214,12 +1249,34 @@ export default function DistributionStructureTab({
                 <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 12px", borderBottom: "1px solid #dbe3ee", background: "#f8fafc", overflowX: "auto" }}>
                   {visiblePricingScenarios.map((scenario, index) => {
                     const active = String(scenario.id) === String(activePricingScenario?.id);
+                    const canReorder = String(scenario._ownerItemId || selectedItem?.id) === String(selectedItem?.id);
+                    const isDragging = String(draggedPricingScenarioId) === String(scenario.id);
                     return (
                       <button
                         key={scenario.id}
                         type="button"
+                        draggable={canReorder}
                         onClick={() => setActivePricingScenarioId(scenario.id)}
-                        title={scenario.minimumQuantity ? `${scenario.minimumQuantity}개 이상 적용` : scenario.scenarioType === "bundle" ? "묶음 프로모션" : "기본 가격대"}
+                        onDragStart={(event) => {
+                          if (!canReorder) return;
+                          setDraggedPricingScenarioId(scenario.id);
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("text/pricing-scenario-id", String(scenario.id));
+                        }}
+                        onDragOver={(event) => {
+                          if (canReorder && draggedPricingScenarioId) {
+                            event.preventDefault();
+                            event.dataTransfer.dropEffect = "move";
+                          }
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          const sourceId = event.dataTransfer.getData("text/pricing-scenario-id") || draggedPricingScenarioId;
+                          reorderPricingScenarios(sourceId, scenario.id);
+                          setDraggedPricingScenarioId(null);
+                        }}
+                        onDragEnd={() => setDraggedPricingScenarioId(null)}
+                        title={`${scenario.minimumQuantity ? `${scenario.minimumQuantity}개 이상 적용` : scenario.scenarioType === "bundle" ? "묶음 프로모션" : "기본 가격대"}${canReorder ? " · 드래그하여 순서 변경" : " · 연결 탭 순서는 원본 품목에서 변경"}`}
                         style={{
                           minHeight: 32,
                           padding: "5px 10px",
@@ -1227,7 +1284,8 @@ export default function DistributionStructureTab({
                           borderRadius: 6,
                           background: active ? "#eff6ff" : "#fff",
                           color: active ? "#1d4ed8" : "#475569",
-                          cursor: "pointer",
+                          cursor: canReorder ? (isDragging ? "grabbing" : "grab") : "pointer",
+                          opacity: isDragging ? 0.55 : 1,
                           fontSize: 12,
                           fontWeight: 800,
                           whiteSpace: "nowrap"
@@ -1286,29 +1344,41 @@ export default function DistributionStructureTab({
                           {bundleItems.length < 2 ? "묶음 프로모션에는 2개 이상의 제품을 선택해주세요." : `${bundleItems.length}종을 같은 구매 조건으로 결합합니다.`}
                         </div>
                       </div>
-                      <div>
-                        <label style={labelStyle}>묶음 일괄 판매가 (VAT 포함)</label>
-                        <input value={activePricingScenario?.bundleSellingPrice || ""} onChange={(event) => updatePricingScenario({ bundleSellingPrice: event.target.value })} inputMode="numeric" placeholder="예: 3종 합계 120,000원" style={inputStyle} />
-                      </div>
                       <div className="calculated-cell">
                         <span>결합 공급 원가 (VAT 포함)</span>
                         <strong>{formatWon(bundleCostTotal)}</strong>
-                        <small style={{ color: "#64748b", fontWeight: 700 }}>{bundleQuantity ? `${bundleItems.length}종 × 각 ${bundleQuantity.toLocaleString("ko-KR")}개` : "최소 구매수량 입력 시 계산"}</small>
+                        <small style={{ color: "#64748b", fontWeight: 700 }}>
+                          {bundleTotalUnits ? `총 ${bundleTotalUnits.toLocaleString("ko-KR")}개 기준` : "최소 구매수량 입력 시 계산"}
+                        </small>
                       </div>
                       <div className="calculated-cell">
-                        <span>묶음 총 마진액 (VAT 포함)</span>
+                        <span>개당 공급 원가 (VAT 포함)</span>
+                        <strong>{formatWon(bundleCostPerUnit)}</strong>
+                        <small style={{ color: "#64748b", fontWeight: 700 }}>
+                          결합 공급 원가 ÷ 묶음 총 판매수량
+                        </small>
+                      </div>
+                      <div className="calculated-cell">
+                        <span>참약사 묶음 총 마진액 (VAT 포함)</span>
                         <strong>{formatWon(bundleMarginAmount)}</strong>
                         <small style={{ color: "#64748b", fontWeight: 700 }}>VAT 미포함 {formatWon(bundleMarginAmountExcludingVat)}</small>
                       </div>
                       <div className="calculated-cell">
-                        <span>묶음 실질 마진율</span>
+                        <span>묶음 개당 마진액 (VAT 포함)</span>
+                        <strong>{formatWon(bundleMarginAmountPerUnit)}</strong>
+                        <small style={{ color: "#64748b", fontWeight: 700 }}>묶음 총 마진액 ÷ 묶음 총 판매수량</small>
+                      </div>
+                      <div className="calculated-cell">
+                        <span>참약사 묶음 실질 마진율</span>
                         <strong>{formatPercent(bundleMarginRate)}</strong>
                         <small style={{ color: "#64748b", fontWeight: 700 }}>총 마진액 ÷ 묶음 판매가</small>
                       </div>
-                      <div className="calculated-cell">
-                        <span>약국 구입 총액 (VAT 포함)</span>
-                        <strong>{formatWon(bundleSellingPrice)}</strong>
-                        <small style={{ color: "#64748b", fontWeight: 700 }}>선택 제품 전체 묶음 금액</small>
+                      <div>
+                        <label style={labelStyle}>묶음 일괄 판매가 (약국 구입 총액, VAT 포함)</label>
+                        <input value={activePricingScenario?.bundleSellingPrice || ""} onChange={(event) => updatePricingScenario({ bundleSellingPrice: event.target.value })} inputMode="numeric" placeholder="예: 3종 합계 120,000원" style={inputStyle} />
+                        <div style={{ marginTop: 5, color: "#64748b", fontSize: 11, fontWeight: 700 }}>
+                          {bundleTotalUnits ? `${bundleItems.length}종 × 각 ${bundleQuantity.toLocaleString("ko-KR")}개 · 총 ${bundleTotalUnits.toLocaleString("ko-KR")}개` : "선택 제품 전체 묶음 금액"}
+                        </div>
                       </div>
                     </>
                   ) : (
