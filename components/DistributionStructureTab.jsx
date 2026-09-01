@@ -171,6 +171,7 @@ function getItemLabel(item) {
 
 function normalizePricingScenario(value = {}, fallbackId = "pricing_default", fallbackLabel = "기본") {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const bundleOrder = parseNumber(source.bundleOrder);
   return {
     id: source.id ?? fallbackId,
     label: String(source.label ?? fallbackLabel),
@@ -179,7 +180,8 @@ function normalizePricingScenario(value = {}, fallbackId = "pricing_default", fa
     chamyaksaMarginRate: String(source.chamyaksaMarginRate ?? ""),
     pharmacySellingPrice: String(source.pharmacySellingPrice ?? ""),
     bundleItemIds: (Array.isArray(source.bundleItemIds) ? source.bundleItemIds : []).map(String),
-    bundleSellingPrice: String(source.bundleSellingPrice ?? "")
+    bundleSellingPrice: String(source.bundleSellingPrice ?? ""),
+    bundleOrder
   };
 }
 
@@ -246,7 +248,18 @@ function getPricingScenariosForItem(targetItem, allItems = []) {
         _linked: true
       }));
   });
-  return [...ownScenarios, ...linkedScenarios];
+  const singleScenarios = ownScenarios.filter((scenario) => scenario.scenarioType !== "bundle");
+  const bundleScenarios = [...ownScenarios.filter((scenario) => scenario.scenarioType === "bundle"), ...linkedScenarios]
+    .sort((left, right) => {
+      const leftOrder = Number.isFinite(left.bundleOrder) ? left.bundleOrder : Number.MAX_SAFE_INTEGER;
+      const rightOrder = Number.isFinite(right.bundleOrder) ? right.bundleOrder : Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder;
+    });
+  return [...singleScenarios, ...bundleScenarios];
+}
+
+function pricingScenarioKey(scenario, fallbackOwnerId = "") {
+  return `${String(scenario?._ownerItemId || fallbackOwnerId)}::${String(scenario?.id || "")}`;
 }
 
 function normalizeComparisonCategory(value) {
@@ -352,7 +365,7 @@ export default function DistributionStructureTab({
   const [structureStatusFilter, setStructureStatusFilter] = useState("all");
   const [editingItemId, setEditingItemId] = useState(null);
   const [activePricingScenarioId, setActivePricingScenarioId] = useState(null);
-  const [draggedPricingScenarioId, setDraggedPricingScenarioId] = useState(null);
+  const [draggedPricingScenarioKey, setDraggedPricingScenarioKey] = useState(null);
   const [comparisonCategoryDraft, setComparisonCategoryDraft] = useState("");
   const [comparisonScenarioByItemId, setComparisonScenarioByItemId] = useState({});
   const query = search.trim().toLowerCase();
@@ -762,27 +775,83 @@ export default function DistributionStructureTab({
     });
   };
 
-  const reorderPricingScenarios = (draggedId, targetId) => {
-    if (!draggedId || !targetId || String(draggedId) === String(targetId)) return;
-    const draggedScenario = visiblePricingScenarios.find((scenario) => String(scenario.id) === String(draggedId));
-    const targetScenario = visiblePricingScenarios.find((scenario) => String(scenario.id) === String(targetId));
-    const ownerId = String(draggedScenario?._ownerItemId || selectedItem?.id || "");
-    if (!draggedScenario || !targetScenario || ownerId !== String(targetScenario._ownerItemId || selectedItem?.id || "")) return;
-    const ownerItem = items.find((item) => String(item.id) === ownerId);
-    if (!ownerItem) return;
-    const ownerDistribution = getDistribution(ownerItem);
-    const sourceIndex = ownerDistribution.pricingScenarios.findIndex((scenario) => String(scenario.id) === String(draggedId));
-    const targetIndex = ownerDistribution.pricingScenarios.findIndex((scenario) => String(scenario.id) === String(targetId));
+  const reorderPricingScenarios = (draggedKey, targetKey) => {
+    if (!draggedKey || !targetKey || draggedKey === targetKey) return;
+    const draggedScenario = visiblePricingScenarios.find((scenario) => (
+      pricingScenarioKey(scenario, selectedItem?.id) === draggedKey
+    ));
+    const targetScenario = visiblePricingScenarios.find((scenario) => (
+      pricingScenarioKey(scenario, selectedItem?.id) === targetKey
+    ));
+    if (!draggedScenario || !targetScenario || draggedScenario.scenarioType !== targetScenario.scenarioType) return;
+
+    if (draggedScenario.scenarioType !== "bundle") {
+      const ownerId = String(draggedScenario._ownerItemId || selectedItem?.id || "");
+      if (ownerId !== String(targetScenario._ownerItemId || selectedItem?.id || "")) return;
+      const ownerItem = items.find((item) => String(item.id) === ownerId);
+      if (!ownerItem) return;
+      const ownerDistribution = getDistribution(ownerItem);
+      const singleScenarios = ownerDistribution.pricingScenarios.filter((scenario) => scenario.scenarioType !== "bundle");
+      const bundleScenarios = ownerDistribution.pricingScenarios.filter((scenario) => scenario.scenarioType === "bundle");
+      const sourceIndex = singleScenarios.findIndex((scenario) => String(scenario.id) === String(draggedScenario.id));
+      const targetIndex = singleScenarios.findIndex((scenario) => String(scenario.id) === String(targetScenario.id));
+      if (sourceIndex < 0 || targetIndex < 0) return;
+      const nextSingleScenarios = [...singleScenarios];
+      const [movedScenario] = nextSingleScenarios.splice(sourceIndex, 1);
+      nextSingleScenarios.splice(targetIndex, 0, movedScenario);
+      onUpdateItem?.(ownerItem.id, {
+        distributionStructure: {
+          ...ownerDistribution,
+          pricingScenarios: [...nextSingleScenarios, ...bundleScenarios],
+          updatedAt: new Date().toISOString()
+        }
+      });
+      setActivePricingScenarioId(movedScenario.id);
+      return;
+    }
+
+    const allBundleScenarios = items.flatMap((item) => (
+      getDistribution(item).pricingScenarios
+        .filter((scenario) => scenario.scenarioType === "bundle")
+        .map((scenario) => ({ ...scenario, _ownerItemId: String(item.id) }))
+    )).sort((left, right) => {
+      const leftOrder = Number.isFinite(left.bundleOrder) ? left.bundleOrder : Number.MAX_SAFE_INTEGER;
+      const rightOrder = Number.isFinite(right.bundleOrder) ? right.bundleOrder : Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder;
+    });
+    const sourceIndex = allBundleScenarios.findIndex((scenario) => pricingScenarioKey(scenario) === draggedKey);
+    const targetIndex = allBundleScenarios.findIndex((scenario) => pricingScenarioKey(scenario) === targetKey);
     if (sourceIndex < 0 || targetIndex < 0) return;
-    const nextScenarios = [...ownerDistribution.pricingScenarios];
-    const [movedScenario] = nextScenarios.splice(sourceIndex, 1);
-    nextScenarios.splice(targetIndex, 0, movedScenario);
-    onUpdateItem?.(ownerItem.id, {
-      distributionStructure: {
-        ...ownerDistribution,
-        pricingScenarios: nextScenarios,
-        updatedAt: new Date().toISOString()
-      }
+    const nextBundleScenarios = [...allBundleScenarios];
+    const [movedScenario] = nextBundleScenarios.splice(sourceIndex, 1);
+    nextBundleScenarios.splice(targetIndex, 0, movedScenario);
+    const orderByKey = new Map(nextBundleScenarios.map((scenario, index) => [
+      pricingScenarioKey(scenario),
+      index + 1
+    ]));
+    const updatedAt = new Date().toISOString();
+
+    items.forEach((item) => {
+      const ownerId = String(item.id);
+      const ownerDistribution = getDistribution(item);
+      if (!ownerDistribution.pricingScenarios.some((scenario) => scenario.scenarioType === "bundle")) return;
+      const nextScenarios = ownerDistribution.pricingScenarios.map((scenario) => {
+        if (scenario.scenarioType !== "bundle") return scenario;
+        const bundleOrder = orderByKey.get(`${ownerId}::${String(scenario.id)}`);
+        return Number.isFinite(bundleOrder) ? { ...scenario, bundleOrder } : scenario;
+      });
+      onUpdateItem?.(item.id, {
+        distributionStructure: {
+          ...ownerDistribution,
+          pricingScenarios: [
+            ...nextScenarios.filter((scenario) => scenario.scenarioType !== "bundle"),
+            ...nextScenarios
+              .filter((scenario) => scenario.scenarioType === "bundle")
+              .sort((left, right) => (left.bundleOrder ?? Number.MAX_SAFE_INTEGER) - (right.bundleOrder ?? Number.MAX_SAFE_INTEGER))
+          ],
+          updatedAt
+        }
+      });
     });
     setActivePricingScenarioId(movedScenario.id);
   };
@@ -794,7 +863,22 @@ export default function DistributionStructureTab({
   };
 
   const addBundlePricingScenario = () => {
-    const nextScenario = createPricingScenario(distribution.pricingScenarios.length, "bundle", selectedItem?.id);
+    const bundleOrderStats = items.reduce((stats, item) => (
+      getDistribution(item).pricingScenarios.reduce((itemStats, scenario) => {
+        if (scenario.scenarioType !== "bundle") return itemStats;
+        return {
+          count: itemStats.count + 1,
+          highestOrder: Number.isFinite(scenario.bundleOrder)
+            ? Math.max(itemStats.highestOrder, scenario.bundleOrder)
+            : itemStats.highestOrder
+        };
+      }, stats)
+    ), { count: 0, highestOrder: 0 });
+    const nextBundleOrder = Math.max(bundleOrderStats.count, bundleOrderStats.highestOrder) + 1;
+    const nextScenario = {
+      ...createPricingScenario(distribution.pricingScenarios.length, "bundle", selectedItem?.id),
+      bundleOrder: nextBundleOrder
+    };
     updateDistribution({ pricingScenarios: [...distribution.pricingScenarios, nextScenario] });
     setActivePricingScenarioId(nextScenario.id);
   };
@@ -1249,36 +1333,44 @@ export default function DistributionStructureTab({
                 <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 12px", borderBottom: "1px solid #dbe3ee", background: "#f8fafc", overflowX: "auto" }}>
                   {visiblePricingScenarios.map((scenario, index) => {
                     const active = String(scenario.id) === String(activePricingScenario?.id);
-                    const canReorder = String(scenario._ownerItemId || selectedItem?.id) === String(selectedItem?.id);
-                    const isDragging = String(draggedPricingScenarioId) === String(scenario.id);
+                    const scenarioDragKey = pricingScenarioKey(scenario, selectedItem?.id);
+                    const canReorder = scenario.scenarioType === "bundle"
+                      || String(scenario._ownerItemId || selectedItem?.id) === String(selectedItem?.id);
+                    const isDragging = draggedPricingScenarioKey === scenarioDragKey;
+                    const draggedScenario = visiblePricingScenarios.find((entry) => (
+                      pricingScenarioKey(entry, selectedItem?.id) === draggedPricingScenarioKey
+                    ));
+                    const beginsBundleZone = scenario.scenarioType === "bundle"
+                      && visiblePricingScenarios[index - 1]?.scenarioType !== "bundle";
                     return (
                       <button
-                        key={scenario.id}
+                        key={scenarioDragKey}
                         type="button"
                         draggable={canReorder}
                         onClick={() => setActivePricingScenarioId(scenario.id)}
                         onDragStart={(event) => {
                           if (!canReorder) return;
-                          setDraggedPricingScenarioId(scenario.id);
+                          setDraggedPricingScenarioKey(scenarioDragKey);
                           event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("text/pricing-scenario-id", String(scenario.id));
+                          event.dataTransfer.setData("text/pricing-scenario-key", scenarioDragKey);
                         }}
                         onDragOver={(event) => {
-                          if (canReorder && draggedPricingScenarioId) {
+                          if (canReorder && draggedScenario?.scenarioType === scenario.scenarioType) {
                             event.preventDefault();
                             event.dataTransfer.dropEffect = "move";
                           }
                         }}
                         onDrop={(event) => {
                           event.preventDefault();
-                          const sourceId = event.dataTransfer.getData("text/pricing-scenario-id") || draggedPricingScenarioId;
-                          reorderPricingScenarios(sourceId, scenario.id);
-                          setDraggedPricingScenarioId(null);
+                          const sourceKey = event.dataTransfer.getData("text/pricing-scenario-key") || draggedPricingScenarioKey;
+                          reorderPricingScenarios(sourceKey, scenarioDragKey);
+                          setDraggedPricingScenarioKey(null);
                         }}
-                        onDragEnd={() => setDraggedPricingScenarioId(null)}
-                        title={`${scenario.minimumQuantity ? `${scenario.minimumQuantity}개 이상 적용` : scenario.scenarioType === "bundle" ? "묶음 프로모션" : "기본 가격대"}${canReorder ? " · 드래그하여 순서 변경" : " · 연결 탭 순서는 원본 품목에서 변경"}`}
+                        onDragEnd={() => setDraggedPricingScenarioKey(null)}
+                        title={`${scenario.minimumQuantity ? `${scenario.minimumQuantity}개 이상 적용` : scenario.scenarioType === "bundle" ? "묶음 프로모션" : "기본 가격대"} · ${scenario.scenarioType === "bundle" ? "드래그하여 묶음 구역 내 순서 변경 · 연결 제품에 공통 반영" : "드래그하여 가격대 구역 내 순서 변경"}`}
                         style={{
                           minHeight: 32,
+                          marginLeft: beginsBundleZone ? 8 : 0,
                           padding: "5px 10px",
                           border: `1px solid ${active ? "#2563eb" : "#cbd5e1"}`,
                           borderRadius: 6,
