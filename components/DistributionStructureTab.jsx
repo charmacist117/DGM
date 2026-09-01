@@ -506,18 +506,25 @@ export default function DistributionStructureTab({
       if (scenario.scenarioType === "bundle") {
         const selectedIds = new Set((scenario.bundleItemIds || []).map(String));
         const selectedProducts = items.filter((item) => selectedIds.has(String(item.id)));
+        const totalUnits = quantity && selectedProducts.length > 0 ? quantity * selectedProducts.length : null;
         const cost = quantity
           ? selectedProducts.reduce((sum, item) => sum + (getBaseAmounts(item).finalUnitCost || 0), 0) * quantity
           : null;
         const sellingPrice = parseNumber(scenario.bundleSellingPrice);
         const margin = sellingPrice !== null && cost !== null ? sellingPrice - cost : null;
         return {
-          type: "묶음 프로모션",
+          type: "묶음 판매",
           label: scenario.label,
           products: selectedProducts.map(getItemLabel).join(" + "),
-          quantity: quantity ? `각 ${quantity.toLocaleString("ko-KR")}개` : "-",
+          basis: totalUnits
+            ? `묶음 전체 (${selectedProducts.length}종 · 총 ${totalUnits.toLocaleString("ko-KR")}개)`
+            : "묶음 전체",
+          quantity: quantity && totalUnits
+            ? `${selectedProducts.length}종 × 각 ${quantity.toLocaleString("ko-KR")}개 = 총 ${totalUnits.toLocaleString("ko-KR")}개`
+            : `${selectedProducts.length}종 · 수량 미입력`,
           cost,
           sellingPrice,
+          unitSellingPrice: sellingPrice !== null && totalUnits ? sellingPrice / totalUnits : null,
           margin,
           marginExVat: margin === null ? null : margin / 1.1,
           marginRate: sellingPrice && margin !== null ? (margin / sellingPrice) * 100 : null,
@@ -528,12 +535,14 @@ export default function DistributionStructureTab({
       const sellingPrice = calculateSellingPriceFromMarginRate(baseAmounts.finalUnitCost, parseNumber(scenario.chamyaksaMarginRate));
       const margin = sellingPrice !== null && baseAmounts.finalUnitCost !== null ? sellingPrice - baseAmounts.finalUnitCost : null;
       return {
-        type: "일반 가격대",
+        type: "개별 판매",
         label: scenario.label,
         products: getItemLabel(selectedItem),
+        basis: "제품 1개당",
         quantity: quantity ? `${quantity.toLocaleString("ko-KR")}개 이상` : "기본",
         cost: baseAmounts.finalUnitCost,
         sellingPrice,
+        unitSellingPrice: sellingPrice,
         margin,
         marginExVat: margin === null ? null : margin / 1.1,
         marginRate: parseNumber(scenario.chamyaksaMarginRate),
@@ -541,37 +550,56 @@ export default function DistributionStructureTab({
         purchaseTotal: sellingPrice !== null && quantity ? sellingPrice * quantity : null
       };
     });
-    const headCells = ["구분", "가격대", "적용 제품", "적용 물량", "공급 원가(VAT 포함)", "참약사/묶음 판매가", "마진액(VAT 포함)", "마진액(VAT 미포함)", "마진율", "약국 판매가", "약국 구입 총액"];
+    const headCells = ["판매 구분", "가격대/프로모션", "적용 제품", "판매·금액 기준", "적용 물량", "공급 원가(VAT 포함)", "참약사 판매가(VAT 포함)", "개당 판매가(VAT 포함)", "마진액(VAT 포함)", "마진액(VAT 미포함)", "마진율", "약국 판매가(VAT 포함)", "약국 구입 총액(VAT 포함)"];
     const rowHtml = rows.map((row) => `<tr>${[
-      row.type, row.label, row.products || "-", row.quantity, formatWon(row.cost), formatWon(row.sellingPrice),
-      formatWon(row.margin), formatWon(row.marginExVat), formatPercent(row.marginRate), formatWon(row.pharmacySellingPrice), formatWon(row.purchaseTotal)
+      row.type, row.label, row.products || "-", row.basis, row.quantity, formatWon(row.cost), formatWon(row.sellingPrice),
+      formatWon(row.unitSellingPrice), formatWon(row.margin), formatWon(row.marginExVat), formatPercent(row.marginRate),
+      formatWon(row.pharmacySellingPrice), formatWon(row.purchaseTotal)
     ].map((value) => `<td>${escapeReportMarkup(value)}</td>`).join("")}</tr>`).join("");
     const comparisonQuotes = comparisonGroupItems.map((item) => {
       const itemDistribution = getDistribution(item);
       const itemPricingScenarios = getPricingScenariosForItem(item, items);
       const scenario = itemPricingScenarios.find((entry) => String(entry.id) === String(comparisonScenarioByItemId[item.id])) || itemPricingScenarios[0];
       const amounts = getBaseAmounts(item);
-      const expectedSellingPrice = scenario?.scenarioType === "bundle"
+      const isBundle = scenario?.scenarioType === "bundle";
+      const bundleProductIds = new Set((scenario?.bundleItemIds || []).map(String));
+      const bundleProducts = isBundle ? items.filter((entry) => bundleProductIds.has(String(entry.id))) : [];
+      const bundleQuantity = isBundle ? parseNumber(scenario.minimumQuantity) : null;
+      const bundleTotalUnits = bundleQuantity && bundleProducts.length > 0 ? bundleQuantity * bundleProducts.length : null;
+      const expectedSellingPrice = isBundle
         ? parseNumber(scenario.bundleSellingPrice)
         : calculateSellingPriceFromMarginRate(amounts.finalUnitCost, parseNumber(scenario?.chamyaksaMarginRate));
+      const expectedCost = isBundle && bundleQuantity && bundleProducts.length > 0
+        ? bundleProducts.reduce((sum, entry) => sum + (getBaseAmounts(entry).finalUnitCost || 0), 0) * bundleQuantity
+        : (isBundle ? null : amounts.finalUnitCost);
+      const expectedMarginRate = expectedSellingPrice && expectedCost !== null
+        ? ((expectedSellingPrice - expectedCost) / expectedSellingPrice) * 100
+        : null;
       return {
         productName: item.productName || "-",
         manufacturer: item.manufacturer || "-",
         permitCompany: item.permitCompany || "-",
         packagingUnit: item.packagingUnit || "-",
         quantity: item.quantity || "-",
-        scenario: `${scenario?.label || "기본"}${scenario?.scenarioType === "bundle" ? " (묶음)" : ""}`,
+        scenario: `${scenario?.label || "기본"}${isBundle ? " (묶음)" : ""}`,
+        saleBasis: isBundle
+          ? (bundleTotalUnits ? `묶음 전체 (${bundleProducts.length}종 · 총 ${bundleTotalUnits.toLocaleString("ko-KR")}개)` : "묶음 전체")
+          : "제품 1개당",
         vatUnitPrice: amounts.vatUnitPrice,
         finalUnitCost: amounts.finalUnitCost,
         expectedSellingPrice,
-        marginRate: scenario?.scenarioType === "bundle" ? "묶음 총액" : formatPercent(parseNumber(scenario?.chamyaksaMarginRate)),
+        expectedUnitSellingPrice: isBundle && bundleTotalUnits && expectedSellingPrice !== null
+          ? expectedSellingPrice / bundleTotalUnits
+          : expectedSellingPrice,
+        marginRate: formatPercent(expectedMarginRate),
         pharmacySellingPrice: parseNumber(itemDistribution.pharmacySellingPrice)
       };
     });
-    const comparisonQuoteHeaders = ["제품명", "제조사", "허가사", "포장단위", "배치 당 포장단위 개수", "가격대", "VAT 포함 단가", "최종 공급사 판매가", "참약사 예상 판매가", "예상 마진율", "약국 판매가"];
+    const comparisonQuoteHeaders = ["제품명", "제조사", "허가사", "포장단위", "배치 당 포장단위 개수", "가격대", "판매·금액 기준", "VAT 포함 단가", "최종 공급사 판매가(VAT 포함)", "참약사 판매가(VAT 포함)", "참약사 개당 판매가(VAT 포함)", "예상 마진율", "약국 판매가(VAT 포함)"];
     const comparisonQuoteRows = comparisonQuotes.map((quote) => `<tr>${[
       quote.productName, quote.manufacturer, quote.permitCompany, quote.packagingUnit, quote.quantity, quote.scenario,
-      formatWon(quote.vatUnitPrice), formatWon(quote.finalUnitCost), formatWon(quote.expectedSellingPrice), quote.marginRate, formatWon(quote.pharmacySellingPrice)
+      quote.saleBasis, formatWon(quote.vatUnitPrice), formatWon(quote.finalUnitCost), formatWon(quote.expectedSellingPrice),
+      formatWon(quote.expectedUnitSellingPrice), quote.marginRate, formatWon(quote.pharmacySellingPrice)
     ].map((value) => `<td>${escapeReportMarkup(value)}</td>`).join("")}</tr>`).join("");
     const competitors = sharedCompetitors.map((competitor) => ({
       date: competitor.date || "-",
@@ -637,12 +665,13 @@ export default function DistributionStructureTab({
       context.font = "700 22px 'Malgun Gothic', Arial, sans-serif";
       context.fillText("가격대 및 묶음 프로모션 전체", margin, y + 34);
       y = drawCanvasTable(context, {
-        headers: ["구분", "가격대", "적용 제품", "적용 물량", "공급 원가", "참약사/묶음 판매가", "마진액 VAT 포함", "마진액 VAT 미포함", "마진율", "약국 판매가", "약국 구입 총액"],
+        headers: ["판매 구분", "가격대/프로모션", "적용 제품", "판매·금액 기준", "적용 물량", "공급 원가(VAT 포함)", "참약사 판매가(VAT 포함)", "개당 판매가(VAT 포함)", "마진액 VAT 포함", "마진액 VAT 미포함", "마진율", "약국 판매가(VAT 포함)", "약국 구입 총액(VAT 포함)"],
         rows: report.rows.map((row) => [
-          row.type, row.label, row.products || "-", row.quantity, formatWon(row.cost), formatWon(row.sellingPrice),
-          formatWon(row.margin), formatWon(row.marginExVat), formatPercent(row.marginRate), formatWon(row.pharmacySellingPrice), formatWon(row.purchaseTotal)
+          row.type, row.label, row.products || "-", row.basis, row.quantity, formatWon(row.cost), formatWon(row.sellingPrice),
+          formatWon(row.unitSellingPrice), formatWon(row.margin), formatWon(row.marginExVat), formatPercent(row.marginRate),
+          formatWon(row.pharmacySellingPrice), formatWon(row.purchaseTotal)
         ]),
-        widths: [125, 150, 350, 130, 155, 190, 170, 180, 115, 155, 200],
+        widths: [105, 130, 260, 185, 170, 145, 160, 145, 145, 150, 100, 140, 155],
         x: margin,
         y: y + 70
       });
@@ -651,9 +680,9 @@ export default function DistributionStructureTab({
       context.font = "700 22px 'Malgun Gothic', Arial, sans-serif";
       context.fillText(`제조사 견적 비교${distribution.comparisonCategory ? ` · ${distribution.comparisonCategory}` : ""}`, margin, y + 34);
       y = drawCanvasTable(context, {
-        headers: ["제품명/제조사", "허가사", "포장단위", "배치 수량", "가격대", "VAT 포함", "최종 원가", "예상 판매가", "마진율", "약국 판매가"],
-        rows: report.comparisonQuotes.map((quote) => [`${quote.productName}\n${quote.manufacturer}`, quote.permitCompany, quote.packagingUnit, quote.quantity, quote.scenario, formatWon(quote.vatUnitPrice), formatWon(quote.finalUnitCost), formatWon(quote.expectedSellingPrice), quote.marginRate, formatWon(quote.pharmacySellingPrice)]),
-        widths: [330, 210, 180, 180, 220, 190, 190, 210, 160, 230], x: margin, y: y + 70
+        headers: ["제품명/제조사", "허가사", "포장단위", "배치 수량", "가격대", "판매·금액 기준", "VAT 포함 단가", "최종 원가(VAT 포함)", "참약사 판매가(VAT 포함)", "개당 판매가(VAT 포함)", "마진율", "약국 판매가(VAT 포함)"],
+        rows: report.comparisonQuotes.map((quote) => [`${quote.productName}\n${quote.manufacturer}`, quote.permitCompany, quote.packagingUnit, quote.quantity, quote.scenario, quote.saleBasis, formatWon(quote.vatUnitPrice), formatWon(quote.finalUnitCost), formatWon(quote.expectedSellingPrice), formatWon(quote.expectedUnitSellingPrice), quote.marginRate, formatWon(quote.pharmacySellingPrice)]),
+        widths: [260, 150, 130, 130, 165, 210, 140, 140, 160, 145, 110, 140], x: margin, y: y + 70
       });
       context.fillStyle = "#0f172a";
       context.font = "700 22px 'Malgun Gothic', Arial, sans-serif";
