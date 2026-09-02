@@ -514,9 +514,17 @@ export default function ContractManagementTab({
                   </Field>
                   <Field label={draft.recordType === "parent" ? "모계약 유형" : "하위 문서 유형"}>
                     {draft.recordType === "parent" ? (
-                      <select value={draft.parentContractType} onChange={(event) => setDraft((previous) => ({ ...previous, parentContractType: event.target.value }))} style={inputStyle}>
-                        {PARENT_CONTRACT_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                      </select>
+                      <div style={{ display: "grid", gap: 5, minWidth: 0 }}>
+                        <select value={draft.parentContractType} onChange={(event) => setDraft((previous) => ({ ...previous, parentContractType: event.target.value }))} style={inputStyle}>
+                          {PARENT_CONTRACT_TYPES.map((item) => (
+                            <option key={item.id} value={item.id}>{item.label} — {item.description}</option>
+                          ))}
+                        </select>
+                        <div style={{ color: "#64748b", fontSize: 10, lineHeight: 1.45 }}>
+                          {PARENT_CONTRACT_TYPES.find((item) => item.id === draft.parentContractType)?.description}
+                          {" · "}실제 계약서 명칭보다 적용 범위를 기준으로 선택
+                        </div>
+                      </div>
                     ) : (
                       <select value={draft.childContractType} onChange={(event) => setDraft((previous) => ({ ...previous, childContractType: event.target.value }))} style={inputStyle}>
                         {CHILD_CONTRACT_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}

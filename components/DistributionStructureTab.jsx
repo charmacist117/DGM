@@ -126,19 +126,30 @@ function drawCanvasTable(context, { headers, rows, widths, x, y }) {
   const headerHeight = 46;
   const lineHeight = 24;
   const padding = 10;
+  const headerPadding = 6;
   let currentX = x;
 
   context.textBaseline = "top";
-  context.font = "700 17px 'Malgun Gothic', Arial, sans-serif";
   headers.forEach((header, index) => {
     context.fillStyle = "#dbeafe";
     context.fillRect(currentX, y, widths[index], headerHeight);
     context.strokeStyle = "#94a3b8";
     context.strokeRect(currentX, y, widths[index], headerHeight);
     context.fillStyle = "#0f172a";
-    getCanvasTextLines(context, header, widths[index] - (padding * 2)).slice(0, 2).forEach((line, lineIndex) => {
-      context.fillText(line, currentX + padding, y + padding + (lineIndex * lineHeight));
-    });
+    const headerText = String(header ?? "-");
+    const availableWidth = Math.max(1, widths[index] - (headerPadding * 2));
+    context.font = "700 17px 'Malgun Gothic', Arial, sans-serif";
+    const measuredWidth = context.measureText(headerText).width;
+    const headerFontSize = measuredWidth > availableWidth
+      ? Math.max(6, Math.floor(17 * (availableWidth / measuredWidth)))
+      : 17;
+    context.font = `700 ${headerFontSize}px 'Malgun Gothic', Arial, sans-serif`;
+    context.fillText(
+      headerText,
+      currentX + headerPadding,
+      y + Math.max(5, Math.floor((headerHeight - headerFontSize) / 2)),
+      availableWidth
+    );
     currentX += widths[index];
   });
 
