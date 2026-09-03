@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import SegmentedDateInput from "@/components/SegmentedDateInput";
 import IngredientAmountTitle, { formatIngredientAmountLabel } from "@/components/IngredientAmountTitle";
 import { calculateMarketAnalysis, calculateSellingPriceFromMarginRate } from "@/lib/pms/marketAnalysis";
+import { calculateBonusPromotion, bonusPromotionQuantityLabel } from "@/lib/pms/pricingScenarios";
 import { marketDecisionBadgeStyle, marketDecisionLabel } from "@/lib/pms/marketDecision";
 import {
   PROMOTION_PROGRESS_OPTIONS,
@@ -325,12 +326,16 @@ export default function ProjectPromotionTab({ items = [], projects = [], marketA
         const sellingPrice = isBundle
           ? numberValue(scenario.bundleSellingPrice)
           : calculateSellingPriceFromMarginRate(cost.finalUnitCost, scenario.chamyaksaMarginRate);
+        const bonus = scenario.scenarioType === "bonus" ? calculateBonusPromotion({
+          unitCost: cost.finalUnitCost, sellingPrice,
+          paidQuantity: scenario.minimumQuantity, bonusQuantity: scenario.bonusQuantity
+        }) : null;
         return [
-          isBundle ? "묶음 프로모션" : "일반 가격대",
+          isBundle ? "묶음 프로모션" : bonus ? "할증 프로모션" : "일반 가격대",
           scenario.label || "기본",
-          numberValue(scenario.minimumQuantity) !== null ? `${numberValue(scenario.minimumQuantity).toLocaleString("ko-KR")}개 이상` : "기본",
-          isBundle ? "묶음 기준" : (scenario.chamyaksaMarginRate ? `${scenario.chamyaksaMarginRate}%` : "-"),
-          formatWon(sellingPrice),
+          bonus ? bonusPromotionQuantityLabel(scenario) : numberValue(scenario.minimumQuantity) !== null ? `${numberValue(scenario.minimumQuantity).toLocaleString("ko-KR")}개 이상` : "기본",
+          isBundle ? "묶음 기준" : bonus ? (bonus.marginRate === null ? "-" : `${bonus.marginRate.toFixed(2)}% (할증 반영)`) : (scenario.chamyaksaMarginRate ? `${scenario.chamyaksaMarginRate}%` : "-"),
+          bonus ? `최종 개당 ${formatWon(bonus.effectiveUnitPrice)} / 유상 1개 기준 ${formatWon(sellingPrice)}` : formatWon(sellingPrice),
           selectedItem.distributionStructure?.pharmacySellingPrice ? `${Number(String(selectedItem.distributionStructure.pharmacySellingPrice).replace(/,/g, "")).toLocaleString("ko-KR")}원` : "-"
         ];
       });

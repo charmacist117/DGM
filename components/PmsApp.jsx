@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { normalizePricingScenario as normalizeDistributionPricingScenario } from "@/lib/pms/pricingScenarios";
 import { useRouter } from "next/navigation";
 import ProjectSidebar from "@/components/ProjectSidebar";
 import DesktopProjectPathControl from "@/components/DesktopProjectPathControl";
@@ -948,20 +949,6 @@ function normalizeDistributionCompetitor(value = {}, fallbackId = "competitor_1"
     salePrice: String(source.salePrice ?? priceTiers[0]?.price ?? ""),
     priceTiers,
     memo: String(source.memo || source.note || "")
-  };
-}
-
-function normalizeDistributionPricingScenario(value = {}, fallbackId = "pricing_default", fallbackLabel = "기본") {
-  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  return {
-    id: source.id ?? fallbackId,
-    label: String(source.label || fallbackLabel),
-    scenarioType: source.scenarioType === "bundle" ? "bundle" : "single",
-    minimumQuantity: String(source.minimumQuantity ?? source.minQuantity ?? ""),
-    chamyaksaMarginRate: String(source.chamyaksaMarginRate ?? ""),
-    pharmacySellingPrice: String(source.pharmacySellingPrice ?? ""),
-    bundleItemIds: (Array.isArray(source.bundleItemIds) ? source.bundleItemIds : []).map(String),
-    bundleSellingPrice: String(source.bundleSellingPrice ?? "")
   };
 }
 

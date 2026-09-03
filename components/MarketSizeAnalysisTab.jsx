@@ -1057,7 +1057,7 @@ export default function MarketSizeAnalysisTab({
                       >
                         <option value="">기본 가격대</option>
                         {pricingScenarios.map((scenario, index) => (
-                          <option key={scenario.id} value={scenario.id}>{scenario.label || `가격대 ${index + 1}`}</option>
+                          <option key={scenario.id} value={scenario.id}>{scenario.label || `가격대 ${index + 1}`}{scenario.scenarioType === "bonus" ? ` (할증 ${scenario.minimumQuantity || "?"}+${scenario.bonusQuantity || "?"})` : ""}</option>
                         ))}
                       </select>
                     </label>
