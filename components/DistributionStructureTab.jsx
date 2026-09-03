@@ -1,10 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import SegmentedDateInput from "@/components/SegmentedDateInput";
 import IngredientAmountTitle, { formatIngredientAmountLabel } from "@/components/IngredientAmountTitle";
 import { calculateSellingPriceFromMarginRate } from "@/lib/pms/marketAnalysis";
 import { getBaseAmounts } from "@/lib/pms/distributionAmounts";
+import {
+  DISTRIBUTION_EXPORT_SECTION_KEYS,
+  composeDistributionReportSections,
+  normalizeDistributionExportSections
+} from "@/lib/pms/distributionExport";
 import { normalizePricingScenario, calculateBonusPromotion, bonusPromotionQuantityLabel, pricingScenarioGroup } from "@/lib/pms/pricingScenarios";
 import {
   marketDecisionBadgeStyle,
@@ -53,6 +58,12 @@ const secondaryButtonStyle = {
   fontSize: 13,
   fontWeight: 800
 };
+
+const DISTRIBUTION_EXPORT_OPTIONS = [
+  { key: "profile", label: "제품 유통 프로파일" },
+  { key: "pricing", label: "판매가 및 마진 설정" },
+  { key: "comparison", label: "견적·경쟁제품 비교" }
+];
 
 function parseNumber(value) {
   const cleaned = String(value ?? "").replace(/,/g, "").replace(/[^\d.-]/g, "");
@@ -125,6 +136,8 @@ function getCanvasTextLines(context, value, maxWidth) {
 }
 
 function drawCanvasTable(context, { headers, rows, widths, x, y }) {
+  const totalWidth = widths.reduce((sum, width) => sum + width, 0);
+  widths = widths.map((width) => width * (context.canvas.width - x * 2) / totalWidth);
   const headerHeight = 46;
   const lineHeight = 24;
   const padding = 10;
@@ -332,6 +345,13 @@ export default function DistributionStructureTab({
   const [draggedPricingScenarioKey, setDraggedPricingScenarioKey] = useState(null);
   const [comparisonCategoryDraft, setComparisonCategoryDraft] = useState("");
   const [comparisonScenarioByItemId, setComparisonScenarioByItemId] = useState({});
+  const [exportDialogType, setExportDialogType] = useState(null);
+  const [exportSections, setExportSections] = useState(() => normalizeDistributionExportSections());
+  const exportDialogRef = useRef(null);
+  useEffect(() => {
+    if (exportDialogType) exportDialogRef.current?.showModal();
+    else exportDialogRef.current?.close();
+  }, [exportDialogType]);
   const query = search.trim().toLowerCase();
   const categoryItems = useMemo(() => (
     selectedCategory === "all" ? items : items.filter((item) => item.category === selectedCategory)
@@ -467,7 +487,8 @@ export default function DistributionStructureTab({
     : null;
   const categoryLabelById = Object.fromEntries(categories.map((category) => [category.id, category.label]));
 
-  const createDistributionReport = () => {
+  const createDistributionReport = (sectionSelection = {}) => {
+    const selectedSections = normalizeDistributionExportSections(sectionSelection);
     const rows = visiblePricingScenarios.map((scenario) => {
       const quantity = parseNumber(scenario.minimumQuantity);
       if (scenario.scenarioType === "bundle") {
@@ -604,25 +625,44 @@ export default function DistributionStructureTab({
     const competitorRows = competitors.map((competitor) => (
       `<tr>${[competitor.date, competitor.productName, competitor.salesChannel, competitor.packagingUnit, competitor.prices, competitor.memo].map((value) => `<td>${escapeReportMarkup(value)}</td>`).join("")}</tr>`
     )).join("");
+    const profileRows = [
+      ["포장단위", selectedItem.packagingForm || "-", selectedItem.packagingUnit || "-"],
+      ["배치 당 포장단위 개수", "1배치 기준", baseAmounts.quantity === null ? "-" : `${baseAmounts.quantity.toLocaleString("ko-KR")}개`],
+      ["최소 주문단위", `${baseAmounts.minimumOrderBatches}배치`, baseAmounts.minimumOrderQuantity === null ? "-" : `${baseAmounts.minimumOrderQuantity.toLocaleString("ko-KR")}개`],
+      ["배치 당 공급단가", `포장단위당 · VAT 제외 / 1배치 총액 ${formatWon(baseAmounts.supplyTotal)}`, formatWon(baseAmounts.unitPrice)],
+      ["허가사 수수료 반영 시", `포장단위당 · VAT 제외 / ${permitFeeStatus} / 허가사: ${(hasPermitCompanyFee ? selectedItem.permitCompany : selectedItem.manufacturer) || "미입력"}`, formatWon(hasPermitCompanyFee ? baseAmounts.permitFeeUnitPrice : baseAmounts.unitPrice)],
+      ["최종 배치 당 VAT 포함가격", "포장단위당 · VAT·허가사 수수료 반영", formatWon(baseAmounts.finalUnitCost)],
+      ["최종 공급사 판매가", "1배치 기준 · VAT·허가사 수수료 반영", formatWon(baseAmounts.finalTotal)],
+      ["최종 공급사 판매가", `최소 주문 ${baseAmounts.minimumOrderBatches}배치 · VAT·허가사 수수료 반영`, formatWon(baseAmounts.minimumOrderFinalTotal)],
+      ["허가사 수수료총액", `1배치 기준 · VAT 포함 / VAT 제외 ${formatWon(baseAmounts.permitFeeTotalExcludingVat)}`, formatWon(baseAmounts.permitFeeTotal)],
+      ["허가사 수수료총액", `최소 주문 ${baseAmounts.minimumOrderBatches}배치 · VAT 포함 / VAT 제외 ${formatWon(baseAmounts.minimumOrderPermitFeeTotalExcludingVat)}`, formatWon(baseAmounts.minimumOrderPermitFeeTotal)]
+    ];
+    if (permitFeeRateUnknown) profileRows.push(["허가사 수수료", "공급단가에 포함 · 금액 분리 불가", "알 수 없음"]);
+    else if (hasPermitCompanyFee && permitFeeRate === null) profileRows.push(["허가사 수수료", "수수료율 미입력 · 수수료 추가분 미반영", "-"]);
+    const profileHtml = `<h3>제품 유통 프로파일</h3><table><thead><tr><th>항목</th><th>기준</th><th>금액·수량</th></tr></thead><tbody>${profileRows.map((row) => `<tr>${row.map((value) => `<td>${escapeReportMarkup(value)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    const pricingHtml = `<h3>판매가 및 마진 설정</h3><table><thead><tr>${headCells.map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${rowHtml}</tbody></table>`;
+    const comparisonHtml = `<h3>견적·경쟁제품 비교</h3><h4>제조사 견적 비교${distribution.comparisonCategory ? ` · ${escapeReportMarkup(distribution.comparisonCategory)}` : ""}</h4><table><thead><tr>${comparisonQuoteHeaders.map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${comparisonQuoteRows}</tbody></table><h4>경쟁제품 비교</h4><table><thead><tr>${["기준일", "경쟁제품명", "판매처", "포장단위", "판매구간 및 단가", "비고"].map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${competitorRows || '<tr><td colspan="6">등록된 경쟁제품 없음</td></tr>'}</tbody></table>`;
     return {
       title: getItemLabel(selectedItem),
       rows,
       comparisonQuotes,
       competitors,
-      html: `<div class="report"><h1>유통 구조 정책 보고서</h1><h2>${escapeReportMarkup(getItemLabel(selectedItem))}</h2><p>${escapeReportMarkup(selectedItem.manufacturer || "제조사 미입력")} · ${escapeReportMarkup(categoryLabelById[selectedItem.category] || selectedItem.category)} · 생성 ${escapeReportMarkup(new Date().toLocaleString("ko-KR"))}</p><h3>공급 기준</h3><table><tbody><tr><th>포장단위</th><td>${escapeReportMarkup(selectedItem.packagingUnit || "-")}</td><th>배치 당 포장단위 개수</th><td>${escapeReportMarkup(baseAmounts.quantity === null ? "-" : `${baseAmounts.quantity.toLocaleString("ko-KR")}개`)}</td><th>최소 주문단위</th><td>${escapeReportMarkup(baseAmounts.minimumOrderQuantity === null ? "-" : `${baseAmounts.minimumOrderQuantity.toLocaleString("ko-KR")}개 (${baseAmounts.minimumOrderBatches}배치)`)}</td><th>최종 공급사 판매가</th><td>${escapeReportMarkup(formatWon(baseAmounts.finalUnitCost))}</td><th>최소 주문 총액</th><td>${escapeReportMarkup(formatWon(baseAmounts.minimumOrderFinalTotal))}</td></tr></tbody></table><h3>가격대 및 프로모션 전체</h3><table><thead><tr>${headCells.map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${rowHtml}</tbody></table><h3>제조사 견적 비교${distribution.comparisonCategory ? ` · ${escapeReportMarkup(distribution.comparisonCategory)}` : ""}</h3><table><thead><tr>${comparisonQuoteHeaders.map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${comparisonQuoteRows}</tbody></table><h3>경쟁제품 비교</h3><table><thead><tr>${["기준일", "경쟁제품명", "판매처", "포장단위", "판매구간 및 단가", "비고"].map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${competitorRows || '<tr><td colspan="6">등록된 경쟁제품 없음</td></tr>'}</tbody></table></div>`
+      selectedSections,
+      profileRows,
+      html: `<div class="report"><h1>유통 구조 정책 보고서</h1><h2>${escapeReportMarkup(getItemLabel(selectedItem))}</h2><p>${escapeReportMarkup(selectedItem.manufacturer || "제조사 미입력")} · ${escapeReportMarkup(categoryLabelById[selectedItem.category] || selectedItem.category)} · 생성 ${escapeReportMarkup(new Date().toLocaleString("ko-KR"))}</p>${composeDistributionReportSections(selectedSections, { profile: profileHtml, pricing: pricingHtml, comparison: comparisonHtml })}</div>`
     };
   };
 
-  const downloadDistributionExcel = () => {
+  const downloadDistributionExcel = (sectionSelection) => {
     if (!selectedItem) return;
-    const report = createDistributionReport();
-    const css = `<style>body{font-family:Arial,'Malgun Gothic',sans-serif;color:#0f172a}h1{font-size:22px}h2{font-size:17px}h3{margin-top:20px;font-size:14px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #94a3b8;padding:7px;font-size:11px;text-align:left;vertical-align:top}th{background:#dbeafe;font-weight:700}</style>`;
+    const report = createDistributionReport(sectionSelection);
+    const css = `<style>body{font-family:Arial,'Malgun Gothic',sans-serif;color:#0f172a}h1{font-size:22px}h2{font-size:17px}h3{margin-top:20px;font-size:14px}h4{margin:14px 0 7px;font-size:12px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #94a3b8;padding:7px;font-size:11px;text-align:left;vertical-align:top}th{background:#dbeafe;font-weight:700}</style>`;
     downloadReportBlob(new Blob([`\uFEFF<html><head><meta charset="utf-8">${css}</head><body>${report.html}</body></html>`], { type: "application/vnd.ms-excel;charset=utf-8" }), `${reportFileName(report.title)}_유통구조.xls`);
   };
 
-  const downloadDistributionImage = async () => {
+  const downloadDistributionImage = async (sectionSelection) => {
     if (!selectedItem) return;
-    const report = createDistributionReport();
+    const report = createDistributionReport(sectionSelection);
     try {
       const width = 2200;
       const margin = 40;
@@ -642,52 +682,46 @@ export default function DistributionStructureTab({
       context.fillStyle = "#475569";
       context.fillText(`${selectedItem.manufacturer || "제조사 미입력"} · ${categoryLabelById[selectedItem.category] || selectedItem.category} · 생성 ${new Date().toLocaleString("ko-KR")}`, margin, 148);
 
-      context.fillStyle = "#0f172a";
-      context.font = "700 22px 'Malgun Gothic', Arial, sans-serif";
-      context.fillText("공급 기준", margin, 198);
-      let y = drawCanvasTable(context, {
-        headers: ["포장단위", "배치 당 포장단위 개수", "최소 주문단위", "최종 공급사 판매가", "최소 주문 총액"],
-        rows: [[selectedItem.packagingUnit || "-", baseAmounts.quantity === null ? "-" : `${baseAmounts.quantity.toLocaleString("ko-KR")}개`, baseAmounts.minimumOrderQuantity === null ? "-" : `${baseAmounts.minimumOrderQuantity.toLocaleString("ko-KR")}개 (${baseAmounts.minimumOrderBatches}배치)`, formatWon(baseAmounts.finalUnitCost), formatWon(baseAmounts.minimumOrderFinalTotal)]],
-        widths: [360, 430, 500, 430, 400],
-        x: margin,
-        y: 232
-      });
-
-      context.fillStyle = "#0f172a";
-      context.font = "700 22px 'Malgun Gothic', Arial, sans-serif";
-      context.fillText("가격대 및 프로모션 전체", margin, y + 34);
-      y = drawCanvasTable(context, {
-        headers: ["판매 구분", "가격대/프로모션", "적용 제품", "판매·금액 기준", "적용 물량", "공급 원가(VAT 포함)", "참약사 판매가(VAT 포함)", "개당 판매가(VAT 포함)", "마진액 VAT 포함", "마진액 VAT 미포함", "마진율", "약국 판매가(VAT 포함)", "약국 구입 총액(VAT 포함)"],
-        rows: report.rows.map((row) => [
-          row.type, row.label, row.products || "-", row.basis, row.quantity, formatWon(row.cost), formatWon(row.sellingPrice),
-          formatWon(row.unitSellingPrice), formatWon(row.margin), formatWon(row.marginExVat), formatPercent(row.marginRate),
-          formatWon(row.pharmacySellingPrice), formatWon(row.purchaseTotal)
-        ]),
-        widths: [105, 130, 260, 185, 170, 145, 160, 145, 145, 150, 100, 140, 155],
-        x: margin,
-        y: y + 70
-      });
-
-      context.fillStyle = "#0f172a";
-      context.font = "700 22px 'Malgun Gothic', Arial, sans-serif";
-      context.fillText(`제조사 견적 비교${distribution.comparisonCategory ? ` · ${distribution.comparisonCategory}` : ""}`, margin, y + 34);
-      y = drawCanvasTable(context, {
-        headers: ["제품명/제조사", "허가사", "포장단위", "배치 수량", "가격대", "판매·금액 기준", "VAT 포함 단가", "최종 원가(VAT 포함)", "참약사 판매가(VAT 포함)", "개당 판매가(VAT 포함)", "마진율", "약국 판매가(VAT 포함)"],
-        rows: report.comparisonQuotes.map((quote) => [`${quote.productName}\n${quote.manufacturer}`, quote.permitCompany, quote.packagingUnit, quote.quantity, quote.scenario, quote.saleBasis, formatWon(quote.vatUnitPrice), formatWon(quote.finalUnitCost), formatWon(quote.expectedSellingPrice), formatWon(quote.expectedUnitSellingPrice), quote.marginRate, formatWon(quote.pharmacySellingPrice)]),
-        widths: [260, 150, 130, 130, 165, 210, 140, 140, 160, 145, 110, 140], x: margin, y: y + 70
-      });
-      context.fillStyle = "#0f172a";
-      context.font = "700 22px 'Malgun Gothic', Arial, sans-serif";
-      context.fillText("경쟁제품 비교", margin, y + 34);
-      y = drawCanvasTable(context, {
-        headers: ["기준일", "경쟁제품명", "판매처", "포장단위", "판매구간 및 단가", "비고"],
-        rows: report.competitors.length > 0
-          ? report.competitors.map((competitor) => [competitor.date, competitor.productName, competitor.salesChannel, competitor.packagingUnit, competitor.prices, competitor.memo])
-          : [["-", "등록된 경쟁제품 없음", "-", "-", "-", "-"]],
-        widths: [220, 420, 320, 260, 520, 380],
-        x: margin,
-        y: y + 70
-      });
+      let y = 184;
+      if (report.selectedSections.profile) {
+        context.fillStyle = "#0f172a";
+        context.font = "700 22px 'Malgun Gothic', Arial, sans-serif";
+        context.fillText("제품 유통 프로파일", margin, y + 14);
+        y = drawCanvasTable(context, {
+          headers: ["항목", "기준", "금액·수량"], rows: report.profileRows,
+          widths: [480, 1080, 560], x: margin, y: y + 48
+        });
+      }
+      if (report.selectedSections.pricing) {
+        context.fillStyle = "#0f172a";
+        context.font = "700 22px 'Malgun Gothic', Arial, sans-serif";
+        context.fillText("판매가 및 마진 설정", margin, y + 34);
+        y = drawCanvasTable(context, {
+          headers: ["판매 구분", "가격대/프로모션", "적용 제품", "판매·금액 기준", "적용 물량", "공급 원가(VAT 포함)", "참약사 판매가(VAT 포함)", "개당 판매가(VAT 포함)", "마진액 VAT 포함", "마진액 VAT 미포함", "마진율", "약국 판매가(VAT 포함)", "약국 구입 총액(VAT 포함)"],
+          rows: report.rows.map((row) => [row.type, row.label, row.products || "-", row.basis, row.quantity, formatWon(row.cost), formatWon(row.sellingPrice), formatWon(row.unitSellingPrice), formatWon(row.margin), formatWon(row.marginExVat), formatPercent(row.marginRate), formatWon(row.pharmacySellingPrice), formatWon(row.purchaseTotal)]),
+          widths: [105, 130, 260, 185, 170, 145, 160, 145, 145, 150, 100, 140, 155], x: margin, y: y + 70
+        });
+      }
+      if (report.selectedSections.comparison) {
+        context.fillStyle = "#0f172a";
+        context.font = "700 22px 'Malgun Gothic', Arial, sans-serif";
+        context.fillText("견적·경쟁제품 비교", margin, y + 34);
+        context.font = "700 18px 'Malgun Gothic', Arial, sans-serif";
+        context.fillText(`제조사 견적 비교${distribution.comparisonCategory ? ` · ${distribution.comparisonCategory}` : ""}`, margin, y + 70);
+        y = drawCanvasTable(context, {
+          headers: ["제품명/제조사", "허가사", "포장단위", "배치 수량", "가격대", "판매·금액 기준", "VAT 포함 단가", "최종 원가(VAT 포함)", "참약사 판매가(VAT 포함)", "개당 판매가(VAT 포함)", "마진율", "약국 판매가(VAT 포함)"],
+          rows: report.comparisonQuotes.map((quote) => [`${quote.productName}\n${quote.manufacturer}`, quote.permitCompany, quote.packagingUnit, quote.quantity, quote.scenario, quote.saleBasis, formatWon(quote.vatUnitPrice), formatWon(quote.finalUnitCost), formatWon(quote.expectedSellingPrice), formatWon(quote.expectedUnitSellingPrice), quote.marginRate, formatWon(quote.pharmacySellingPrice)]),
+          widths: [260, 150, 130, 130, 165, 210, 140, 140, 160, 145, 110, 140], x: margin, y: y + 100
+        });
+        context.fillStyle = "#0f172a";
+        context.font = "700 18px 'Malgun Gothic', Arial, sans-serif";
+        context.fillText("경쟁제품 비교", margin, y + 34);
+        y = drawCanvasTable(context, {
+          headers: ["기준일", "경쟁제품명", "판매처", "포장단위", "판매구간 및 단가", "비고"],
+          rows: report.competitors.length > 0 ? report.competitors.map((competitor) => [competitor.date, competitor.productName, competitor.salesChannel, competitor.packagingUnit, competitor.prices, competitor.memo]) : [["-", "등록된 경쟁제품 없음", "-", "-", "-", "-"]],
+          widths: [220, 420, 320, 260, 520, 380], x: margin, y: y + 70
+        });
+      }
 
       const output = document.createElement("canvas");
       output.width = width;
@@ -700,6 +734,23 @@ export default function DistributionStructureTab({
       console.error("유통 구조 이미지 저장 실패", error);
       window.alert("이미지를 생성하지 못했습니다. 잠시 후 다시 시도해주세요.");
     }
+  };
+
+  const openDistributionExportDialog = (type) => {
+    setExportSections(normalizeDistributionExportSections());
+    setExportDialogType(type);
+  };
+
+  const confirmDistributionExport = async () => {
+    const selectedSections = normalizeDistributionExportSections(exportSections);
+    if (!DISTRIBUTION_EXPORT_SECTION_KEYS.some((key) => selectedSections[key])) {
+      window.alert("출력할 항목을 하나 이상 선택해주세요.");
+      return;
+    }
+    const type = exportDialogType;
+    setExportDialogType(null);
+    if (type === "excel") downloadDistributionExcel(selectedSections);
+    if (type === "image") await downloadDistributionImage(selectedSections);
   };
 
   useEffect(() => {
@@ -1189,6 +1240,7 @@ export default function DistributionStructureTab({
               <section style={panelStyle}>
                 <div className="supply-summary-header" style={{ padding: "13px 15px", borderBottom: "1px solid #cbd5e1", background: "#e8f1fb" }}>
                   <div className="supply-summary-title" style={{ minWidth: 0, maxWidth: "100%", overflow: "hidden" }}>
+                    <h2 style={{ margin: "0 0 8px", fontSize: 16, color: "#0f172a" }}>제품 유통 프로파일</h2>
                     <IngredientAmountTitle label={getItemLabel(selectedItem)} maxFontSize={17} minFontSize={12} />
                     <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>
                       {selectedItem.manufacturer || "제조사 미입력"} · {categoryLabelById[selectedItem.category] || selectedItem.category}
@@ -1329,8 +1381,8 @@ export default function DistributionStructureTab({
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                     <div style={{ color: "#0f172a", fontSize: 16, fontWeight: 900, flexShrink: 0 }}>판매가 및 마진 설정</div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7, flexWrap: "wrap" }}>
-                      <button type="button" onClick={downloadDistributionExcel} style={{ ...secondaryButtonStyle, minHeight: 32, padding: "5px 9px", fontSize: 12 }}>Excel 다운로드</button>
-                      <button type="button" onClick={downloadDistributionImage} style={{ ...secondaryButtonStyle, minHeight: 32, padding: "5px 9px", fontSize: 12 }}>이미지 저장</button>
+                      <button type="button" onClick={() => openDistributionExportDialog("excel")} style={{ ...secondaryButtonStyle, minHeight: 32, padding: "5px 9px", fontSize: 12 }}>Excel 다운로드</button>
+                      <button type="button" onClick={() => openDistributionExportDialog("image")} style={{ ...secondaryButtonStyle, minHeight: 32, padding: "5px 9px", fontSize: 12 }}>이미지 저장</button>
                       <button
                         type="button"
                         onClick={completeDistributionStructure}
@@ -1942,11 +1994,45 @@ export default function DistributionStructureTab({
         </main>
       </div>
 
+          <dialog ref={exportDialogRef} className="distribution-export-dialog" aria-labelledby="distribution-export-title" onCancel={() => setExportDialogType(null)}>
+            <div className="distribution-export-header">
+              <div>
+                <h2 id="distribution-export-title">{exportDialogType === "excel" ? "Excel" : "이미지"} 출력 항목 선택</h2>
+              </div>
+            </div>
+            <div className="distribution-export-options">
+              {DISTRIBUTION_EXPORT_OPTIONS.map((option) => (
+                <label key={option.key}>
+                  <input
+                    type="checkbox"
+                    checked={exportSections[option.key] !== false}
+                    onChange={(event) => setExportSections((current) => ({ ...current, [option.key]: event.target.checked }))}
+                  />
+                  <strong>{option.label}</strong>
+                </label>
+              ))}
+            </div>
+            <div className="distribution-export-actions">
+              <button type="button" onClick={() => setExportDialogType(null)} style={secondaryButtonStyle}>취소</button>
+              <button type="button" onClick={confirmDistributionExport} disabled={!DISTRIBUTION_EXPORT_SECTION_KEYS.some((key) => exportSections[key])} style={{ ...secondaryButtonStyle, borderColor: "#2563eb", background: "#2563eb", color: "#fff" }}>확인</button>
+            </div>
+          </dialog>
+
       <style jsx>{`
         .distribution-root {
           display: grid;
           gap: 14px;
         }
+        .distribution-export-dialog::backdrop { background: rgba(15, 23, 42, .55); }
+        .distribution-export-dialog { width: min(480px, calc(100% - 32px)); max-height: calc(100% - 32px); padding: 0; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; box-shadow: 0 24px 70px rgba(15, 23, 42, .3); overflow: auto; }
+        .distribution-export-header { padding: 16px 18px; border-bottom: 1px solid #dbe3ee; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+        .distribution-export-header h2 { margin: 0; color: #0f172a; font-size: 18px; }
+        .distribution-export-options { padding: 14px 18px; display: grid; gap: 9px; }
+        .distribution-export-options label { min-height: 48px; display: flex; align-items: center; gap: 11px; cursor: pointer; }
+        .distribution-export-options input { width: 18px; height: 18px; margin: 0; flex: 0 0 18px; accent-color: #2563eb; }
+        .distribution-export-options strong { color: #0f172a; font-size: 13px; }
+        .distribution-export-actions button:disabled { opacity: .45; cursor: not-allowed !important; }
+        .distribution-export-actions { padding: 12px 18px 16px; border-top: 1px solid #dbe3ee; display: flex; justify-content: flex-end; gap: 8px; }
         .distribution-layout {
           display: grid;
           grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
