@@ -1292,7 +1292,8 @@ export default function DistributionStructureTab({
                   <div className="fee-projection-cell">
                     <div className="fee-projection-title">최종 배치 당 VAT 포함가격</div>
                     <div className="fee-projection-value">{formatWon(baseAmounts.finalUnitCost)}</div>
-                    <div className="fee-projection-note">포장단위당 · VAT·허가사 수수료 반영</div>
+                    <div className="fee-projection-note">포장단위당</div>
+                    <div className="fee-projection-note">VAT·허가사 수수료 반영</div>
                     {hasPermitCompanyFee && !permitFeeRateUnknown && permitFeeRate === null && <div className="fee-projection-note">수수료율 미입력 · 수수료 추가분 미반영</div>}
                   </div>
                   <div className="fee-projection-cell">
@@ -1302,7 +1303,8 @@ export default function DistributionStructureTab({
                     <div className="fee-projection-note">VAT·허가사 수수료 반영</div>
                   </div>
                   <div className="fee-projection-cell">
-                    <div className="fee-projection-title">최소 주문단위 기준 공급사 판매가</div>
+                    <div className="fee-projection-title">최종 공급사 판매가</div>
+                    <div className="fee-projection-label">최소 주문단위 기준</div>
                     <div className="fee-projection-value">{formatWon(baseAmounts.minimumOrderFinalTotal)}</div>
                     <div className="fee-projection-note">{baseAmounts.minimumOrderBatches}배치 · VAT·허가사 수수료 반영</div>
                   </div>
