@@ -7199,6 +7199,7 @@ export default function PmsApp() {
             }}
             onOpenSupply={openSupplyPriceItem}
             onOpenDistribution={openDistributionStructure}
+            onOpenPromotion={openProjectPromotion}
             syncState={syncState}
           />
         ) : moduleTab === "promotion" ? (

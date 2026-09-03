@@ -22,6 +22,7 @@ import {
   matchesPermitCompanyFilter,
   permitCompanyFilterOptions
 } from "@/lib/pms/permitCompanyFilter";
+import { projectPromotionReadiness } from "@/lib/pms/projectPromotion";
 
 const MARKET_ANALYSIS_CLIPBOARD_KEY = "dgm-market-analysis-clipboard-v1";
 
@@ -327,6 +328,7 @@ export default function MarketSizeAnalysisTab({
   onMarketAnalysisDefaultsChange,
   onOpenSupply,
   onOpenDistribution,
+  onOpenPromotion,
   syncState
 }) {
   const [search, setSearch] = useState("");
@@ -393,6 +395,7 @@ export default function MarketSizeAnalysisTab({
   const isEditing = selectedItem && String(editingItemId) === String(selectedItem.id);
   const workingAnalysis = isEditing && draft ? draft : savedAnalysis;
   const calculations = calculateMarketAnalysis(selectedItem, workingAnalysis, normalizedDefaults);
+  const promotionReadiness = selectedItem ? projectPromotionReadiness(selectedItem) : null;
   const growthRateYears = growthRatePeriod === "3y"
     ? Math.min(3, calculations.growthYearCount)
     : calculations.growthYearCount;
@@ -710,6 +713,28 @@ export default function MarketSizeAnalysisTab({
     setDraft(null);
   };
 
+  const openProjectPromotion = () => {
+    if (!selectedItem) return;
+    if (normalizeMarketDecisionStatus(selectedItem.marketDecisionStatus) !== "proceed") {
+      window.alert("검토결과를 ‘진행 추진’으로 설정한 뒤 이동해주세요.");
+      return;
+    }
+    if (isEditing) {
+      window.alert("수정 중인 시장 분석 내용을 먼저 저장해주세요.");
+      return;
+    }
+    const missingSteps = [
+      !promotionReadiness?.supplyReady && "공급단가",
+      !promotionReadiness?.distributionReady && "유통 구조 설정",
+      !promotionReadiness?.marketReady && "시장 규모 분석 저장"
+    ].filter(Boolean);
+    if (missingSteps.length > 0) {
+      window.alert(`프로젝트 추진 전 다음 단계를 완료해주세요.\n\n${missingSteps.join(" · ")}`);
+      return;
+    }
+    onOpenPromotion?.(selectedItem.id);
+  };
+
   const resetConditionsToDefaults = () => {
     if (!isEditing) return;
     updateDraft({
@@ -916,6 +941,23 @@ export default function MarketSizeAnalysisTab({
                         ))}
                       </select>
                     </label>
+                    <button
+                      type="button"
+                      onClick={openProjectPromotion}
+                      disabled={normalizeMarketDecisionStatus(selectedItem.marketDecisionStatus) !== "proceed"}
+                      title={normalizeMarketDecisionStatus(selectedItem.marketDecisionStatus) === "proceed"
+                        ? "현재 품목을 프로젝트 추진 단계에서 엽니다."
+                        : "검토결과를 ‘진행 추진’으로 설정하면 이동할 수 있습니다."}
+                      style={{
+                        ...secondaryButtonStyle,
+                        borderColor: "#10b981",
+                        background: normalizeMarketDecisionStatus(selectedItem.marketDecisionStatus) === "proceed" ? "#ecfdf5" : "#f8fafc",
+                        color: normalizeMarketDecisionStatus(selectedItem.marketDecisionStatus) === "proceed" ? "#047857" : "#94a3b8",
+                        cursor: normalizeMarketDecisionStatus(selectedItem.marketDecisionStatus) === "proceed" ? "pointer" : "not-allowed"
+                      }}
+                    >
+                      프로젝트 추진으로 이동
+                    </button>
                     <button type="button" onClick={() => onOpenSupply?.(selectedItem.id)} style={secondaryButtonStyle}>공급단가 보기</button>
                     <button type="button" onClick={() => onOpenDistribution?.(selectedItem.id)} style={secondaryButtonStyle}>유통 구조 설정</button>
                     {!isEditing ? (
@@ -1511,13 +1553,11 @@ export default function MarketSizeAnalysisTab({
         :global(.scenario-year-metric dd.positive) { color: #047857; }
         :global(.scenario-year-metric dd.warning) { color: #b45309; }
         @media (max-width: 1500px) {
+          .market-item-header { grid-template-columns: 1fr; }
+          .market-actions { justify-content: start; }
           .market-input-grid, .market-result-grid { grid-template-columns: 1fr; }
           .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .scenario-metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-        }
-        @media (max-width: 1250px) {
-          .market-item-header { grid-template-columns: 1fr; }
-          .market-actions { justify-content: start; }
         }
         @media (max-width: 920px) {
           .market-layout { grid-template-columns: 1fr; }
