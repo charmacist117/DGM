@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import SegmentedDateInput from "@/components/SegmentedDateInput";
 import IngredientAmountTitle, { formatIngredientAmountLabel } from "@/components/IngredientAmountTitle";
 import { calculateSellingPriceFromMarginRate } from "@/lib/pms/marketAnalysis";
+import { getBaseAmounts } from "@/lib/pms/distributionAmounts";
 import { normalizePricingScenario, calculateBonusPromotion, bonusPromotionQuantityLabel, pricingScenarioGroup } from "@/lib/pms/pricingScenarios";
 import {
   marketDecisionBadgeStyle,
@@ -280,39 +281,6 @@ function mergeCompetitors(items = []) {
   return Array.from(merged.values());
 }
 
-function getBaseAmounts(item) {
-  const unitPrice = parseNumber(item?.supplyUnitPrice);
-  const quantity = parseNumber(item?.quantity);
-  const minimumOrderBatches = Math.max(1, Math.ceil(parseNumber(item?.minimumOrderBatchQuantity) ?? 1));
-  const permitFeeRate = parseNumber(item?.permitCompanyFeeRate);
-  const hasPermitFee = item?.category === "OTC" && item?.permitCompanyFee;
-  const permitFeeRateUnknown = item?.category === "OTC" && item?.permitCompanyFee && item?.permitCompanyFeeRateUnknown;
-  const hasKnownPermitFee = item?.category === "OTC" && item?.permitCompanyFee && !permitFeeRateUnknown && permitFeeRate !== null;
-  const permitFeeMultiplier = hasKnownPermitFee ? 1 + (permitFeeRate / 100) : 1;
-  const finalUnitCost = unitPrice === null
-    ? null
-    : unitPrice * 1.1 * permitFeeMultiplier;
-  const permitFeeUnitPrice = !hasPermitFee || unitPrice === null ? null : unitPrice * permitFeeMultiplier;
-  const permitFeeSupplyTotal = permitFeeUnitPrice === null || quantity === null ? null : permitFeeUnitPrice * quantity;
-  const finalTotal = finalUnitCost === null || quantity === null ? null : finalUnitCost * quantity;
-
-  return {
-    unitPrice,
-    quantity,
-    minimumOrderBatches,
-    minimumOrderQuantity: quantity === null ? null : quantity * minimumOrderBatches,
-    vatUnitPrice: unitPrice === null ? null : unitPrice * 1.1,
-    supplyTotal: unitPrice === null || quantity === null ? null : unitPrice * quantity,
-    vatTotal: unitPrice === null || quantity === null ? null : unitPrice * quantity * 1.1,
-    permitFeeUnitPrice,
-    permitFeeSupplyTotal,
-    permitFeeVatUnitPrice: hasPermitFee ? finalUnitCost : null,
-    permitFeeVatTotal: hasPermitFee && finalUnitCost !== null && quantity !== null ? finalUnitCost * quantity : null,
-    finalUnitCost,
-    finalTotal,
-    minimumOrderFinalTotal: finalTotal === null ? null : finalTotal * minimumOrderBatches
-  };
-}
 
 function createPriceTier(index = 0) {
   return {
@@ -438,9 +406,8 @@ export default function DistributionStructureTab({
   const permitFeeRate = parseNumber(selectedItem?.permitCompanyFeeRate);
   const permitFeeRateUnknown = hasPermitCompanyFee && selectedItem?.permitCompanyFeeRateUnknown;
   const permitFeeStatus = !hasPermitCompanyFee
-    ? "불포함"
+    ? "0% (수수료 없음)"
     : (permitFeeRateUnknown || permitFeeRate === null ? "알 수 없음" : formatPercent(permitFeeRate));
-  const permitFeeApplied = hasPermitCompanyFee && (permitFeeRateUnknown || permitFeeRate !== null);
   const chamyaksaMarginRate = parseNumber(activePricingScenario?.chamyaksaMarginRate);
   const marginRateIsValid = chamyaksaMarginRate !== null
     && chamyaksaMarginRate >= 0
@@ -1292,67 +1259,65 @@ export default function DistributionStructureTab({
                     </div>
                   </div>
                 </div>
-                <div className="base-grid">
-                  <div style={{ minWidth: 0, padding: 13, borderRight: "1px solid #e2e8f0", borderBottom: "1px solid #e2e8f0", overflow: "hidden" }}>
-                    <div style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>포장단위</div>
-                    <div style={{ marginTop: 7, color: "#0f172a", fontSize: 16, fontWeight: 900 }}>{selectedItem.packagingUnit || "-"}</div>
-                    {selectedItem.packagingForm && <div style={{ marginTop: 4, color: "#64748b", fontSize: 11 }}>포장형태: {selectedItem.packagingForm}</div>}
+                <div className="base-grid" aria-label="공급 가격 요약">
+                  <div className="fee-projection-cell">
+                    <div className="fee-projection-title">포장단위</div>
+                    <div className="fee-projection-value">{selectedItem.packagingUnit || "-"}</div>
+                    {selectedItem.packagingForm && <div className="fee-projection-note">포장형태: {selectedItem.packagingForm}</div>}
                   </div>
                   <div className="fee-projection-cell">
                     <div className="fee-projection-title">배치 당 포장단위 개수</div>
-                    <div className="fee-projection-section">
-                      <div className="fee-projection-label">1배치 기준</div>
-                      <div className="fee-projection-value">{baseAmounts.quantity === null ? "-" : `${baseAmounts.quantity.toLocaleString("ko-KR")}개`}</div>
-                    </div>
-                    <div className="fee-projection-section fee-projection-adjusted">
-                      <div className="fee-projection-label">최소 주문단위</div>
-                      <div className="fee-projection-value">{baseAmounts.minimumOrderQuantity === null ? "-" : `${baseAmounts.minimumOrderQuantity.toLocaleString("ko-KR")}개`}</div>
-                      <div className="fee-projection-note">최소 주문 {baseAmounts.minimumOrderBatches}배치</div>
-                    </div>
+                    <div className="fee-projection-value">{baseAmounts.quantity === null ? "-" : `${baseAmounts.quantity.toLocaleString("ko-KR")}개`}</div>
+                    <div className="fee-projection-note">1배치 기준</div>
+                  </div>
+                  <div className="fee-projection-cell">
+                    <div className="fee-projection-title">최소 주문단위</div>
+                    <div className="fee-projection-value">{baseAmounts.minimumOrderQuantity === null ? "-" : `${baseAmounts.minimumOrderQuantity.toLocaleString("ko-KR")}개`}</div>
+                    <div className="fee-projection-note">최소 주문 {baseAmounts.minimumOrderBatches}배치</div>
                   </div>
                   <div className="fee-projection-cell">
                     <div className="fee-projection-title">배치 당 공급단가</div>
-                    <div className="fee-projection-section">
-                      <div className="fee-projection-label">기본</div>
-                      <div className="fee-projection-value">{formatWon(baseAmounts.unitPrice)}</div>
-                      <div className="fee-projection-note">총 금액: {formatWon(baseAmounts.supplyTotal)}</div>
-                    </div>
-                    <div className="fee-projection-section fee-projection-adjusted">
-                      <div className="fee-projection-label">허가사 수수료 반영 시</div>
-                      <div className="fee-projection-value">{formatWon(baseAmounts.permitFeeUnitPrice)}</div>
-                      <div className="fee-projection-note">총 금액: {formatWon(baseAmounts.permitFeeSupplyTotal)}{permitFeeRateUnknown ? " · 공급단가에 포함" : ""}</div>
-                    </div>
+                    <div className="fee-projection-value">{formatWon(baseAmounts.unitPrice)}</div>
+                    <div className="fee-projection-note">포장단위당 · VAT 제외</div>
+                    <div className="fee-projection-note">1배치 총액: {formatWon(baseAmounts.supplyTotal)}</div>
                   </div>
                   <div className="fee-projection-cell">
-                    <div className="fee-projection-title">배치 당 VAT 포함 가격</div>
-                    <div className="fee-projection-section">
-                      <div className="fee-projection-label">기본</div>
-                      <div className="fee-projection-value">{formatWon(baseAmounts.vatUnitPrice)}</div>
-                      <div className="fee-projection-note">VAT 포함 총금액: {formatWon(baseAmounts.vatTotal)}</div>
-                    </div>
-                    <div className="fee-projection-section fee-projection-adjusted">
-                      <div className="fee-projection-label">허가사 수수료 반영 시</div>
-                      <div className="fee-projection-value">{formatWon(baseAmounts.permitFeeVatUnitPrice)}</div>
-                      <div className="fee-projection-note">총 금액: {formatWon(baseAmounts.permitFeeVatTotal)}{permitFeeRateUnknown ? " · 공급단가에 포함" : ""}</div>
-                    </div>
+                    <div className="fee-projection-title">허가사 수수료 반영 시</div>
+                    <div className="fee-projection-value">{formatWon(hasPermitCompanyFee ? baseAmounts.permitFeeUnitPrice : baseAmounts.unitPrice)}</div>
+                    <div className="fee-projection-note">포장단위당 · VAT 제외</div>
+                    <div className="fee-projection-note">수수료율: {permitFeeStatus}</div>
+                    <div className="fee-projection-note">허가사: {hasPermitCompanyFee ? (selectedItem.permitCompany || "미입력") : (selectedItem.manufacturer || "미입력")}</div>
+                    {permitFeeRateUnknown && <div className="fee-projection-note">수수료는 공급단가에 포함</div>}
                   </div>
-                  <div style={{ minWidth: 0, padding: 13, borderRight: "1px solid #e2e8f0", borderBottom: "1px solid #e2e8f0", overflow: "hidden" }}>
-                    <div style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>허가사 수수료</div>
-                    <div style={{ marginTop: 7, color: "#0f172a", fontSize: 16, fontWeight: 900 }}>{permitFeeStatus}</div>
-                    {hasPermitCompanyFee && <div style={{ marginTop: 4, color: "#64748b", fontSize: 11, lineHeight: 1.45, whiteSpace: "pre-line" }}>허가사: {selectedItem.permitCompany || "미입력"}{permitFeeRateUnknown ? "\n공급단가에 포함" : ""}</div>}
+                  <div className="fee-projection-cell">
+                    <div className="fee-projection-title">최종 배치 당 VAT 포함가격</div>
+                    <div className="fee-projection-value">{formatWon(baseAmounts.finalUnitCost)}</div>
+                    <div className="fee-projection-note">포장단위당 · VAT·허가사 수수료 반영</div>
+                    {hasPermitCompanyFee && !permitFeeRateUnknown && permitFeeRate === null && <div className="fee-projection-note">수수료율 미입력 · 수수료 추가분 미반영</div>}
                   </div>
                   <div className="fee-projection-cell">
                     <div className="fee-projection-title">최종 공급사 판매가</div>
-                    <div className="fee-projection-section">
-                      <div className="fee-projection-label">1배치 기준</div>
-                      <div className="fee-projection-value">{formatWon(baseAmounts.finalTotal)}</div>
-                      <div className="fee-projection-note">개당: {formatWon(baseAmounts.finalUnitCost)}</div>
+                    <div className="fee-projection-label">1배치 기준</div>
+                    <div className="fee-projection-value">{formatWon(baseAmounts.finalTotal)}</div>
+                    <div className="fee-projection-note">VAT·허가사 수수료 반영</div>
+                  </div>
+                  <div className="fee-projection-cell">
+                    <div className="fee-projection-title">최소 주문단위 기준 공급사 판매가</div>
+                    <div className="fee-projection-value">{formatWon(baseAmounts.minimumOrderFinalTotal)}</div>
+                    <div className="fee-projection-note">{baseAmounts.minimumOrderBatches}배치 · VAT·허가사 수수료 반영</div>
+                  </div>
+                  <div className="fee-projection-cell">
+                    <div className="fee-projection-title">허가사 수수료총액</div>
+                    <div className="fee-projection-label">1배치 기준 · VAT 포함</div>
+                    <div className="fee-projection-value">{formatWon(baseAmounts.permitFeeTotal)}</div>
+                    {baseAmounts.permitFeeTotalExcludingVat !== null && <div className="fee-projection-note">VAT 제외 {formatWon(baseAmounts.permitFeeTotalExcludingVat)}</div>}
+                    <div className="fee-total-minimum">
+                      <div className="fee-projection-label">최소 주문 {baseAmounts.minimumOrderBatches}배치 · VAT 포함</div>
+                      <div className="fee-projection-value">{formatWon(baseAmounts.minimumOrderPermitFeeTotal)}</div>
+                      {baseAmounts.minimumOrderPermitFeeTotalExcludingVat !== null && <div className="fee-projection-note">VAT 제외 {formatWon(baseAmounts.minimumOrderPermitFeeTotalExcludingVat)}</div>}
                     </div>
-                    <div className="fee-projection-section fee-projection-adjusted">
-                      <div className="fee-projection-label">최소 주문단위</div>
-                      <div className="fee-projection-value">{formatWon(baseAmounts.minimumOrderFinalTotal)}</div>
-                      <div className="fee-projection-note">{baseAmounts.minimumOrderBatches}배치 · {permitFeeApplied ? (permitFeeRateUnknown ? "VAT 반영 · 허가사 수수료 포함" : "VAT·허가사 수수료 반영") : "VAT 반영"}</div>
-                    </div>
+                    {permitFeeRateUnknown && <div className="fee-projection-note">공급단가에 포함 · 금액 분리 불가</div>}
+                    {hasPermitCompanyFee && !permitFeeRateUnknown && permitFeeRate === null && <div className="fee-projection-note">수수료율 입력 시 계산</div>}
                   </div>
                 </div>
               </section>
@@ -1989,30 +1954,27 @@ export default function DistributionStructureTab({
         .base-grid {
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
-          grid-auto-rows: 1fr;
+          grid-auto-rows: minmax(150px, 1fr);
           height: 100%;
         }
         .fee-projection-cell {
           min-width: 0;
-          display: grid;
-          grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
+          padding: 13px;
           border-right: 1px solid #e2e8f0;
           border-bottom: 1px solid #e2e8f0;
           overflow: hidden;
         }
         .fee-projection-title {
-          padding: 13px 13px 5px;
+          margin-bottom: 7px;
           color: #64748b;
           font-size: 12px;
           font-weight: 800;
+          overflow-wrap: anywhere;
         }
-        .fee-projection-section {
-          min-width: 0;
-          padding: 7px 13px 10px;
-        }
-        .fee-projection-adjusted {
+        .fee-total-minimum {
+          margin-top: 8px;
+          padding-top: 8px;
           border-top: 1px solid #dbe3ee;
-          background: #f8fafc;
         }
         .fee-projection-label {
           color: #64748b;
@@ -2119,6 +2081,10 @@ export default function DistributionStructureTab({
           .base-grid,
           .margin-grid {
             grid-template-columns: 1fr;
+          }
+          .base-grid {
+            grid-auto-rows: auto;
+            height: auto;
           }
         }
       `}</style>
