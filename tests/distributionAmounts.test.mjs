@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { getBaseAmounts } from "../lib/pms/distributionAmounts.js";
+import { calculateMarketAnalysis } from "../lib/pms/marketAnalysis.js";
+import { calculateProjectPromotionCost, projectPromotionTotalExpectedCost } from "../lib/pms/projectPromotion.js";
 
 const fixture = {
   category: "OTC", supplyUnitPrice: "720", quantity: "50000",
@@ -70,3 +72,33 @@ test("non-OTC records do not acquire permit fees", () => {
   close(result.finalTotal, 39600000);
 });
 
+test("market and project promotion keep the same VAT and fee basis as distribution", () => {
+  for (const patch of [{}, { permitCompanyFee: false }, { permitCompanyFeeRateUnknown: true },
+    { permitCompanyFeeRate: "" }, { permitCompanyFeeRate: "0" }, { category: "일반식품" },
+    { supplyUnitPrice: "1,580", quantity: "30,000", minimumOrderBatchQuantity: "2.1" }]) {
+    const item = { ...fixture, ...patch, projectPromotion: { additionalExpectedCost: "10,000" } };
+    const base = getBaseAmounts(item);
+    const market = calculateMarketAnalysis(item);
+    const promotion = calculateProjectPromotionCost(item);
+    close(market.baseUnitCost, base.finalUnitCost);
+    close(promotion.finalUnitCost, base.finalUnitCost);
+    close(promotion.initialProductionCost, base.minimumOrderFinalTotal);
+    close(projectPromotionTotalExpectedCost(item), base.minimumOrderFinalTotal + 10000);
+    assert.equal(market.minimumOrderBatches, base.minimumOrderBatches);
+  }
+});
+
+test("shared calculations retain missing-price and invalid-order guards", () => {
+  for (const supplyUnitPrice of ["", "-", ".", "-.", "unknown"]) {
+    const item = { ...fixture, supplyUnitPrice };
+    assert.equal(calculateMarketAnalysis(item).baseUnitCost, null);
+    assert.equal(calculateProjectPromotionCost(item).initialProductionCost, null);
+  }
+  for (const quantity of ["", "0", "-1"]) {
+    const item = { ...fixture, quantity };
+    assert.deepEqual(calculateProjectPromotionCost(item), {
+      finalUnitCost: null, minimumOrderBatches: null, initialProductionCost: null
+    });
+    close(calculateMarketAnalysis(item).baseUnitCost, 871.2);
+  }
+});

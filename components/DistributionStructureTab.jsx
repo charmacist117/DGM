@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { downloadReportBlob, drawCanvasTable } from "@/lib/pms/exporters";
 import SegmentedDateInput from "@/components/SegmentedDateInput";
 import IngredientAmountTitle, { formatIngredientAmountLabel } from "@/components/IngredientAmountTitle";
 import { calculateSellingPriceFromMarginRate } from "@/lib/pms/marketAnalysis";
@@ -101,94 +102,6 @@ function reportFileName(value) {
   return String(value || "유통구조").replace(/[\\/:*?"<>|]/g, "_").slice(0, 80);
 }
 
-function downloadReportBlob(blob, fileName) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function getCanvasTextLines(context, value, maxWidth) {
-  const sourceLines = String(value ?? "-").split(/\r?\n/);
-  const lines = [];
-  sourceLines.forEach((sourceLine) => {
-    if (!sourceLine) {
-      lines.push("");
-      return;
-    }
-    let line = "";
-    Array.from(sourceLine).forEach((character) => {
-      const candidate = `${line}${character}`;
-      if (line && context.measureText(candidate).width > maxWidth) {
-        lines.push(line);
-        line = character;
-      } else {
-        line = candidate;
-      }
-    });
-    lines.push(line);
-  });
-  return lines.length > 0 ? lines : ["-"];
-}
-
-function drawCanvasTable(context, { headers, rows, widths, x, y }) {
-  const totalWidth = widths.reduce((sum, width) => sum + width, 0);
-  widths = widths.map((width) => width * (context.canvas.width - x * 2) / totalWidth);
-  const headerHeight = 46;
-  const lineHeight = 24;
-  const padding = 10;
-  const headerPadding = 6;
-  let currentX = x;
-
-  context.textBaseline = "top";
-  headers.forEach((header, index) => {
-    context.fillStyle = "#dbeafe";
-    context.fillRect(currentX, y, widths[index], headerHeight);
-    context.strokeStyle = "#94a3b8";
-    context.strokeRect(currentX, y, widths[index], headerHeight);
-    context.fillStyle = "#0f172a";
-    const headerText = String(header ?? "-");
-    const availableWidth = Math.max(1, widths[index] - (headerPadding * 2));
-    context.font = "700 17px 'Malgun Gothic', Arial, sans-serif";
-    const measuredWidth = context.measureText(headerText).width;
-    const headerFontSize = measuredWidth > availableWidth
-      ? Math.max(6, Math.floor(17 * (availableWidth / measuredWidth)))
-      : 17;
-    context.font = `700 ${headerFontSize}px 'Malgun Gothic', Arial, sans-serif`;
-    context.fillText(
-      headerText,
-      currentX + headerPadding,
-      y + Math.max(5, Math.floor((headerHeight - headerFontSize) / 2)),
-      availableWidth
-    );
-    currentX += widths[index];
-  });
-
-  let currentY = y + headerHeight;
-  rows.forEach((row, rowIndex) => {
-    context.font = "16px 'Malgun Gothic', Arial, sans-serif";
-    const lineSets = row.map((value, index) => getCanvasTextLines(context, value, widths[index] - (padding * 2)));
-    const rowHeight = Math.max(50, Math.max(...lineSets.map((lines) => lines.length)) * lineHeight + (padding * 2));
-    currentX = x;
-    row.forEach((value, index) => {
-      context.fillStyle = rowIndex % 2 === 0 ? "#ffffff" : "#f8fafc";
-      context.fillRect(currentX, currentY, widths[index], rowHeight);
-      context.strokeStyle = "#cbd5e1";
-      context.strokeRect(currentX, currentY, widths[index], rowHeight);
-      context.fillStyle = "#0f172a";
-      lineSets[index].forEach((line, lineIndex) => {
-        context.fillText(line, currentX + padding, currentY + padding + (lineIndex * lineHeight));
-      });
-      currentX += widths[index];
-    });
-    currentY += rowHeight;
-  });
-  return currentY;
-}
 
 function getItemLabel(item) {
   const ingredients = formatIngredientAmountLabel(item, item.manufacturer || "성분 미입력");

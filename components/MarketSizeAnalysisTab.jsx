@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { downloadReportBlob, drawCanvasTable, getCanvasTextLines } from "@/lib/pms/exporters";
 import SegmentedDateInput from "@/components/SegmentedDateInput";
 import IngredientAmountTitle, { formatIngredientAmountLabel } from "@/components/IngredientAmountTitle";
 import {
@@ -126,78 +127,6 @@ function reportFileName(value) {
   return String(value || "시장규모분석").replace(/[\\/:*?"<>|]/g, "_").slice(0, 80);
 }
 
-function downloadReportBlob(blob, fileName) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function getCanvasTextLines(context, value, maxWidth) {
-  const lines = [];
-  String(value ?? "-").split(/\r?\n/).forEach((sourceLine) => {
-    if (!sourceLine) {
-      lines.push("");
-      return;
-    }
-    let line = "";
-    Array.from(sourceLine).forEach((character) => {
-      const candidate = `${line}${character}`;
-      if (line && context.measureText(candidate).width > maxWidth) {
-        lines.push(line);
-        line = character;
-      } else {
-        line = candidate;
-      }
-    });
-    lines.push(line);
-  });
-  return lines.length > 0 ? lines : ["-"];
-}
-
-function drawCanvasTable(context, { headers, rows, widths, x, y }) {
-  const headerHeight = 46;
-  const lineHeight = 24;
-  const padding = 10;
-  let currentX = x;
-  context.textBaseline = "top";
-  context.font = "700 17px 'Malgun Gothic', Arial, sans-serif";
-  headers.forEach((header, index) => {
-    context.fillStyle = "#dbeafe";
-    context.fillRect(currentX, y, widths[index], headerHeight);
-    context.strokeStyle = "#94a3b8";
-    context.strokeRect(currentX, y, widths[index], headerHeight);
-    context.fillStyle = "#0f172a";
-    getCanvasTextLines(context, header, widths[index] - (padding * 2)).slice(0, 2).forEach((line, lineIndex) => {
-      context.fillText(line, currentX + padding, y + padding + (lineIndex * lineHeight));
-    });
-    currentX += widths[index];
-  });
-  let currentY = y + headerHeight;
-  rows.forEach((row, rowIndex) => {
-    context.font = "16px 'Malgun Gothic', Arial, sans-serif";
-    const lineSets = row.map((value, index) => getCanvasTextLines(context, value, widths[index] - (padding * 2)));
-    const rowHeight = Math.max(50, Math.max(...lineSets.map((lines) => lines.length)) * lineHeight + (padding * 2));
-    currentX = x;
-    row.forEach((value, index) => {
-      context.fillStyle = rowIndex % 2 === 0 ? "#ffffff" : "#f8fafc";
-      context.fillRect(currentX, currentY, widths[index], rowHeight);
-      context.strokeStyle = "#cbd5e1";
-      context.strokeRect(currentX, currentY, widths[index], rowHeight);
-      context.fillStyle = "#0f172a";
-      lineSets[index].forEach((line, lineIndex) => {
-        context.fillText(line, currentX + padding, currentY + padding + (lineIndex * lineHeight));
-      });
-      currentX += widths[index];
-    });
-    currentY += rowHeight;
-  });
-  return currentY;
-}
 
 function toDateInputValue(date) {
   const year = date.getFullYear();
