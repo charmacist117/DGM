@@ -1754,20 +1754,20 @@ export default function DistributionStructureTab({
                   </table>
                 </div>
                 <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", minWidth: isEditing ? 1080 : 860, borderCollapse: "collapse", tableLayout: "fixed" }}>
+                  <table className="competitor-comparison-table" style={{ width: "100%", minWidth: isEditing ? 1080 : 860, borderCollapse: "collapse", tableLayout: "fixed" }}>
                     <colgroup>
                       <col style={{ width: isEditing ? "15%" : "11%" }} />
-                      <col style={{ width: isEditing ? "18%" : "23%" }} />
+                      <col style={{ width: isEditing ? "18%" : "27%" }} />
                       <col style={{ width: isEditing ? "13%" : "16%" }} />
                       <col style={{ width: "10%" }} />
-                      <col style={{ width: isEditing ? "23%" : "22%" }} />
-                      <col style={{ width: isEditing ? "15%" : "18%" }} />
+                      <col style={{ width: isEditing ? "23%" : "14%" }} />
+                      <col style={{ width: isEditing ? "15%" : "22%" }} />
                       {isEditing && <col style={{ width: "6%" }} />}
                     </colgroup>
                     <thead>
                       <tr style={{ background: "#f1f5f9" }}>
                         {["기준일", "경쟁제품명", "판매처", "포장단위", "판매단가", "비고", ...(isEditing ? ["관리"] : [])].map((header) => (
-                          <th key={header} style={{ padding: "9px 10px", borderBottom: "1px solid #dbe3ee", color: "#475569", fontSize: 12, textAlign: "left" }}>
+                          <th key={header} style={{ padding: "9px 10px", borderBottom: "1px solid #dbe3ee", color: "#475569", fontSize: 12, textAlign: "center" }}>
                             {header}
                           </th>
                         ))}
@@ -2020,6 +2020,10 @@ export default function DistributionStructureTab({
         .competitor-panel {
           grid-column: 1 / -1;
           min-width: 0;
+        }
+        .competitor-comparison-table th,
+        .competitor-comparison-table td {
+          border-right: 1px solid #dbe3ee;
         }
         .margin-grid {
           display: grid;
