@@ -1692,7 +1692,7 @@ export default function DistributionStructureTab({
                     <thead>
                       <tr style={{ background: "#eef6ff" }}>
                         {["제품명 / 제조사", "허가사", "포장단위", "배치 당 포장단위 개수", "가격대", "VAT 포함 단가", "최종 공급사 판매가", "참약사 예상 판매가", "예상 마진율", "약국 판매가"].map((header) => (
-                          <th key={header} style={{ padding: "8px 9px", borderBottom: "1px solid #dbe3ee", color: "#475569", fontSize: 11, textAlign: "left" }}>{header}</th>
+                          <th key={header} style={{ padding: "8px 9px", borderBottom: "1px solid #dbe3ee", color: "#475569", fontSize: 11, textAlign: "center" }}>{header}</th>
                         ))}
                       </tr>
                     </thead>
@@ -2020,6 +2020,12 @@ export default function DistributionStructureTab({
         .competitor-panel {
           grid-column: 1 / -1;
           min-width: 0;
+        }
+        .competitor-panel table td {
+          text-align: center;
+        }
+        .competitor-comparison-table td:nth-child(5) {
+          text-align: left;
         }
         .competitor-comparison-table th,
         .competitor-comparison-table td {
