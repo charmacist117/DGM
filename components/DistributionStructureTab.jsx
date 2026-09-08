@@ -11,7 +11,7 @@ import {
   composeDistributionReportSections,
   normalizeDistributionExportSections
 } from "@/lib/pms/distributionExport";
-import { normalizePricingScenario, calculateBonusPromotion, bonusPromotionQuantityLabel, pricingScenarioGroup } from "@/lib/pms/pricingScenarios";
+import { normalizePricingScenario, clonePricingScenario, calculateBonusPromotion, bonusPromotionQuantityLabel, pricingScenarioGroup } from "@/lib/pms/pricingScenarios";
 import {
   marketDecisionBadgeStyle,
   marketDecisionLabel
@@ -255,6 +255,7 @@ export default function DistributionStructureTab({
   const [structureStatusFilter, setStructureStatusFilter] = useState("all");
   const [editingItemId, setEditingItemId] = useState(null);
   const [activePricingScenarioId, setActivePricingScenarioId] = useState(null);
+  const [pricingScenarioClipboard, setPricingScenarioClipboard] = useState(null);
   const [draggedPricingScenarioKey, setDraggedPricingScenarioKey] = useState(null);
   const [comparisonCategoryDraft, setComparisonCategoryDraft] = useState("");
   const [comparisonScenarioByItemId, setComparisonScenarioByItemId] = useState({});
@@ -850,6 +851,27 @@ export default function DistributionStructureTab({
     setActivePricingScenarioId(nextScenario.id);
   };
 
+  const copyActivePricingScenario = () => {
+    if (!activePricingScenario || activePricingScenario.scenarioType === "bundle") return;
+    const ownerId = String(activePricingScenario._ownerItemId || selectedItem?.id || "");
+    const ownerItem = items.find((item) => String(item.id) === ownerId) || selectedItem;
+    setPricingScenarioClipboard({
+      scenario: normalizePricingScenario(activePricingScenario),
+      sourceLabel: getItemLabel(ownerItem)
+    });
+  };
+
+  const pastePricingScenario = () => {
+    if (!selectedItem || !pricingScenarioClipboard?.scenario) return;
+    const nextScenario = clonePricingScenario(
+      pricingScenarioClipboard.scenario,
+      `pricing_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    );
+    if (!nextScenario) return;
+    updateDistribution({ pricingScenarios: [...distribution.pricingScenarios, nextScenario] });
+    setActivePricingScenarioId(nextScenario.id);
+  };
+
   const addBonusPricingScenario = () => {
     const nextScenario = {
       ...createPricingScenario(distribution.pricingScenarios.length, "bonus"),
@@ -1301,6 +1323,24 @@ export default function DistributionStructureTab({
                       <button type="button" onClick={() => openDistributionExportDialog("image")} style={{ ...secondaryButtonStyle, minHeight: 32, padding: "5px 9px", fontSize: 12 }}>이미지 저장</button>
                       <button
                         type="button"
+                        onClick={copyActivePricingScenario}
+                        disabled={activePricingScenario?.scenarioType === "bundle"}
+                        title={activePricingScenario?.scenarioType === "bundle" ? "묶음 프로모션 탭은 복사하지 않습니다." : "현재 가격대 탭 복사"}
+                        style={{ ...secondaryButtonStyle, minHeight: 32, padding: "5px 9px", fontSize: 12, opacity: activePricingScenario?.scenarioType === "bundle" ? 0.55 : 1, cursor: activePricingScenario?.scenarioType === "bundle" ? "not-allowed" : "pointer" }}
+                      >
+                        현재 탭 복사
+                      </button>
+                      <button
+                        type="button"
+                        onClick={pastePricingScenario}
+                        disabled={!pricingScenarioClipboard}
+                        title={pricingScenarioClipboard ? `${pricingScenarioClipboard.sourceLabel}의 ${pricingScenarioClipboard.scenario.label || "가격대"} 탭 붙여넣기` : "먼저 복사할 가격대 탭을 선택해주세요."}
+                        style={{ ...secondaryButtonStyle, minHeight: 32, padding: "5px 9px", fontSize: 12, opacity: pricingScenarioClipboard ? 1 : 0.55, cursor: pricingScenarioClipboard ? "pointer" : "not-allowed" }}
+                      >
+                        복사한 탭 붙여넣기
+                      </button>
+                      <button
+                        type="button"
                         onClick={completeDistributionStructure}
                         disabled={distribution.isConfigured}
                         style={{
@@ -1332,6 +1372,11 @@ export default function DistributionStructureTab({
                   <div style={{ marginTop: 4, color: "#475569", fontSize: 12, lineHeight: 1.5 }}>
                     모든 금액은 VAT 포함 기준입니다.
                   </div>
+                  {pricingScenarioClipboard && (
+                    <div role="status" style={{ marginTop: 4, color: "#1d4ed8", fontSize: 12, fontWeight: 800 }}>
+                      복사됨: {pricingScenarioClipboard.sourceLabel} · {pricingScenarioClipboard.scenario.label || "가격대"}
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 12px", borderBottom: "1px solid #dbe3ee", background: "#f8fafc", overflowX: "auto" }}>
                   {visiblePricingScenarios.map((scenario, index) => {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizePricingScenario, calculateBonusPromotion, bonusPromotionQuantityLabel, pricingScenarioGroup } from "../lib/pms/pricingScenarios.js";
+import { normalizePricingScenario, clonePricingScenario, calculateBonusPromotion, bonusPromotionQuantityLabel, pricingScenarioGroup } from "../lib/pms/pricingScenarios.js";
 import { calculateMarketAnalysis } from "../lib/pms/marketAnalysis.js";
 
 const calculate = (patch = {}) => calculateBonusPromotion({
@@ -69,6 +69,28 @@ test("bundle ordering survives the same save pipeline", () => {
   assert.equal(normalizePricingScenario(saved).bundleOrder, 3);
   assert.deepEqual(saved.bundleItemIds, ["1", "2"]);
 });
+
+test("ordinary and bonus pricing tabs can be copied but bundle tabs cannot", () => {
+  const source = normalizePricingScenario({
+    id: "source",
+    label: "10+2",
+    scenarioType: "bonus",
+    minimumQuantity: "10",
+    bonusQuantity: "2",
+    bundleItemIds: ["source-product", "linked-product"],
+    bundleOrder: 4
+  });
+  const copy = clonePricingScenario(source, "copy");
+
+  assert.equal(copy.id, "copy");
+  assert.equal(copy.label, source.label);
+  assert.equal(copy.minimumQuantity, source.minimumQuantity);
+  assert.equal(copy.bonusQuantity, source.bonusQuantity);
+  assert.deepEqual(copy.bundleItemIds, []);
+  assert.equal(copy.bundleOrder, null);
+  assert.deepEqual(source.bundleItemIds, ["source-product", "linked-product"]);
+  assert.equal(clonePricingScenario({ scenarioType: "bundle" }, "bundle-copy"), null);
+});
 test("bonus and ordinary tabs share a reorder group but bundles do not", () => {
   assert.equal(pricingScenarioGroup({ scenarioType: "single" }), pricingScenarioGroup({ scenarioType: "bonus" }));
   assert.notEqual(pricingScenarioGroup({ scenarioType: "bonus" }), pricingScenarioGroup({ scenarioType: "bundle" }));
@@ -85,4 +107,3 @@ test("market analysis consumes the effective bonus-inclusive unit price", () => 
 test("report quantity labels explicitly distinguish paid and free units", () => {
   assert.equal(bonusPromotionQuantityLabel({ minimumQuantity: "10", bonusQuantity: "2" }), "10개 구매 + 2개 증정 (총 12개)");
 });
-
