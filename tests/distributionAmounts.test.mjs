@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getBaseAmounts } from "../lib/pms/distributionAmounts.js";
+import { getBaseAmounts, getPermitFeeRates } from "../lib/pms/distributionAmounts.js";
 import { calculateMarketAnalysis } from "../lib/pms/marketAnalysis.js";
 import { calculateProjectPromotionCost, projectPromotionTotalExpectedCost } from "../lib/pms/projectPromotion.js";
 
@@ -23,6 +23,20 @@ test("batch and minimum order costs retain VAT and permit fees", () => {
   close(result.minimumOrderPermitFeeTotalExcludingVat, 7200000);
   close(result.minimumOrderPermitFeeTotal, 7920000);
   close(result.vatTotal + result.permitFeeTotal, result.finalTotal);
+});
+
+test("markup and margin fee inputs convert to the same permit company price", () => {
+  const markup = getBaseAmounts({ ...fixture, permitCompanyFeeRate: "10", permitCompanyFeeRateType: "markup" });
+  const marginRate = getPermitFeeRates("10", "markup").marginRate;
+  const margin = getBaseAmounts({ ...fixture, permitCompanyFeeRate: String(marginRate), permitCompanyFeeRateType: "margin" });
+  close(markup.permitFeeUnitPrice, margin.permitFeeUnitPrice);
+  close(markup.finalUnitCost, margin.finalUnitCost);
+  close(markup.permitFeeMarginRate, marginRate);
+  close(margin.permitFeeMarkupRate, 10);
+});
+
+test("margin fee rate must stay below 100 percent", () => {
+  assert.equal(getPermitFeeRates("100", "margin").multiplier, null);
 });
 
 test("no permit fee ignores a stale rate and reports zero fee", () => {

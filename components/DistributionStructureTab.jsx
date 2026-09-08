@@ -338,9 +338,12 @@ export default function DistributionStructureTab({
   const hasPermitCompanyFee = selectedItem?.category === "OTC" && selectedItem?.permitCompanyFee;
   const permitFeeRate = parseNumber(selectedItem?.permitCompanyFeeRate);
   const permitFeeRateUnknown = hasPermitCompanyFee && selectedItem?.permitCompanyFeeRateUnknown;
+  const permitFeeRateType = baseAmounts.permitFeeRateType;
   const permitFeeStatus = !hasPermitCompanyFee
     ? "0% (수수료 없음)"
-    : (permitFeeRateUnknown || permitFeeRate === null ? "알 수 없음" : formatPercent(permitFeeRate));
+    : (permitFeeRateUnknown || permitFeeRate === null
+        ? "알 수 없음"
+        : `${permitFeeRateType === "margin" ? "허가사 마진율" : "가산수수료율"} ${formatPercent(permitFeeRate)} · 환산 ${permitFeeRateType === "margin" ? "가산율" : "마진율"} ${formatPercent(permitFeeRateType === "margin" ? baseAmounts.permitFeeMarkupRate : baseAmounts.permitFeeMarginRate)}`);
   const chamyaksaMarginRate = parseNumber(activePricingScenario?.chamyaksaMarginRate);
   const marginRateIsValid = chamyaksaMarginRate !== null
     && chamyaksaMarginRate >= 0

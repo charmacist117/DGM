@@ -63,6 +63,7 @@ import {
 } from "@/lib/pms/supplyCostBreakdown";
 import { normalizeProjectPromotion, projectPromotionTotalExpectedCost } from "@/lib/pms/projectPromotion";
 import { createCompactPmsPayload } from "@/lib/pms/storageCompact";
+import { getBaseAmounts, getPermitFeeRates } from "@/lib/pms/distributionAmounts";
 import {
   MISSING_PERMIT_COMPANY_FILTER,
   matchesPermitCompanyFilter,
@@ -791,12 +792,6 @@ function parseSupplyPriceNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function formatVatIncludedPrice(value) {
-  const price = parseSupplyPriceNumber(value);
-  if (price === null) return "";
-  return `${supplyPriceFormat.format(price * 1.1)}원`;
-}
-
 function formatTotalPrice(value, quantity, multiplier = 1) {
   const price = parseSupplyPriceNumber(value);
   const count = parseSupplyPriceNumber(quantity);
@@ -804,33 +799,13 @@ function formatTotalPrice(value, quantity, multiplier = 1) {
   return `${supplyPriceFormat.format(price * multiplier * count)}원`;
 }
 
-function formatPermitFeeIncludedTotalPrice(value, quantity, rate) {
-  const price = parseSupplyPriceNumber(value);
-  const count = parseSupplyPriceNumber(quantity);
-  const percentage = parseSupplyPriceNumber(rate);
-  if (price === null || count === null || percentage === null) return "";
-  return `${supplyPriceFormat.format(price * count * 1.1 * (1 + (percentage / 100)))}원`;
-}
-
-function formatPermitFeeIncludedUnitPrice(value, rate) {
-  const price = parseSupplyPriceNumber(value);
-  const percentage = parseSupplyPriceNumber(rate);
-  if (price === null || percentage === null) return "";
-  return `${supplyPriceFormat.format(price * 1.1 * (1 + (percentage / 100)))}원`;
-}
-
 function getMinimumOrderBatchCount(value) {
   const count = parseSupplyPriceNumber(value);
   return count === null || count <= 0 ? 1 : Math.ceil(count);
 }
 
-function formatPermitFeeIncludedMinimumOrderTotalPrice(value, quantity, rate, minimumOrderBatchQuantity, rateUnknown = false) {
-  const packageCount = parseSupplyPriceNumber(quantity);
-  if (packageCount === null) return "";
-  const minimumOrderPackageCount = packageCount * getMinimumOrderBatchCount(minimumOrderBatchQuantity);
-  return rateUnknown
-    ? formatTotalPrice(value, minimumOrderPackageCount, 1.1)
-    : formatPermitFeeIncludedTotalPrice(value, minimumOrderPackageCount, rate);
+function formatCalculatedSupplyPrice(value) {
+  return Number.isFinite(value) ? `${supplyPriceFormat.format(value)}원` : "";
 }
 
 function formatSupplyCostAmount(value) {
@@ -971,6 +946,7 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     permitCompanyFeeRate: supportsPermitCompanyFee
       ? String(source.permitCompanyFeeRate || source.licenseCompanyFeeRate || source.approvalCompanyFeeRate || "")
       : "",
+    permitCompanyFeeRateType: supportsPermitCompanyFee && source.permitCompanyFeeRateType === "margin" ? "margin" : "markup",
     permitCompanyFeeRateUnknown: supportsPermitCompanyFee && normalizeSupplyCheckedValue(
       source.permitCompanyFeeRateUnknown ?? source.licenseCompanyFeeRateUnknown ?? source.approvalCompanyFeeRateUnknown
     ),
@@ -2323,41 +2299,24 @@ function SupplyPriceTab({
     const headers = [
       "카테고리", "제품명", "제조사", "허가사", "공급 성분", "함량/규격", "원료 원산지", "브랜드/공급처", "kg당 가격대",
       "포장단위", "포장형태", "배치 당 포장단위 개수", "최소 주문 배치 수량", "견적 원가 구성", "원가 구성 합계(원)",
-      "포장단위당 원가 구성(원)", "배치 당 공급단가", "VAT 포함", "배치 당 VAT 포함 가격",
-      "총 금액", "VAT 포함 총금액", "허가사 수수료", "허가사 수수료율(%) / 상태", "수수료 반영 포장단위당 공급단가(VAT 포함)", "수수료 반영 총금액", "최소 주문 배치 기준 수수료 반영 총금액",
+      "포장단위당 원가 구성(원)", "배치 당 공급단가", "총 금액", "허가사 수수료", "수수료 산정 방식",
+      "입력 수수료율(%) / 상태", "환산 수수료율(%)", "허가사 공급단가(VAT 제외)", "허가사 1배치 총액(VAT 제외)",
+      "VAT 포함", "VAT 포함 가격", "1배치 VAT 포함 총액", "최소 주문 기준 VAT 포함 총액",
       "견적일자", "사용기한", "비고", "견적 채택 예상", "시장 분석 검토결과"
     ];
     const rows = exportItems.flatMap((item) => {
       const ingredients = item.ingredients?.length ? item.ingredients : [normalizeSupplyIngredient()];
       const totalPrice = formatTotalPrice(item.supplyUnitPrice, item.quantity);
-      const vatUnitPrice = item.vatIncluded ? formatVatIncludedPrice(item.supplyUnitPrice) : "";
-      const vatTotalPrice = item.vatIncluded ? formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1) : "";
       const supportsPermitCompanyFee = isPermitCompanyFeeCategory(item.category);
+      const amounts = getBaseAmounts(item);
       const costBreakdownText = supplyCostBreakdownCsvText(item.costBreakdown);
       const costBreakdownTotal = costBreakdownText ? supplyCostBreakdownTotal(item.costBreakdown) : "";
       const costBreakdownPerPackage = costBreakdownText
         ? supplyCostBreakdownPerPackage(item.costBreakdown, item.quantity)
         : null;
       const permitFeeRateUnknown = supportsPermitCompanyFee && item.permitCompanyFee && item.permitCompanyFeeRateUnknown;
-      const permitFeeUnitPrice = supportsPermitCompanyFee
-        ? (!item.permitCompanyFee || permitFeeRateUnknown
-            ? formatVatIncludedPrice(item.supplyUnitPrice)
-            : formatPermitFeeIncludedUnitPrice(item.supplyUnitPrice, item.permitCompanyFeeRate))
-        : "";
-      const permitFeeTotal = supportsPermitCompanyFee
-        ? (!item.permitCompanyFee || permitFeeRateUnknown
-            ? formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1)
-            : formatPermitFeeIncludedTotalPrice(item.supplyUnitPrice, item.quantity, item.permitCompanyFeeRate))
-        : "";
-      const permitFeeMinimumOrderTotal = supportsPermitCompanyFee
-        ? formatPermitFeeIncludedMinimumOrderTotalPrice(
-            item.supplyUnitPrice,
-            item.quantity,
-            item.permitCompanyFeeRate,
-            item.minimumOrderBatchQuantity,
-            !item.permitCompanyFee || permitFeeRateUnknown
-          )
-        : "";
+      const rateType = item.permitCompanyFeeRateType === "margin" ? "margin" : "markup";
+      const rates = getPermitFeeRates(item.permitCompanyFeeRate, rateType);
       return ingredients.map((ingredient) => [
         SUPPLY_PRICE_CATEGORY_LABEL_BY_ID[item.category] || item.category,
         item.productName,
@@ -2376,15 +2335,17 @@ function SupplyPriceTab({
         costBreakdownTotal,
         costBreakdownPerPackage ?? "",
         item.supplyUnitPrice,
-        item.vatIncluded ? "포함" : "",
-        vatUnitPrice,
         totalPrice,
-        vatTotalPrice,
         supportsPermitCompanyFee ? (item.permitCompanyFee ? "해당" : "미해당 (제조사·허가사 동일)") : "",
+        supportsPermitCompanyFee ? (rateType === "margin" ? "허가사 마진율" : "가산수수료율") : "",
         supportsPermitCompanyFee ? (!item.permitCompanyFee ? "미적용 (0%)" : (permitFeeRateUnknown ? "알 수 없음 (공급단가에 포함)" : item.permitCompanyFeeRate)) : "",
-        permitFeeUnitPrice,
-        permitFeeTotal,
-        permitFeeMinimumOrderTotal,
+        !item.permitCompanyFee || rates.multiplier === null || permitFeeRateUnknown ? "" : (rateType === "margin" ? rates.markupRate : rates.marginRate),
+        supportsPermitCompanyFee ? (formatCalculatedSupplyPrice(amounts.permitFeeUnitPrice)) : "",
+        supportsPermitCompanyFee ? (formatCalculatedSupplyPrice(amounts.permitFeeSupplyTotal)) : "",
+        item.vatIncluded ? "포함" : "",
+        item.vatIncluded ? formatCalculatedSupplyPrice(amounts.finalUnitCost) : "",
+        item.vatIncluded ? formatCalculatedSupplyPrice(amounts.finalTotal) : "",
+        item.vatIncluded ? formatCalculatedSupplyPrice(amounts.minimumOrderFinalTotal) : "",
         item.quoteDate,
         item.shelfLife,
         item.memo,
@@ -2586,8 +2547,8 @@ function SupplyPriceTab({
     }
     if (isPermitCompanyFeeCategory(item.category) && item.permitCompanyFee && !item.permitCompanyFeeRateUnknown) {
       const permitFeeRate = parseSupplyPriceNumber(item.permitCompanyFeeRate);
-      if (permitFeeRate === null || permitFeeRate < 0) {
-        window.alert("허가사 수수료율(%)을 숫자로 입력하거나 '알 수 없음'을 체크해주세요.");
+      if (permitFeeRate === null || permitFeeRate < 0 || (item.permitCompanyFeeRateType === "margin" && permitFeeRate >= 100)) {
+        window.alert(item.permitCompanyFeeRateType === "margin" ? "허가사 마진율은 0% 이상 100% 미만으로 입력해주세요." : "가산수수료율은 0% 이상 숫자로 입력해주세요.");
         return;
       }
     }
@@ -2853,30 +2814,20 @@ function SupplyPriceTab({
           const costBreakdownAmount = supplyCostBreakdownTotal(costBreakdown);
           const costBreakdownUnitAmount = supplyCostBreakdownPerPackage(costBreakdown, item.quantity);
           const supportsPermitCompanyFee = isPermitCompanyFeeCategory(item.category);
+          const baseAmounts = getBaseAmounts(item);
           const totalPrice = formatTotalPrice(item.supplyUnitPrice, item.quantity);
-          const vatIncludedPrice = item.vatIncluded ? formatVatIncludedPrice(item.supplyUnitPrice) : "";
-          const vatTotalPrice = item.vatIncluded ? formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1) : "";
           const permitFeeRateUnknown = supportsPermitCompanyFee && item.permitCompanyFee && item.permitCompanyFeeRateUnknown;
-          const permitFeeIncludedUnitPrice = supportsPermitCompanyFee
-            ? (!item.permitCompanyFee || permitFeeRateUnknown
-                ? formatVatIncludedPrice(item.supplyUnitPrice)
-                : formatPermitFeeIncludedUnitPrice(item.supplyUnitPrice, item.permitCompanyFeeRate))
-            : "";
-          const permitFeeIncludedTotalPrice = supportsPermitCompanyFee
-            ? (!item.permitCompanyFee || permitFeeRateUnknown
-                ? formatTotalPrice(item.supplyUnitPrice, item.quantity, 1.1)
-                : formatPermitFeeIncludedTotalPrice(item.supplyUnitPrice, item.quantity, item.permitCompanyFeeRate))
-            : "";
+          const permitFeeRateType = item.permitCompanyFeeRateType === "margin" ? "margin" : "markup";
+          const permitFeeRates = getPermitFeeRates(item.permitCompanyFeeRate, permitFeeRateType);
+          const convertedPermitFeeRate = item.permitCompanyFee && !permitFeeRateUnknown
+            ? (permitFeeRateType === "margin" ? permitFeeRates.markupRate : permitFeeRates.marginRate)
+            : null;
+          const permitCompanyUnitPrice = formatCalculatedSupplyPrice(baseAmounts.permitFeeUnitPrice);
+          const permitCompanyTotalPrice = formatCalculatedSupplyPrice(baseAmounts.permitFeeSupplyTotal);
+          const vatIncludedPrice = item.vatIncluded ? formatCalculatedSupplyPrice(baseAmounts.finalUnitCost) : "";
+          const vatTotalPrice = item.vatIncluded ? formatCalculatedSupplyPrice(baseAmounts.finalTotal) : "";
           const minimumOrderBatchCount = getMinimumOrderBatchCount(item.minimumOrderBatchQuantity);
-          const permitFeeIncludedMinimumOrderTotalPrice = supportsPermitCompanyFee
-            ? formatPermitFeeIncludedMinimumOrderTotalPrice(
-                item.supplyUnitPrice,
-                item.quantity,
-                item.permitCompanyFeeRate,
-                item.minimumOrderBatchQuantity,
-                !item.permitCompanyFee || permitFeeRateUnknown
-              )
-            : "";
+          const minimumOrderVatTotalPrice = item.vatIncluded ? formatCalculatedSupplyPrice(baseAmounts.minimumOrderFinalTotal) : "";
           return (
             <div
               key={item.id}
@@ -2889,19 +2840,18 @@ function SupplyPriceTab({
               }}
             >
               <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", minWidth: 1520, borderCollapse: "collapse", tableLayout: "fixed" }}>
+                <table style={{ width: "100%", minWidth: 1480, borderCollapse: "collapse", tableLayout: "fixed" }}>
                   <colgroup>
                     <col style={{ width: 110 }} />
                     <col style={{ width: 150 }} />
                     <col style={{ width: 480 }} />
                     <col style={{ width: 210 }} />
-                    <col style={{ width: 90 }} />
-                    <col style={{ width: 230 }} />
-                    <col style={{ width: 155 }} />
+                    <col style={{ width: 290 }} />
+                    <col style={{ width: 240 }} />
                   </colgroup>
                   <thead>
                     <tr style={supplyHeaderRowStyle}>
-                      {["카테고리", "제품 / 제조사", "세부 공급내역", isRawMaterialCategory ? "배치 당 전체 견적단가" : "배치 당 공급단가", "VAT 포함", "배치 당 VAT 포함 가격", "관리"].map((header) => (
+                      {["카테고리", "제품 / 제조사", "세부 공급내역", isRawMaterialCategory ? "배치 당 전체 견적단가" : "배치 당 공급단가", "허가사 수수료 반영 공급단가", "VAT 포함 가격"].map((header) => (
                         <th key={header} style={{ textAlign: "left", padding: "9px 10px", fontSize: 14, color: "#1e3a8a", borderBottom: "1px solid #bfdbfe", whiteSpace: "nowrap" }}>
                           {header}
                         </th>
@@ -2920,6 +2870,7 @@ function SupplyPriceTab({
                                 category,
                                 permitCompanyFee: isPermitCompanyFeeCategory(category) ? item.permitCompanyFee : false,
                                 permitCompanyFeeRate: isPermitCompanyFeeCategory(category) ? item.permitCompanyFeeRate : "",
+                                permitCompanyFeeRateType: isPermitCompanyFeeCategory(category) ? item.permitCompanyFeeRateType : "markup",
                                 permitCompanyFeeRateUnknown: isPermitCompanyFeeCategory(category) ? item.permitCompanyFeeRateUnknown : false,
                                 permitCompany: isPermitCompanyFeeCategory(category) ? item.permitCompany : "",
                                 costBreakdown: supportsSupplyCostBreakdown(category) ? item.costBreakdown : []
@@ -3111,170 +3062,102 @@ function SupplyPriceTab({
                       </td>
                       <td style={{ padding: 8 }}>
                         {isEditing ? (
-                          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 15, color: "#334155", fontWeight: 700 }}>
-                            <input
-                              type="checkbox"
-                              checked={Boolean(item.vatIncluded)}
-                              onChange={(event) => updateItem(item.id, { vatIncluded: event.target.checked })}
-                            />
-                            포함
-                          </label>
+                          <div style={{ display: "grid", gap: 8 }}>
+                            {supportsPermitCompanyFee && <>
+                              <div>
+                                <label style={supplyFieldLabelStyle}>수수료율 산정 방식</label>
+                                <select value={permitFeeRateType} disabled={!item.permitCompanyFee || permitFeeRateUnknown} onChange={(event) => updateItem(item.id, { permitCompanyFeeRateType: event.target.value })} style={supplyCompactInputStyle}>
+                                  <option value="markup">가산수수료율 (공급단가 기준)</option>
+                                  <option value="margin">허가사 마진율 (최종 공급단가 기준)</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label style={supplyFieldLabelStyle}>{permitFeeRateType === "margin" ? "허가사 마진율 (%)" : "가산수수료율 (%)"}</label>
+                                <input type="number" min="0" max={permitFeeRateType === "margin" ? "99.99" : undefined} step="0.01" inputMode="decimal" value={item.permitCompanyFeeRate} disabled={!item.permitCompanyFee || permitFeeRateUnknown} onChange={(event) => updateItem(item.id, { permitCompanyFeeRate: event.target.value })} placeholder={permitFeeRateUnknown ? "공급단가에 수수료 포함" : (item.permitCompanyFee ? "예: 10" : "허가사 수수료 체크 후 입력")} style={supplyCompactInputStyle} />
+                              </div>
+                              <div>
+                                <label style={supplyFieldLabelStyle}>{permitFeeRateType === "margin" ? "환산 가산수수료율" : "환산 허가사 마진율"}</label>
+                                <input value={convertedPermitFeeRate === null ? "" : `${supplyPriceFormat.format(convertedPermitFeeRate)}%`} readOnly placeholder="입력값 기준 자동 환산" style={{ ...supplyCompactInputStyle, background: "#f8fafc", fontWeight: 800 }} />
+                              </div>
+                              <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.4 }}>
+                                {permitFeeRateType === "margin" ? "마진율 = (허가사 공급단가 - 공급단가) ÷ 허가사 공급단가" : "허가사 공급단가 = 공급단가 × (1 + 가산수수료율)"}
+                              </div>
+                              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, color: item.permitCompanyFee ? "#334155" : "#94a3b8", fontSize: 13, fontWeight: 800 }}>
+                                <input type="checkbox" checked={Boolean(item.permitCompanyFeeRateUnknown)} disabled={!item.permitCompanyFee} onChange={(event) => updateItem(item.id, { permitCompanyFeeRateUnknown: event.target.checked, permitCompanyFeeRate: event.target.checked ? "" : item.permitCompanyFeeRate })} />
+                                알 수 없음
+                              </label>
+                            </>}
+                            <div>
+                              <label style={supplyFieldLabelStyle}>허가사 공급단가 (VAT 제외)</label>
+                              <input value={permitCompanyUnitPrice} readOnly placeholder="자동계산" style={{ ...supplyCompactInputStyle, background: "#f8fafc", fontWeight: 800 }} />
+                            </div>
+                            <div>
+                              <label style={supplyFieldLabelStyle}>1배치 총액 (VAT 제외)</label>
+                              <input value={permitCompanyTotalPrice} readOnly placeholder="자동계산" style={{ ...supplyCompactInputStyle, background: "#f8fafc", fontWeight: 800 }} />
+                            </div>
+                            {permitFeeRateUnknown && <div style={{ color: "#64748b", fontSize: 11 }}>공급단가에 허가사 수수료가 이미 포함된 것으로 계산합니다.</div>}
+                            {supportsPermitCompanyFee && !item.permitCompanyFee && <div style={{ color: "#64748b", fontSize: 11 }}>수수료 미해당 · 제조사와 허가사가 동일한 기준입니다.</div>}
+                          </div>
                         ) : (
-                          <div style={supplyTextCellStyle}>{item.vatIncluded ? "포함" : "-"}</div>
+                          <div style={{ display: "grid", gap: 5 }}>
+                            {supportsPermitCompanyFee && item.permitCompanyFee && !permitFeeRateUnknown && permitFeeRates.multiplier !== null && <>
+                              <div style={supplyTextCellStyle}>{permitFeeRateType === "margin" ? "허가사 마진율" : "가산수수료율"}: {supplyPriceFormat.format(permitFeeRates.enteredRate)}%</div>
+                              <div style={supplyTextCellStyle}>{permitFeeRateType === "margin" ? "환산 가산수수료율" : "환산 허가사 마진율"}: {supplyPriceFormat.format(convertedPermitFeeRate)}%</div>
+                            </>}
+                            {permitFeeRateUnknown && <div style={supplyTextCellStyle}>수수료율: 알 수 없음 · 공급단가에 포함</div>}
+                            {supportsPermitCompanyFee && !item.permitCompanyFee && <div style={supplyTextCellStyle}>수수료 미해당 · 제조사와 허가사 동일</div>}
+                            <div style={supplyMoneyTextStyle}>허가사 공급단가: {permitCompanyUnitPrice || "-"}</div>
+                            <div style={supplyMoneyTextStyle}>1배치 총액: {permitCompanyTotalPrice || "-"}</div>
+                          </div>
                         )}
                       </td>
                       <td style={{ padding: 8 }}>
                         {isEditing ? (
                           <div style={{ display: "grid", gap: 6 }}>
+                            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 15, color: "#334155", fontWeight: 700 }}>
+                              <input type="checkbox" checked={Boolean(item.vatIncluded)} onChange={(event) => updateItem(item.id, { vatIncluded: event.target.checked })} />
+                              VAT 포함
+                            </label>
+                            <label style={supplyFieldLabelStyle}>포장단위당 VAT 포함 가격</label>
                             <input
                               value={vatIncludedPrice}
                               readOnly
                               placeholder="자동계산"
                               style={{ ...supplyCompactInputStyle, background: "#f8fafc", color: item.vatIncluded ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
                             />
+                            <label style={supplyFieldLabelStyle}>1배치 VAT 포함 총액</label>
                             <input
                               value={vatTotalPrice}
                               readOnly
                               placeholder="총 견적금액"
                               style={{ ...supplyCompactInputStyle, background: "#f8fafc", color: vatTotalPrice ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
                             />
-                            {supportsPermitCompanyFee && <>
-                              <div>
-                                <label style={supplyFieldLabelStyle}>허가사 수수료율 (%)</label>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  inputMode="decimal"
-                                  value={item.permitCompanyFeeRate}
-                                  disabled={!item.permitCompanyFee || item.permitCompanyFeeRateUnknown}
-                                  onChange={(event) => updateItem(item.id, { permitCompanyFeeRate: event.target.value })}
-                                  placeholder={item.permitCompanyFeeRateUnknown ? "공급단가에 수수료 포함" : (item.permitCompanyFee ? "예: 10" : "허가사 수수료 체크 후 입력")}
-                                  style={{
-                                    ...supplyCompactInputStyle,
-                                    background: item.permitCompanyFee && !item.permitCompanyFeeRateUnknown ? "#fff" : "#f1f5f9",
-                                    color: item.permitCompanyFee && !item.permitCompanyFeeRateUnknown ? "#0f172a" : "#94a3b8",
-                                    cursor: item.permitCompanyFee && !item.permitCompanyFeeRateUnknown ? "text" : "not-allowed"
-                                  }}
-                                />
-                                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 6, color: item.permitCompanyFee ? "#334155" : "#94a3b8", fontSize: 13, fontWeight: 800 }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={Boolean(item.permitCompanyFeeRateUnknown)}
-                                    disabled={!item.permitCompanyFee}
-                                    onChange={(event) => updateItem(item.id, {
-                                      permitCompanyFeeRateUnknown: event.target.checked,
-                                      permitCompanyFeeRate: event.target.checked ? "" : item.permitCompanyFeeRate
-                                    })}
-                                  />
-                                  알 수 없음
-                                </label>
-                                {item.permitCompanyFeeRateUnknown && (
-                                  <div style={{ marginTop: 4, color: "#64748b", fontSize: 11, lineHeight: 1.4 }}>
-                                    배치 당 공급단가에 허가사 수수료가 이미 포함된 것으로 계산합니다.
-                                  </div>
-                                )}
-                              </div>
-                              <div>
-                                <label style={supplyFieldLabelStyle}>허가사 수수료 반영 포장단위당 공급단가 (VAT 포함)</label>
-                                <input
-                                  value={permitFeeIncludedUnitPrice}
-                                  readOnly
-                                  placeholder={item.permitCompanyFee ? "수수료 기준 자동계산" : "수수료 미적용 자동계산"}
-                                  style={{ ...supplyCompactInputStyle, background: "#f8fafc", color: permitFeeIncludedUnitPrice ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
-                                />
-                              </div>
-                              <div>
-                                <label style={supplyFieldLabelStyle}>허가사 수수료 반영 총금액</label>
-                                <input
-                                  value={permitFeeIncludedTotalPrice}
-                                  readOnly
-                                  placeholder={item.permitCompanyFee ? "수수료 기준 자동계산" : "수수료 미적용 자동계산"}
-                                  style={{ ...supplyCompactInputStyle, background: "#f8fafc", color: permitFeeIncludedTotalPrice ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
-                                />
-                                <div style={{ marginTop: 8 }}>
-                                  <label style={supplyFieldLabelStyle}>최소 주문 배치 기준 총금액 ({minimumOrderBatchCount}배치)</label>
-                                  <input
-                                    value={permitFeeIncludedMinimumOrderTotalPrice}
-                                    readOnly
-                                    placeholder="배치 수량 입력 시 자동계산"
-                                    style={{ ...supplyCompactInputStyle, background: "#eef6ff", color: permitFeeIncludedMinimumOrderTotalPrice ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
-                                  />
-                                </div>
-                                {!item.permitCompanyFee && (
-                                  <div style={{ marginTop: 5, color: "#64748b", fontSize: 11, lineHeight: 1.4 }}>
-                                    수수료 미해당 · 제조사와 허가사가 동일한 기준으로 계산합니다.
-                                  </div>
-                                )}
-                              </div>
-                            </>}
+                            <label style={supplyFieldLabelStyle}>최소 주문 기준 총액 ({minimumOrderBatchCount}배치)</label>
+                            <input value={minimumOrderVatTotalPrice} readOnly placeholder="배치 수량 입력 시 자동계산" style={{ ...supplyCompactInputStyle, background: "#eef6ff", color: minimumOrderVatTotalPrice ? "#0f172a" : "#94a3b8", fontWeight: 800 }} />
                           </div>
                         ) : item.vatIncluded ? (
-                          <div style={{ display: "grid", gap: 4 }}>
-                            <div style={supplyMoneyTextStyle}>
-                              {vatIncludedPrice || "-"}
-                            </div>
-                            {vatTotalPrice && (
-                              <div style={supplyMoneyTextStyle}>
-                                {isRawMaterialCategory ? "총 견적금액" : "총 금액"}: {vatTotalPrice}
-                              </div>
-                            )}
-                            {supportsPermitCompanyFee && item.permitCompanyFee && item.permitCompanyFeeRate && (
-                              <div style={supplyTextCellStyle}>허가사 수수료율: {item.permitCompanyFeeRate}%</div>
-                            )}
-                            {supportsPermitCompanyFee && item.permitCompanyFee && item.permitCompanyFeeRateUnknown && (
-                              <div style={supplyTextCellStyle}>허가사 수수료율: 알 수 없음 · 공급단가에 포함</div>
-                            )}
-                            {supportsPermitCompanyFee && !item.permitCompanyFee && (
-                              <div style={supplyTextCellStyle}>허가사 수수료: 미해당 · 제조사와 허가사 동일</div>
-                            )}
-                            {supportsPermitCompanyFee && permitFeeIncludedTotalPrice && (
-                              <>
-                                <div style={supplyMoneyTextStyle}>수수료 반영 포장단위당 공급단가: {permitFeeIncludedUnitPrice}</div>
-                                <div style={supplyMoneyTextStyle}>수수료 반영 총금액: {permitFeeIncludedTotalPrice}</div>
-                                <div style={supplyMoneyTextStyle}>최소 주문 배치 기준 총금액 ({minimumOrderBatchCount}배치): {permitFeeIncludedMinimumOrderTotalPrice}</div>
-                              </>
-                            )}
+                          <div style={{ display: "grid", gap: 5 }}>
+                            <div style={supplyMoneyTextStyle}>{vatIncludedPrice || "-"}</div>
+                            <div style={supplyMoneyTextStyle}>1배치 총액: {vatTotalPrice || "-"}</div>
+                            <div style={supplyMoneyTextStyle}>최소 주문 {minimumOrderBatchCount}배치: {minimumOrderVatTotalPrice || "-"}</div>
                           </div>
                         ) : (
                           <div style={supplyTextCellStyle}>-</div>
                         )}
                       </td>
-                      <td style={{ padding: 8 }}>
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          {isEditing ? (
-                            <>
-                              <button onClick={() => saveItem(item.id)} style={{ ...supplyPrimaryButtonStyle, padding: "6px 9px", fontSize: 15 }}>
-                                저장
-                              </button>
-                              <button onClick={() => cancelEditing(item.id)} style={supplySubtleButtonStyle}>
-                                취소
-                              </button>
-                              {isAdmin && (
-                                <button onClick={() => requestDelete(item.id)} style={{ ...supplySubtleButtonStyle, borderColor: "#fecaca", color: "#dc2626" }}>
-                                  삭제
-                                </button>
-                              )}
-                            </>
-                           ) : (
-                             <>
-                               <button
-                                 onClick={() => duplicateItem(item)}
-                                 title="입력값을 복사해 새로운 공급단가 건을 만듭니다."
-                                 style={supplySubtleButtonStyle}
-                               >
-                                 복사
-                               </button>
-                               <button onClick={() => startEditing(item)} style={supplySubtleButtonStyle}>
-                                 수정
-                               </button>
-                             </>
-                           )}
-                         </div>
-                       </td>
                     </tr>
                   </tbody>
                 </table>
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, padding: "8px 12px", borderTop: "1px solid #e2e8f0", background: "#f8fafc" }}>
+                {isEditing ? <>
+                  <button onClick={() => saveItem(item.id)} style={{ ...supplyPrimaryButtonStyle, padding: "6px 9px", fontSize: 15 }}>저장</button>
+                  <button onClick={() => cancelEditing(item.id)} style={supplySubtleButtonStyle}>취소</button>
+                  {isAdmin && <button onClick={() => requestDelete(item.id)} style={{ ...supplySubtleButtonStyle, borderColor: "#fecaca", color: "#dc2626" }}>삭제</button>}
+                </> : <>
+                  <button onClick={() => duplicateItem(item)} title="입력값을 복사해 새로운 공급단가 건을 만듭니다." style={supplySubtleButtonStyle}>복사</button>
+                  <button onClick={() => startEditing(item)} style={supplySubtleButtonStyle}>수정</button>
+                </>}
               </div>
 
               {showsCostBreakdown && (
