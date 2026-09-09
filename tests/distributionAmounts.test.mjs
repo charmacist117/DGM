@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { getBaseAmounts, getPermitFeeRates } from "../lib/pms/distributionAmounts.js";
-import { calculateMarketAnalysis } from "../lib/pms/marketAnalysis.js";
+import { calculateMarketAnalysis, forecastGrowthYears, remainingYearRatio } from "../lib/pms/marketAnalysis.js";
 import { calculateProjectPromotionCost, projectPromotionTotalExpectedCost } from "../lib/pms/projectPromotion.js";
 
 const fixture = {
@@ -10,6 +10,20 @@ const fixture = {
   permitCompanyFeeRate: "10", permitCompany: "테스트 허가사"
 };
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 0.000001, `${actual} != ${expected}`);
+
+test("YTD start date changes Year 1 using both CAGR timing and remaining days while Year 2 stays a full calendar year", () => {
+  const march = new Date(2027, 2, 1);
+  const june = new Date(2027, 5, 1);
+  const marchGrowthYears = forecastGrowthYears("ytd", march, 2025, 0);
+  const juneGrowthYears = forecastGrowthYears("ytd", june, 2025, 0);
+  const marchForecast = (1.2 ** marchGrowthYears) * remainingYearRatio(march);
+  const juneForecast = (1.2 ** juneGrowthYears) * remainingYearRatio(june);
+
+  assert.ok(juneGrowthYears > marchGrowthYears);
+  assert.ok(juneForecast < marchForecast);
+  assert.equal(forecastGrowthYears("ytd", march, 2025, 1), 3);
+  assert.equal(forecastGrowthYears("ytd", june, 2025, 1), 3);
+});
 
 test("batch and minimum order costs retain VAT and permit fees", () => {
   const result = getBaseAmounts(fixture);

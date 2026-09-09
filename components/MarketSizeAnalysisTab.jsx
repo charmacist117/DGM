@@ -8,9 +8,11 @@ import {
   applyMarketAnalysisDefaults,
   calculateBatchFinance,
   calculateMarketAnalysis,
+  forecastGrowthYears,
   marketAnalysisMatchesDefaults,
   normalizeMarketAnalysisDefaults,
-  normalizeMarketSizeAnalysis
+  normalizeMarketSizeAnalysis,
+  remainingYearRatio
 } from "@/lib/pms/marketAnalysis";
 import {
   MARKET_DECISION_OPTIONS,
@@ -156,13 +158,6 @@ function formatPeriodDate(date) {
   return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function decimalYear(date) {
-  const year = date.getFullYear();
-  const start = new Date(year, 0, 1);
-  const end = new Date(year + 1, 0, 1);
-  return year + ((date.getTime() - start.getTime()) / (end.getTime() - start.getTime()));
-}
-
 function validateAnalysis(analysis) {
   const numericFields = [
     ["달러 환율", analysis.exchangeRate],
@@ -271,6 +266,7 @@ export default function MarketSizeAnalysisTab({
   const [annualForecastBaseDate, setAnnualForecastBaseDate] = useState(() => (
     toDateInputValue(new Date(new Date().getFullYear(), 0, 1))
   ));
+  const [ytdForecastStartDate, setYtdForecastStartDate] = useState(() => toDateInputValue(new Date()));
   const [showDefaultsModal, setShowDefaultsModal] = useState(false);
   const [defaultsDraft, setDefaultsDraft] = useState(() => normalizeMarketAnalysisDefaults(marketAnalysisDefaults));
   const [analysisClipboard, setAnalysisClipboard] = useState(null);
@@ -338,30 +334,28 @@ export default function MarketSizeAnalysisTab({
   const today = new Date();
   const currentYear = today.getFullYear();
   const startOfYear = new Date(currentYear, 0, 1);
-  const startOfNextYear = new Date(currentYear + 1, 0, 1);
-  const elapsedYearRatio = Math.min(
-    1,
-    Math.max(0, (today.getTime() - startOfYear.getTime() + 86_400_000) / (startOfNextYear.getTime() - startOfYear.getTime()))
-  );
   const growthMultiplier = Number.isFinite(selectedGrowthRate)
     ? Math.max(0, 1 + (selectedGrowthRate / 100))
     : 1;
   const annualDemandBase = calculations.annualDemandUnits;
   const annualPeriodStart = parseDateInput(annualForecastBaseDate, startOfYear);
+  const ytdPeriodStart = parseDateInput(ytdForecastStartDate, today);
+  const ytdPeriodRatio = remainingYearRatio(ytdPeriodStart);
   const latestMarketYear = calculations.latestYear?.year ?? currentYear - 1;
-  const annualStartGrowthYears = Math.max(0, decimalYear(annualPeriodStart) - latestMarketYear);
-  const currentFullYearGrowthYears = Math.max(0, currentYear - latestMarketYear);
   const demandForecasts = [0, 1, 2].map((offset) => {
-    const growthYears = yearOneMode === "annual"
-      ? annualStartGrowthYears + offset
-      : currentFullYearGrowthYears + offset;
-    const periodRatio = yearOneMode === "ytd" && offset === 0 ? elapsedYearRatio : 1;
+    const growthYears = forecastGrowthYears(
+      yearOneMode,
+      yearOneMode === "annual" ? annualPeriodStart : ytdPeriodStart,
+      latestMarketYear,
+      offset
+    );
+    const periodRatio = yearOneMode === "ytd" && offset === 0 ? ytdPeriodRatio : 1;
     const periodStart = yearOneMode === "annual"
       ? addYears(annualPeriodStart, offset)
-      : new Date(currentYear + offset, 0, 1);
+      : (offset === 0 ? ytdPeriodStart : new Date(ytdPeriodStart.getFullYear() + offset, 0, 1));
     const periodEnd = yearOneMode === "annual"
       ? addDaysToDate(addYears(annualPeriodStart, offset + 1), -1)
-      : new Date(currentYear + offset, 11, 31);
+      : new Date(ytdPeriodStart.getFullYear() + offset, 11, 31);
     return {
       year: periodStart.getFullYear(),
       growthYears,
@@ -412,10 +406,10 @@ export default function MarketSizeAnalysisTab({
     : "공급단가 기준";
   const planningBasisLabel = selectedGrowthRate === null
     ? (yearOneMode === "ytd"
-        ? "Year 1 YTD 기준"
+        ? `Year 1 YTD ${formatPeriodDate(ytdPeriodStart)} 시작`
         : `Year 1 연간 ${formatPeriodDate(annualPeriodStart)} 시작`)
     : (yearOneMode === "ytd"
-        ? `${growthRateYears}개년 성장률 · Year 1 YTD 기준`
+        ? `${growthRateYears}개년 성장률 · YTD ${formatPeriodDate(ytdPeriodStart)} 시작`
         : `${growthRateYears}개년 성장률 · 연간 ${formatPeriodDate(annualPeriodStart)} 시작`);
 
   const createMarketAnalysisReport = () => {
@@ -1134,22 +1128,22 @@ export default function MarketSizeAnalysisTab({
                           ? "성장률이 없으면 현재 예상 소진수량을 유지합니다."
                           : `${growthRateYears}개년 연평균 성장률 ${formatDecimal(selectedGrowthRate, 2, "%")} 적용`}
                         {yearOneMode === "ytd"
-                          ? " · 현재 시점까지 성장률을 일할 반영한 환산값에 Year 2·3의 연간 성장률을 순차 적용합니다."
+                          ? " · 지정 시작일부터 해당 연도 말일까지 일할 반영하고 다음 해부터 연간 성장률을 순차 적용합니다."
                           : ""}
                       </span>
                     </div>
                     <div className="forecast-controls">
-                      {yearOneMode === "annual" && (
-                        <label className="annual-base-date-control">
-                          <span>연간 기준 시작일</span>
-                          <SegmentedDateInput
-                            aria-label="연간 기준 시작일"
-                            value={annualForecastBaseDate}
-                            onChange={(value) => setAnnualForecastBaseDate(value || toDateInputValue(startOfYear))}
-                            style={{ width: 170, minHeight: 30, padding: "4px 7px", fontSize: 12 }}
-                          />
-                        </label>
-                      )}
+                      <label className="annual-base-date-control">
+                        <span>{yearOneMode === "annual" ? "연간 기준 시작일" : "YTD 시작일"}</span>
+                        <SegmentedDateInput
+                          aria-label={yearOneMode === "annual" ? "연간 기준 시작일" : "YTD 시작일"}
+                          value={yearOneMode === "annual" ? annualForecastBaseDate : ytdForecastStartDate}
+                          onChange={(value) => yearOneMode === "annual"
+                            ? setAnnualForecastBaseDate(value || toDateInputValue(startOfYear))
+                            : setYtdForecastStartDate(value || toDateInputValue(today))}
+                          style={{ width: 170, minHeight: 30, padding: "4px 7px", fontSize: 12 }}
+                        />
+                      </label>
                       <div className="growth-period-control" role="group" aria-label="예상 소진수량 계산 기준">
                         {[
                           ["annual", "연간 기준"],
@@ -1179,12 +1173,12 @@ export default function MarketSizeAnalysisTab({
                         value={formatCount(forecast.value)}
                         subtext={yearOneMode === "ytd"
                           ? (index === 0
-                              ? `${forecast.year}년 현재 시점 · 연간 전망의 ${formatDecimal(elapsedYearRatio * 100, 1, "%")} 일할 반영`
+                              ? `${formatPeriodDate(forecast.periodStart)}~${formatPeriodDate(forecast.periodEnd)} · 연간 전망의 ${formatDecimal(ytdPeriodRatio * 100, 1, "%")} 일할 반영`
                               : `${forecast.year}년 1/1~12/31 · 성장률 ${formatDecimal(forecast.growthYears, 2, "년")} 반영`)
                           : `${formatPeriodDate(forecast.periodStart)}~${formatPeriodDate(forecast.periodEnd)} · 성장률 ${formatDecimal(forecast.growthYears, 2, "년")} 반영`}
                         tone="positive"
                         formula={yearOneMode === "ytd" && index === 0
-                          ? "연간 예상 소진수량 × (1 + 연평균 성장률)^최신 실적 이후 연수 × 현재 연도 경과일수 비율"
+                          ? "연간 예상 소진수량 × (1 + 연평균 성장률)^최신 실적 이후 연수 × 지정 시작일부터 연말까지 일수 비율"
                           : "연간 예상 소진수량 × (1 + 연평균 성장률)^최신 실적 연도부터 해당 기간 시작일까지의 연수"}
                       />
                     ))}
@@ -1296,7 +1290,7 @@ export default function MarketSizeAnalysisTab({
                         <strong>{index === 0 && yearOneMode === "ytd" ? "YTD 손익 전망" : "연간 손익 전망"}</strong>
                         <small>
                           {formatPeriodDate(forecast.periodStart)}~
-                          {index === 0 && yearOneMode === "ytd" ? formatPeriodDate(today) : formatPeriodDate(forecast.periodEnd)}
+                          {formatPeriodDate(forecast.periodEnd)}
                         </small>
                         <dl>
                           <div>
