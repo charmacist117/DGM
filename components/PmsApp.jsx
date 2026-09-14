@@ -751,6 +751,7 @@ const SUPPLY_PRICE_CATEGORIES = [
   { id: "OTC", label: "OTC", color: "#0ea5e9" },
   { id: "건강기능식품", label: "건강기능식품", color: "#10b981" },
   { id: "일반식품", label: "일반식품", color: "#f59e0b" },
+  { id: "화장품", label: "화장품", color: "#ec4899" },
   { id: "의약외품", label: "의약외품", color: "#8b5cf6" },
   { id: "기타", label: "기타", color: "#64748b" }
 ];

@@ -6,13 +6,13 @@ const date = { changeDate: "2026-09-03", createdAt: "2026-09-03T01:00:00Z" };
 const append = (logs, seeds = DASHBOARD_CHANGE_SEEDS) => appendDashboardChangeSeeds(logs, seeds, date);
 
 test("all existing release keys and notices are retained", () => {
-  assert.equal(DASHBOARD_CHANGE_SEEDS.length, 47);
-  assert.equal(new Set(DASHBOARD_CHANGE_SEEDS.map((seed) => seed.key)).size, 47);
-  assert.equal(new Set(DASHBOARD_CHANGE_SEEDS.map((seed) => seed.id)).size, 47);
-  assert.equal(DASHBOARD_CHANGE_SEEDS.reduce((sum, seed) => sum + seed.changes.length, 0), 126);
+  assert.equal(DASHBOARD_CHANGE_SEEDS.length, 48);
+  assert.equal(new Set(DASHBOARD_CHANGE_SEEDS.map((seed) => seed.key)).size, 48);
+  assert.equal(new Set(DASHBOARD_CHANGE_SEEDS.map((seed) => seed.id)).size, 48);
+  assert.equal(DASHBOARD_CHANGE_SEEDS.reduce((sum, seed) => sum + seed.changes.length, 0), 127);
   const logs = append([]);
-  assert.equal(logs.length, 47);
-  assert.deepEqual(logs.map((log) => log.revision), Array.from({ length: 47 }, (_, index) => String(index + 1)));
+  assert.equal(logs.length, 48);
+  assert.deepEqual(logs.map((log) => log.revision), Array.from({ length: 48 }, (_, index) => String(index + 1)));
   assert.equal(append(logs), logs);
 });
 
@@ -41,5 +41,5 @@ test("legacy registration flags can suppress deleted notices and the initial not
   assert.equal(append(logs, []), logs);
   const events = [{ id: "event", type: "project_event" }];
   assert.equal(append(events)[0], events[0]);
-  assert.equal(append(events).length, 48);
+  assert.equal(append(events).length, 49);
 });
