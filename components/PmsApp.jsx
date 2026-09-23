@@ -1535,6 +1535,12 @@ function TasksTab({
     });
   };
 
+  const deleteDraftTask = (task) => {
+    if (!window.confirm(`"${task.name}" 행을 삭제하시겠습니까?`)) return;
+    setDraftTasks((prev) => prev.filter((currentTask) => currentTask.id !== task.id));
+    if (editTask?.id === task.id) setEditTask(null);
+  };
+
   const applyTaskDetailPatch = (task, patch) => {
     updateDraftTask(task.id, (currentTask) => {
       const hasStartPatch = Boolean(patch.startDate);
@@ -1664,8 +1670,14 @@ function TasksTab({
       }
     });
 
+    const draftIds = new Set(draftTasks.map((task) => task.id));
+    (project.tasks || []).filter((task) => !draftIds.has(task.id)).forEach((task) => {
+      changeCount += 1;
+      changes.push(`${task.name} 태스크 삭제`);
+    });
     const draftExistingIds = draftTasks.map((task) => task.id).filter((id) => originalById[id]);
-    if (draftExistingIds.join("|") !== originalIds.join("|")) {
+    const remainingOriginalIds = originalIds.filter((id) => draftIds.has(id));
+    if (draftExistingIds.join("|") !== remainingOriginalIds.join("|")) {
       changeCount += 1;
       changes.push("태스크 행 순서 변경");
     }
@@ -1964,9 +1976,14 @@ function TasksTab({
                 <td style={{ padding: "9px 12px", fontSize: 12 }}>{task.progress || 0}%</td>
                 <td style={{ padding: "9px 12px", fontSize: 12, color: "#64748b", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.notes || "-"}</td>
                 <td style={{ padding: "9px 12px" }}>
-                  {isEditing && <button onClick={() => setEditTask(task)} style={{ padding: "6px 9px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer", fontSize: 12 }} disabled={!enabled}>
-                    수정
-                  </button>}
+                  {isEditing && <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => setEditTask(task)} style={{ padding: "6px 9px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer", fontSize: 12 }} disabled={!enabled}>
+                      수정
+                    </button>
+                    <button onClick={() => deleteDraftTask(task)} style={{ padding: "6px 9px", borderRadius: 6, border: "1px solid #fecaca", background: "#fef2f2", color: "#dc2626", cursor: "pointer", fontSize: 12 }}>
+                      삭제
+                    </button>
+                  </div>}
                 </td>
               </tr>
             ];
