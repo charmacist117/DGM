@@ -109,11 +109,18 @@ test("market and project promotion keep the same VAT and fee basis as distributi
     const market = calculateMarketAnalysis(item);
     const promotion = calculateProjectPromotionCost(item);
     close(market.baseUnitCost, base.finalUnitCost);
-    close(promotion.finalUnitCost, base.finalUnitCost);
-    close(promotion.initialProductionCost, base.minimumOrderFinalTotal);
-    close(projectPromotionTotalExpectedCost(item), base.minimumOrderFinalTotal + 10000);
+    close(promotion.finalUnitCost, Math.round(base.finalUnitCost * 10) / 10);
+    close(promotion.initialProductionCost, Math.round(promotion.finalUnitCost * base.minimumOrderQuantity));
+    close(projectPromotionTotalExpectedCost(item), promotion.initialProductionCost + 10000);
     assert.equal(market.minimumOrderBatches, base.minimumOrderBatches);
   }
+});
+
+test("project promotion production cost uses the displayed unit cost including half-won values", () => {
+  const item = { ...fixture, supplyUnitPrice: "1759.99636", quantity: "30,000", minimumOrderBatchQuantity: "1", permitCompanyFeeRate: "0" };
+  assert.deepEqual(calculateProjectPromotionCost(item), { finalUnitCost: 1936, minimumOrderBatches: 1, initialProductionCost: 58080000 });
+  const halfWonItem = { ...item, supplyUnitPrice: "1334.996", quantity: "22,500" };
+  assert.deepEqual(calculateProjectPromotionCost(halfWonItem), { finalUnitCost: 1468.5, minimumOrderBatches: 1, initialProductionCost: 33041250 });
 });
 
 test("shared calculations retain missing-price and invalid-order guards", () => {

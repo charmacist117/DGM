@@ -41,6 +41,10 @@ function formatWon(value) {
   return Number.isFinite(value) ? `${Math.round(value).toLocaleString("ko-KR")}원` : "-";
 }
 
+function formatUnitWon(value) {
+  return Number.isFinite(value) ? `${value.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}원` : "-";
+}
+
 function formatCompactWon(value) {
   if (!Number.isFinite(value)) return "-";
   if (Math.abs(value) >= 100_000_000) return `${(value / 100_000_000).toFixed(2)}억원`;
@@ -247,7 +251,7 @@ export default function ProjectPromotionTab({ items = [], projects = [], marketA
       drawSection("공급단가 및 초기 비용", ["포장단위", "배치 당 포장단위 개수", "최종 공급원가 (VAT 포함)", "최소 주문 배치", "최소 주문 생산비", "추가 예상비용"], [[
         selectedItem.packagingUnit || "-",
         selectedItem.quantity ? `${Number(selectedItem.quantity).toLocaleString("ko-KR")}개` : "-",
-        formatWon(cost.finalUnitCost),
+        formatUnitWon(cost.finalUnitCost),
         `${cost.minimumOrderBatches || "-"}배치`,
         formatWon(cost.initialProductionCost),
         formatWon(numberValue(promotion.additionalExpectedCost))
@@ -329,7 +333,7 @@ export default function ProjectPromotionTab({ items = [], projects = [], marketA
 
         {promotion.followUps.length > 0 && <section style={panelStyle}><div style={{ padding: "10px 13px", background: "#f1f5f9", borderBottom: "1px solid #cbd5e1", fontWeight: 900 }}>후속 진행 F/U 이력</div><div style={{ display: "grid" }}>{[...promotion.followUps].reverse().map((entry) => <div key={entry.id || `${entry.createdAt}-${entry.status}`} style={{ display: "grid", gridTemplateColumns: "110px 170px minmax(0, 1fr)", gap: 12, padding: "10px 13px", borderBottom: "1px solid #e2e8f0", alignItems: "start" }}><span style={promotionProgressBadgeStyle(entry.status)}>{promotionProgressLabel(entry.status)}</span><time style={{ color: "#64748b", fontSize: 12 }}>{formatDateTime(entry.createdAt)}</time><div style={{ color: "#334155", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{entry.note || "별도 F/U 내용 없음"}</div></div>)}</div></section>}
 
-        <section style={panelStyle}><div style={{ padding: "10px 13px", background: "#dbeafe", borderBottom: "1px solid #bfdbfe", fontWeight: 900 }}>공급단가 <span style={{ marginLeft: 6, color: "#475569", fontSize: 11 }}>VAT·허가사 수수료 포함 기준</span></div><div className="promotion-data-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}><SummaryCell label="최종 공급원가 (VAT 포함)" value={formatWon(cost.finalUnitCost)} subtext="개당 기준" /><SummaryCell label="배치 당 포장단위 개수" value={selectedItem.quantity ? `${Number(selectedItem.quantity).toLocaleString("ko-KR")}개` : "-"} /><SummaryCell label="최소 주문 배치" value={`${cost.minimumOrderBatches || "-"}배치`} /><SummaryCell label="최소 주문 기준 생산비" value={formatWon(cost.initialProductionCost)} subtext="VAT·허가사 수수료 포함" /></div><div style={{ padding: "9px 13px", borderTop: "1px solid #e2e8f0" }}><button onClick={() => onOpenSupply?.(selectedItem.id)} style={buttonStyle}>공급단가 원문 보기</button></div></section>
+        <section style={panelStyle}><div style={{ padding: "10px 13px", background: "#dbeafe", borderBottom: "1px solid #bfdbfe", fontWeight: 900 }}>공급단가 <span style={{ marginLeft: 6, color: "#475569", fontSize: 11 }}>VAT·허가사 수수료 포함 기준</span></div><div className="promotion-data-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}><SummaryCell label="최종 공급원가 (VAT 포함)" value={formatUnitWon(cost.finalUnitCost)} subtext="개당 기준" /><SummaryCell label="배치 당 포장단위 개수" value={selectedItem.quantity ? `${Number(selectedItem.quantity).toLocaleString("ko-KR")}개` : "-"} /><SummaryCell label="최소 주문 배치" value={`${cost.minimumOrderBatches || "-"}배치`} /><SummaryCell label="최소 주문 기준 생산비" value={formatWon(cost.initialProductionCost)} subtext="VAT·허가사 수수료 포함" /></div><div style={{ padding: "9px 13px", borderTop: "1px solid #e2e8f0" }}><button onClick={() => onOpenSupply?.(selectedItem.id)} style={buttonStyle}>공급단가 원문 보기</button></div></section>
 
         <section style={panelStyle}><div style={{ padding: "10px 13px", background: "#dbeafe", borderBottom: "1px solid #bfdbfe", fontWeight: 900 }}>유통 구조 설정</div><div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}><thead><tr>{["가격대", "적용 물량", "참약사 마진율", "참약사 판매가", "약국 판매가"].map((header) => <th key={header} style={{ padding: 9, background: "#f8fafc", borderBottom: "1px solid #e2e8f0", textAlign: "left" }}>{header}</th>)}</tr></thead><tbody>{scenarios.map((scenario) => <tr key={scenario.id}><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{scenario.label || "기본"}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{scenario.minimumQuantity || "기본"}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{scenario.chamyaksaMarginRate ? `${scenario.chamyaksaMarginRate}%` : "-"}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", fontWeight: 800 }}>{formatWon(calculateSellingPriceFromMarginRate(cost.finalUnitCost, scenario.chamyaksaMarginRate))}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{selectedItem.distributionStructure?.pharmacySellingPrice ? `${Number(String(selectedItem.distributionStructure.pharmacySellingPrice).replace(/,/g, "")).toLocaleString("ko-KR")}원` : "-"}</td></tr>)}{scenarios.length === 0 && <tr><td colSpan={5} style={{ padding: 18, textAlign: "center", color: "#94a3b8" }}>등록된 가격대가 없습니다.</td></tr>}</tbody></table></div><div style={{ padding: "9px 13px" }}><button onClick={() => onOpenDistribution?.(selectedItem.id)} style={buttonStyle}>유통 구조 원문 보기</button></div></section>
 
