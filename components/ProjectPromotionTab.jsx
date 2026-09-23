@@ -87,7 +87,10 @@ export default function ProjectPromotionTab({ items = [], projects = [], marketA
       if (progressFilter !== "all" && promotion.progressDecision !== progressFilter) return false;
       if (!matchesPermitCompanyFilter(item, permitCompanyFilter)) return false;
       return !keyword || [itemLabel(item), item.manufacturer, item.permitCompany, item.category].some((value) => String(value || "").toLowerCase().includes(keyword));
-    }).sort((left, right) => String(right.projectPromotion?.updatedAt || right.quoteDate || "").localeCompare(String(left.projectPromotion?.updatedAt || left.quoteDate || "")));
+    }).sort((left, right) => (
+      Number(normalizeProjectPromotion(left.projectPromotion).progressDecision === "stop") - Number(normalizeProjectPromotion(right.projectPromotion).progressDecision === "stop")
+      || String(right.projectPromotion?.updatedAt || right.quoteDate || "").localeCompare(String(left.projectPromotion?.updatedAt || left.quoteDate || ""))
+    ));
   }, [eligibleItems, permitCompanyFilter, progressFilter, query]);
   const selectedItem = visibleItems.find((item) => String(item.id) === String(selectedItemId)) || visibleItems[0] || null;
 
