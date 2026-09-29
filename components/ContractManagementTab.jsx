@@ -236,7 +236,10 @@ export default function ContractManagementTab({
           ? selectedRecord.id
           : (selectedRecord?.parentId || parentRecords[0]?.id || ""));
     const next = createContractRecord(recordType, recordType === "child" ? preferredParentId : "");
-    setDraft(next);
+    const linkedParent = recordType === "child"
+      ? parentRecords.find((record) => String(record.id) === String(preferredParentId))
+      : null;
+    setDraft(recordType === "child" ? { ...next, counterparty: linkedParent?.counterparty || "" } : next);
     setSelectedId(next.id);
     setIsEditing(true);
   };
@@ -577,11 +580,26 @@ export default function ContractManagementTab({
                     <input value={draft.title} onChange={(event) => setDraft((previous) => ({ ...previous, title: event.target.value }))} style={inputStyle} placeholder="계약명" />
                   </Field>
                   <Field label="계약 상대방" span={2}>
-                    <input value={draft.counterparty} onChange={(event) => setDraft((previous) => ({ ...previous, counterparty: event.target.value }))} style={inputStyle} placeholder="법인명 또는 상대방명" />
+                    <div style={{ display: "grid", gap: 4 }}>
+                      <input value={draft.counterparty} onChange={(event) => setDraft((previous) => ({ ...previous, counterparty: event.target.value }))} style={inputStyle} placeholder={draft.recordType === "child" ? "모계약 상대방이 기본 입력됩니다" : "법인명 또는 상대방명"} />
+                      {draft.recordType === "child" && <small style={{ color: "#64748b", fontSize: 10 }}>모계약 상대방을 기본값으로 입력했습니다. 필요하면 수정할 수 있습니다.</small>}
+                    </div>
                   </Field>
                   {draft.recordType === "child" && <>
                     <Field label="연결 모계약" span={2}>
-                      <select value={draft.parentId} onChange={(event) => setDraft((previous) => ({ ...previous, parentId: event.target.value }))} style={inputStyle}>
+                      <select value={draft.parentId} onChange={(event) => {
+                        const parentId = event.target.value;
+                        const nextParent = parentRecords.find((record) => String(record.id) === String(parentId));
+                        setDraft((previous) => {
+                          const previousParent = parentRecords.find((record) => String(record.id) === String(previous.parentId));
+                          const followsParent = !previous.counterparty || previous.counterparty === (previousParent?.counterparty || "");
+                          return {
+                            ...previous,
+                            parentId,
+                            counterparty: followsParent ? (nextParent?.counterparty || "") : previous.counterparty
+                          };
+                        });
+                      }} style={inputStyle}>
                         <option value="">모계약 선택</option>
                         {parentRecords.filter((record) => String(record.id) !== String(draft.id)).map((parent) => (
                           <option key={parent.id} value={parent.id}>{contractDisplayTitle(parent)} · {parent.counterparty}</option>
