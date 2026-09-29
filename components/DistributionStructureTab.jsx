@@ -11,7 +11,7 @@ import {
   composeDistributionReportSections,
   normalizeDistributionExportSections
 } from "@/lib/pms/distributionExport";
-import { normalizePricingScenario, clonePricingScenario, calculateBonusPromotion, bonusPromotionQuantityLabel, pricingScenarioGroup } from "@/lib/pms/pricingScenarios";
+import { normalizePricingScenario, clonePricingScenario, calculateBonusPromotion, calculateDisplayedPriceTotal, bonusPromotionQuantityLabel, pricingScenarioGroup } from "@/lib/pms/pricingScenarios";
 import {
   marketDecisionBadgeStyle,
   marketDecisionLabel
@@ -370,7 +370,7 @@ export default function DistributionStructureTab({
     : (chamyaksaMarginAmount === null || !appliedQuantity ? null : chamyaksaMarginAmount * appliedQuantity);
   const totalChamyaksaMarginAmountExcludingVat = totalChamyaksaMarginAmount === null ? null : totalChamyaksaMarginAmount / 1.1;
   const pharmacyPurchaseTotal = isBonusPromotion ? bonusPromotion.purchaseTotal
-    : (chamyaksaSellingPrice === null || !appliedQuantity ? null : chamyaksaSellingPrice * appliedQuantity);
+    : calculateDisplayedPriceTotal(chamyaksaSellingPrice, appliedQuantity);
   const pharmacySellingPrice = parseNumber(distribution.pharmacySellingPrice);
   const pharmacyMarginAmount = pharmacySellingPrice === null || effectiveChamyaksaSellingPrice === null
     ? null
@@ -473,7 +473,7 @@ export default function DistributionStructureTab({
         marginExVat: margin === null ? null : margin / 1.1,
         marginRate: parseNumber(scenario.chamyaksaMarginRate),
         pharmacySellingPrice,
-        purchaseTotal: sellingPrice !== null && quantity ? sellingPrice * quantity : null
+        purchaseTotal: calculateDisplayedPriceTotal(sellingPrice, quantity)
       };
     });
     const headCells = ["판매 구분", "가격대/프로모션", "적용 제품", "판매·금액 기준", "적용 물량", "공급 원가(VAT 포함)", "참약사 판매가(VAT 포함)", "개당 판매가(VAT 포함)", "마진액(VAT 포함)", "마진액(VAT 미포함)", "마진율", "약국 판매가(VAT 포함)", "약국 구입 총액(VAT 포함)"];

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizePricingScenario, clonePricingScenario, calculateBonusPromotion, bonusPromotionQuantityLabel, pricingScenarioGroup } from "../lib/pms/pricingScenarios.js";
+import { normalizePricingScenario, clonePricingScenario, calculateBonusPromotion, calculateDisplayedPriceTotal, bonusPromotionQuantityLabel, pricingScenarioGroup } from "../lib/pms/pricingScenarios.js";
 import { calculateMarketAnalysis } from "../lib/pms/marketAnalysis.js";
 
 const calculate = (patch = {}) => calculateBonusPromotion({
@@ -17,6 +17,11 @@ test("10+2 charges only 10 units but includes the cost of all 12", () => {
   close(result.effectiveUnitPrice, 10000 / 12);
   close(result.marginPerUnit, 400 / 12);
   close(result.marginRate, 4);
+});
+test("totals use the displayed whole-won unit price", () => {
+  assert.equal(calculateDisplayedPriceTotal(1200.4, 10), 12000);
+  assert.equal(calculateDisplayedPriceTotal(1200, 0), null);
+  assert.equal(calculate({ sellingPrice: 1200.4 }).purchaseTotal, 12000);
 });
 test("zero bonus keeps the ordinary unit price and margin", () => {
   const result = calculate({ bonusQuantity: 0 });
