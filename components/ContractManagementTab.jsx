@@ -204,6 +204,20 @@ export default function ContractManagementTab({
       });
   }, [childTypeFilter, normalizedRecords, parentScope, projectsById, recordFilter, search, statusFilter]);
 
+  const visibleRecordGroups = useMemo(() => {
+    const visibleChildren = filteredRecords.filter((record) => record.recordType === "child");
+    const groupedChildIds = new Set();
+    const groups = filteredRecords.filter((record) => record.recordType === "parent").map((parent) => {
+      const children = visibleChildren.filter((record) => String(record.parentId) === String(parent.id));
+      children.forEach((record) => groupedChildIds.add(String(record.id)));
+      return { parent, children };
+    });
+    visibleChildren.filter((record) => !groupedChildIds.has(String(record.id))).forEach((record) => {
+      groups.push({ parent: null, children: [record] });
+    });
+    return groups;
+  }, [filteredRecords]);
+
   const expiringCount = normalizedRecords.filter((record) => {
     if (record.status !== "active" && record.status !== "renewal") return false;
     const days = daysUntil(record.expirationDate);
@@ -332,7 +346,7 @@ export default function ContractManagementTab({
     }
   };
 
-  const renderRecordRow = (record) => {
+  const renderRecordRow = (record, compact = false) => {
     const active = String(record.id) === String(selectedId);
     const childCount = (childrenByParent.get(String(record.id)) || []).length;
     const linkedParent = record.recordType === "child"
@@ -342,6 +356,8 @@ export default function ContractManagementTab({
       <button
         key={record.id}
         type="button"
+        title={compact ? `${contractDisplayTitle(record)} · ${contractStatusLabel(record.status)}` : undefined}
+        aria-label={compact ? `하위 계약·문서 ${record.counterparty || "상대방 미입력"}: ${contractDisplayTitle(record)} · ${contractStatusLabel(record.status)}` : undefined}
         onClick={() => {
           if (isEditing && String(record.id) !== String(selectedId)) {
             if (!window.confirm("저장하지 않은 수정 내용을 취소하고 다른 계약을 보시겠습니까?")) return;
@@ -356,11 +372,13 @@ export default function ContractManagementTab({
           border: `1px solid ${active ? "#2563eb" : "#dbe3ee"}`,
           borderRadius: 7,
           background: active ? "#eff6ff" : "#fff",
-          padding: 10,
+          padding: compact ? "6px 9px" : 10,
           cursor: "pointer",
-          color: "#0f172a"
+          color: "#0f172a",
+          ...(compact ? { width: "fit-content", maxWidth: "100%", display: "block", fontSize: 12, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } : {})
         }}
       >
+        {compact ? (record.counterparty || "상대방 미입력") : <>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
           <div style={{ fontSize: 13, fontWeight: 900, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {contractDisplayTitle(record)}
@@ -368,12 +386,13 @@ export default function ContractManagementTab({
           <span style={statusStyle(record.status)}>{contractStatusLabel(record.status)}</span>
         </div>
         <div style={{ marginTop: 5, fontSize: 11, color: "#64748b" }}>
-          {record.recordType === "parent" ? "모계약" : "하위 계약·문서"} · {contractTypeLabel(record)} · {record.counterparty || "상대방 미입력"}
+          {record.recordType === "parent" ? <><strong style={{ color: "#334155", fontWeight: 900 }}>모계약</strong> · {contractTypeLabel(record)}</> : <>하위 계약·문서 · {contractTypeLabel(record)} · {record.counterparty || "상대방 미입력"}</>}
         </div>
         <div style={{ marginTop: 4, display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11, color: "#475569" }}>
           <span>{record.contractNumber || "계약번호 미입력"}</span>
           <span>{record.recordType === "parent" ? `하위 계약·문서 ${childCount}건` : (linkedParent ? `상위 모계약: ${contractDisplayTitle(linkedParent)}` : "상위 모계약 미연결")}</span>
         </div>
+        </>}
       </button>
     );
   };
@@ -459,8 +478,18 @@ export default function ContractManagementTab({
               </select>
             </div>
           </div>
-          <div style={{ maxHeight: "calc(100vh - 330px)", overflowY: "auto", padding: 9, display: "grid", gap: 7 }}>
-            {filteredRecords.map(renderRecordRow)}
+          <div style={{ maxHeight: "calc(100vh - 330px)", overflowY: "auto", padding: 9 }}>
+            <div style={{ display: "grid", gap: 7 }}>
+            {visibleRecordGroups.map(({ parent, children }) => (
+              <div key={parent?.id || children[0]?.id} style={{ minWidth: 0 }}>
+                {parent && renderRecordRow(parent)}
+                {parent && children.length > 0 ? (
+                  <div className="contract-child-list">
+                    {children.map((record) => <div className="contract-child-branch" key={record.id}>{renderRecordRow(record, true)}</div>)}
+                  </div>
+                ) : children.map((record) => renderRecordRow(record, true))}
+              </div>
+            ))}
             {filteredRecords.length === 0 && (
               <div style={{ padding: 24, textAlign: "center", color: "#94a3b8", fontSize: 12, lineHeight: 1.55 }}>
                 {selectedScopeParent
@@ -468,6 +497,7 @@ export default function ContractManagementTab({
                   : "조건에 맞는 계약이 없습니다."}
               </div>
             )}
+            </div>
           </div>
         </div>
 
@@ -661,6 +691,13 @@ export default function ContractManagementTab({
           )}
         </div>
       </div>
+
+      <style jsx>{`
+        .contract-child-list { position: relative; display: grid; gap: 5px; margin: 0 0 0 10px; padding: 0 0 0 17px; }
+        .contract-child-list::before { content: ""; position: absolute; left: 4px; top: -7px; bottom: 15px; border-left: 1px solid #94a3b8; }
+        .contract-child-branch { position: relative; min-width: 0; }
+        .contract-child-branch::before { content: ""; position: absolute; left: -13px; top: 50%; width: 13px; border-top: 1px solid #94a3b8; }
+      `}</style>
 
       {deleteTarget && (
         <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(15,23,42,.58)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
