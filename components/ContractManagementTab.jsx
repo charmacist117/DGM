@@ -368,6 +368,7 @@ export default function ContractManagementTab({
         }}
         style={{
           width: "100%",
+          display: "block",
           textAlign: "left",
           border: `1px solid ${active ? "#2563eb" : "#dbe3ee"}`,
           borderRadius: 7,
@@ -696,7 +697,7 @@ export default function ContractManagementTab({
       </div>
 
       <style jsx>{`
-        .contract-child-list { position: relative; display: grid; gap: 5px; margin: 0 0 0 10px; padding: 0 0 0 17px; }
+        .contract-child-list { position: relative; display: grid; gap: 5px; margin: 7px 0 0 10px; padding: 0 0 0 17px; }
         .contract-child-list::before { content: ""; position: absolute; left: 4px; top: -7px; bottom: 15px; border-left: 1px solid #94a3b8; }
         .contract-child-branch { position: relative; min-width: 0; }
         .contract-child-branch::before { content: ""; position: absolute; left: -13px; top: 50%; width: 13px; border-top: 1px solid #94a3b8; }
