@@ -375,10 +375,13 @@ export default function ContractManagementTab({
           padding: compact ? "6px 9px" : 10,
           cursor: "pointer",
           color: "#0f172a",
-          ...(compact ? { width: "fit-content", maxWidth: "100%", display: "block", fontSize: 12, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } : {})
+          ...(compact ? { width: "100%", display: "flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 800, overflow: "hidden", whiteSpace: "nowrap" } : {})
         }}
       >
-        {compact ? (record.counterparty || "상대방 미입력") : <>
+        {compact ? <>
+          <span style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis" }}>{record.title || contractTypeLabel(record)}</span>
+          <span style={{ minWidth: 0, maxWidth: "42%", flex: "0 1 auto", color: "#64748b", fontSize: 11, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }}>{record.counterparty || "상대방 미입력"}</span>
+        </> : <>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
           <div style={{ fontSize: 13, fontWeight: 900, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {contractDisplayTitle(record)}
