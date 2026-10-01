@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { getBaseAmounts, getPermitFeeRates } from "../lib/pms/distributionAmounts.js";
-import { calculateMarketAnalysis, forecastGrowthYears, remainingYearRatio } from "../lib/pms/marketAnalysis.js";
+import { calculateMarketAnalysis, forecastGrowthYears, normalizeMarketSizeAnalysis, remainingYearRatio } from "../lib/pms/marketAnalysis.js";
 import { calculateProjectPromotionCost, projectPromotionTotalExpectedCost } from "../lib/pms/projectPromotion.js";
 
 const fixture = {
@@ -23,6 +23,23 @@ test("YTD start date changes Year 1 using both CAGR timing and remaining days wh
   assert.ok(juneForecast < marchForecast);
   assert.equal(forecastGrowthYears("ytd", march, 2025, 1), 3);
   assert.equal(forecastGrowthYears("ytd", june, 2025, 1), 3);
+});
+
+test("market analysis keeps added years and calculates recent 3, recent 5 and full-period CAGR", () => {
+  const totals = [100, 120, 150, 180, 210, 240, 300];
+  const analysis = normalizeMarketSizeAnalysis({
+    marketYears: totals.map((value, index) => ({
+      year: String(2019 + index), productionThousandKrw: String(value), importUsd: ""
+    }))
+  });
+  const result = calculateMarketAnalysis({}, analysis);
+  const cagr = (start, end, years) => ((end / start) ** (1 / years) - 1) * 100;
+
+  assert.equal(analysis.marketYears.length, 7);
+  assert.equal(result.growthYearCount, 7);
+  close(result.cagr3Year, cagr(210, 300, 2));
+  close(result.cagr5Year, cagr(150, 300, 4));
+  close(result.cagrAllYear, cagr(100, 300, 6));
 });
 
 test("batch and minimum order costs retain VAT and permit fees", () => {

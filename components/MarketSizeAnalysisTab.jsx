@@ -321,12 +321,16 @@ export default function MarketSizeAnalysisTab({
   const workingAnalysis = isEditing && draft ? draft : savedAnalysis;
   const calculations = calculateMarketAnalysis(selectedItem, workingAnalysis, normalizedDefaults);
   const promotionReadiness = selectedItem ? projectPromotionReadiness(selectedItem) : null;
-  const growthRateYears = growthRatePeriod === "3y"
-    ? Math.min(3, calculations.growthYearCount)
-    : calculations.growthYearCount;
+  const growthRateYears = growthRatePeriod === "all"
+    ? calculations.growthYearCount
+    : Number(growthRatePeriod.replace("y", ""));
   const selectedGrowthRate = growthRatePeriod === "3y"
     ? calculations.cagr3Year
-    : calculations.cagr5Year;
+    : growthRatePeriod === "5y" ? calculations.cagr5Year : calculations.cagrAllYear;
+  const growthRateLabel = growthRatePeriod === "all"
+    ? (growthRateYears ? `${growthRateYears}개년 전체 연평균 성장률` : "전체 연평균 성장률")
+    : `최근 ${growthRateYears}개년 연평균 성장률`;
+  const requiredGrowthYearCount = growthRatePeriod === "all" ? 2 : growthRateYears;
   const pricingScenarios = Array.isArray(selectedItem?.distributionStructure?.pricingScenarios)
     ? selectedItem.distributionStructure.pricingScenarios
     : [];
@@ -424,7 +428,7 @@ export default function MarketSizeAnalysisTab({
     const marketMetrics = [
       ["기준 시장 규모", formatCompactWon(calculations.latestYear?.totalKrw)],
       ["평균 시장 규모", formatCompactWon(calculations.averageMarketKrw)],
-      [`${growthRateYears || "-"}개년 연평균 성장률`, formatDecimal(selectedGrowthRate, 2, "%")],
+      [growthRateLabel, formatDecimal(selectedGrowthRate, 2, "%")],
       ["전국 예상 공급수량", formatCount(calculations.marketUnitCount)],
       ["참약사 약국 점유율", formatDecimal(calculations.pharmacyShareRate, 2, "%")],
       ["침투 예상 가맹약국", formatCount(calculations.activeChainPharmacies, "개소")],
@@ -484,7 +488,7 @@ export default function MarketSizeAnalysisTab({
       forecastRows,
       batchMetricRows: pairRows(batchMetrics),
       scenarioMetricRows: pairRows(scenarioMetrics),
-      html: `<div class="report"><h1>시장 규모 분석 보고서</h1><h2>${escapeReportMarkup(getItemLabel(selectedItem))}</h2><p>${escapeReportMarkup(selectedItem.manufacturer || "제조사 미입력")} · ${escapeReportMarkup(categoryLabelById[selectedItem.category] || selectedItem.category)} · 검토결과 ${escapeReportMarkup(marketDecisionLabel(selectedItem.marketDecisionStatus))} · 생성 ${escapeReportMarkup(new Date().toLocaleString("ko-KR"))}</p><h3>최근 5개년 시장 실적</h3>${htmlTable(["연도", "생산실적(천원)", "수입실적(USD)", "합산 시장규모", "성장률 포함"], yearRows)}<h3>분석 조건</h3>${htmlTable(["조건", "값", "조건", "값"], pairRows(conditions))}<h3>시장 환산 및 약국 침투</h3>${htmlTable(["지표", "값", "지표", "값"], pairRows(marketMetrics))}<h3>성장률 반영 예상 소진 및 손익</h3>${htmlTable(["기간", "기준일", "예상 소진수량", "기대 매출", "매출총이익", "금융비용 차감"], forecastRows)}<h3>배치 소진 및 금융비용</h3>${htmlTable(["지표", "값", "지표", "값"], pairRows(batchMetrics))}<h3>조정 시나리오 기댓값</h3>${htmlTable(["지표", "값", "지표", "값"], pairRows(scenarioMetrics))}</div>`
+      html: `<div class="report"><h1>시장 규모 분석 보고서</h1><h2>${escapeReportMarkup(getItemLabel(selectedItem))}</h2><p>${escapeReportMarkup(selectedItem.manufacturer || "제조사 미입력")} · ${escapeReportMarkup(categoryLabelById[selectedItem.category] || selectedItem.category)} · 검토결과 ${escapeReportMarkup(marketDecisionLabel(selectedItem.marketDecisionStatus))} · 생성 ${escapeReportMarkup(new Date().toLocaleString("ko-KR"))}</p><h3>최근 ${calculations.yearResults.length}개년 시장 실적</h3>${htmlTable(["연도", "생산실적(천원)", "수입실적(USD)", "합산 시장규모", "성장률 포함"], yearRows)}<h3>분석 조건</h3>${htmlTable(["조건", "값", "조건", "값"], pairRows(conditions))}<h3>시장 환산 및 약국 침투</h3>${htmlTable(["지표", "값", "지표", "값"], pairRows(marketMetrics))}<h3>성장률 반영 예상 소진 및 손익</h3>${htmlTable(["기간", "기준일", "예상 소진수량", "기대 매출", "매출총이익", "금융비용 차감"], forecastRows)}<h3>배치 소진 및 금융비용</h3>${htmlTable(["지표", "값", "지표", "값"], pairRows(batchMetrics))}<h3>조정 시나리오 기댓값</h3>${htmlTable(["지표", "값", "지표", "값"], pairRows(scenarioMetrics))}</div>`
     };
   };
 
@@ -523,7 +527,7 @@ export default function MarketSizeAnalysisTab({
         context.fillText(title, margin, y);
         y = drawCanvasTable(context, { headers, rows, widths, x: margin, y: y + 36 }) + 34;
       };
-      drawSection("최근 5개년 시장 실적", ["연도", "생산실적(천원)", "수입실적(USD)", "합산 시장규모", "성장률 포함"], report.yearRows, [260, 500, 500, 560, 300]);
+      drawSection(`최근 ${calculations.yearResults.length}개년 시장 실적`, ["연도", "생산실적(천원)", "수입실적(USD)", "합산 시장규모", "성장률 포함"], report.yearRows, [260, 500, 500, 560, 300]);
       drawSection("분석 조건", ["조건", "값", "조건", "값"], report.conditionRows, [480, 580, 480, 580]);
       drawSection("시장 환산 및 약국 침투", ["지표", "값", "지표", "값"], report.marketMetricRows, [560, 500, 560, 500]);
       drawSection("성장률 반영 예상 소진 및 손익", ["기간", "기준일", "예상 소진수량", "기대 매출", "매출총이익", "금융비용 차감"], report.forecastRows, [240, 460, 340, 360, 360, 360]);
@@ -608,6 +612,20 @@ export default function MarketSizeAnalysisTab({
       marketYears: workingAnalysis.marketYears.map((entry) => (
         String(entry.id) === String(yearId) ? { ...entry, ...patch } : entry
       ))
+    });
+  };
+
+  const addMarketYear = () => {
+    const years = workingAnalysis.marketYears.map((entry) => Number(entry.year)).filter(Number.isInteger);
+    const year = years.length ? Math.min(...years) - 1 : new Date().getFullYear() - 1;
+    updateDraft({
+      marketYears: [...workingAnalysis.marketYears, {
+        id: `market_year_${Date.now()}_${workingAnalysis.marketYears.length}`,
+        year: String(year),
+        productionThousandKrw: "",
+        importUsd: "",
+        includeInGrowthRate: true
+      }]
     });
   };
 
@@ -901,7 +919,7 @@ export default function MarketSizeAnalysisTab({
                 <section style={panelStyle}>
                   <div className="section-title">
                     <div>
-                      <strong>최근 5개년 시장 실적</strong>
+                      <strong>최근 {calculations.yearResults.length}개년 시장 실적</strong>
                       <span>생산실적 × 1,000원 + 수입실적 × 기준 환율 · 출처: 식품의약품안전처 의약품안전나라 공개 데이터</span>
                     </div>
                     <label>
@@ -962,6 +980,7 @@ export default function MarketSizeAnalysisTab({
                       </div>
                     ))}
                   </div>
+                  {isEditing && <div style={{ padding: "0 12px 12px" }}><button type="button" onClick={addMarketYear} style={secondaryButtonStyle}>연도 추가</button></div>}
                 </section>
 
                 <section style={panelStyle}>
@@ -1038,7 +1057,8 @@ export default function MarketSizeAnalysisTab({
                   </div>
                   <div className="growth-period-control" role="group" aria-label="연평균 성장률 기간">
                     {[
-                      ["all", "최대 5개년"],
+                      ["all", calculations.growthYearCount ? `전체 ${calculations.growthYearCount}개년` : "입력 전체"],
+                      ["5y", "최근 5개년"],
                       ["3y", "최근 3개년"]
                     ].map(([period, label]) => {
                       const active = growthRatePeriod === period;
@@ -1073,16 +1093,16 @@ export default function MarketSizeAnalysisTab({
                     formula="최신 연도 생산실적(천원) × 1,000 + 최신 연도 수입실적(USD) × 기준 환율"
                   />
                   <Metric
-                    label="5개년 평균 시장 규모"
+                    label={calculations.populatedYearCount ? `${calculations.populatedYearCount}개년 평균 시장 규모` : "평균 시장 규모"}
                     value={formatCompactWon(calculations.averageMarketKrw)}
                     formula="값이 입력된 각 연도 합산 시장 규모의 합 ÷ 입력 연도 수"
                   />
                   <Metric
-                    label={growthRateYears > 0 ? `${growthRateYears}개년 연평균 성장률` : "연평균 성장률"}
+                    label={growthRateLabel}
                     value={formatDecimal(selectedGrowthRate, 2, "%")}
                     subtext={selectedGrowthRate === null
-                      ? "성장률 포함 실적을 2개년 이상 선택해주세요."
-                      : (growthRatePeriod === "3y" ? "포함된 최근 3개 실적 기준" : `포함 선택한 ${growthRateYears}개 실적 기준`)}
+                      ? `성장률 포함 실적을 ${requiredGrowthYearCount}개년 이상 선택해주세요.`
+                      : (growthRatePeriod === "all" ? `포함 선택한 전체 ${growthRateYears}개 실적 기준` : `포함된 최근 ${growthRateYears}개 실적 기준`)}
                     tone={selectedGrowthRate === null ? "default" : (selectedGrowthRate >= 0 ? "positive" : "warning")}
                     formula="(마지막 포함 연도 시장 규모 ÷ 첫 포함 연도 시장 규모)^(1 ÷ 연도 간격) - 1"
                   />
