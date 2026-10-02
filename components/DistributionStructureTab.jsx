@@ -11,7 +11,7 @@ import {
   composeDistributionReportSections,
   normalizeDistributionExportSections
 } from "@/lib/pms/distributionExport";
-import { normalizePricingScenario, clonePricingScenario, calculateBonusPromotion, calculateDisplayedPriceTotal, bonusPromotionQuantityLabel, pricingScenarioGroup } from "@/lib/pms/pricingScenarios";
+import { normalizePricingScenario, clonePricingScenario, calculateBonusPromotion, calculateDisplayedPriceTotal, calculateProfitBreakdown, bonusPromotionQuantityLabel, pricingScenarioGroup } from "@/lib/pms/pricingScenarios";
 import {
   marketDecisionBadgeStyle,
   marketDecisionLabel
@@ -358,6 +358,7 @@ export default function DistributionStructureTab({
     : chamyaksaSellingPrice - baseAmounts.finalUnitCost;
   const appliedQuantity = parseNumber(activePricingScenario?.minimumQuantity);
   const isBonusPromotion = activePricingScenario?.scenarioType === "bonus";
+  const sellingAdminExpenseRate = parseNumber(activePricingScenario?.sellingAdminExpenseRate);
   const bonusPromotion = calculateBonusPromotion({
     unitCost: baseAmounts.finalUnitCost,
     sellingPrice: chamyaksaSellingPrice,
@@ -366,11 +367,15 @@ export default function DistributionStructureTab({
   });
   const effectiveChamyaksaSellingPrice = isBonusPromotion ? bonusPromotion.effectiveUnitPrice : chamyaksaSellingPrice;
   const chamyaksaMarginAmountExcludingVat = chamyaksaMarginAmount === null ? null : chamyaksaMarginAmount / 1.1;
-  const totalChamyaksaMarginAmount = isBonusPromotion ? bonusPromotion.totalMargin
-    : (chamyaksaMarginAmount === null || !appliedQuantity ? null : chamyaksaMarginAmount * appliedQuantity);
-  const totalChamyaksaMarginAmountExcludingVat = totalChamyaksaMarginAmount === null ? null : totalChamyaksaMarginAmount / 1.1;
   const pharmacyPurchaseTotal = isBonusPromotion ? bonusPromotion.purchaseTotal
     : calculateDisplayedPriceTotal(chamyaksaSellingPrice, appliedQuantity);
+  const costOfGoods = isBonusPromotion ? bonusPromotion.totalCost
+    : (baseAmounts.finalUnitCost !== null && appliedQuantity > 0 ? baseAmounts.finalUnitCost * appliedQuantity : null);
+  const pricingProfit = calculateProfitBreakdown({
+    revenue: pharmacyPurchaseTotal,
+    costOfGoods,
+    sellingAdminExpenseRate
+  });
   const pharmacySellingPrice = parseNumber(distribution.pharmacySellingPrice);
   const pharmacyMarginAmount = pharmacySellingPrice === null || effectiveChamyaksaSellingPrice === null
     ? null
@@ -383,8 +388,9 @@ export default function DistributionStructureTab({
   const bundleItems = bundleCandidateItems.filter((item) => bundleItemIdSet.has(String(item.id)));
   const bundleSellingPrice = parseNumber(activePricingScenario?.bundleSellingPrice);
   const bundleQuantity = appliedQuantity && appliedQuantity > 0 ? appliedQuantity : null;
-  const bundleCostTotal = bundleQuantity && bundleItems.length > 0
-    ? bundleItems.reduce((sum, item) => sum + (getBaseAmounts(item).finalUnitCost || 0), 0) * bundleQuantity
+  const bundleProductCosts = bundleItems.map((item) => getBaseAmounts(item).finalUnitCost);
+  const bundleCostTotal = bundleQuantity && bundleProductCosts.length > 0 && bundleProductCosts.every(Number.isFinite)
+    ? bundleProductCosts.reduce((sum, value) => sum + value, 0) * bundleQuantity
     : null;
   const bundleTotalUnits = bundleQuantity && bundleItems.length > 0
     ? bundleQuantity * bundleItems.length
@@ -392,16 +398,16 @@ export default function DistributionStructureTab({
   const bundleCostPerUnit = bundleCostTotal !== null && bundleTotalUnits
     ? bundleCostTotal / bundleTotalUnits
     : null;
-  const bundleMarginAmount = bundleSellingPrice === null || bundleCostTotal === null
-    ? null
-    : bundleSellingPrice - bundleCostTotal;
-  const bundleMarginAmountExcludingVat = bundleMarginAmount === null ? null : bundleMarginAmount / 1.1;
+  const bundleProfit = calculateProfitBreakdown({
+    revenue: bundleSellingPrice,
+    costOfGoods: bundleCostTotal,
+    sellingAdminExpenseRate
+  });
+  const bundleMarginAmount = bundleProfit.grossProfit;
   const bundleSellingPricePerUnit = bundleSellingPrice !== null && bundleTotalUnits
     ? bundleSellingPrice / bundleTotalUnits
     : null;
-  const bundleMarginRate = bundleSellingPrice && bundleMarginAmount !== null
-    ? (bundleMarginAmount / bundleSellingPrice) * 100
-    : null;
+  const bundleMarginRate = bundleProfit.grossProfitRate;
   const categoryLabelById = Object.fromEntries(categories.map((category) => [category.id, category.label]));
 
   const createDistributionReport = (sectionSelection = {}) => {
@@ -412,11 +418,16 @@ export default function DistributionStructureTab({
         const selectedIds = new Set((scenario.bundleItemIds || []).map(String));
         const selectedProducts = items.filter((item) => selectedIds.has(String(item.id)));
         const totalUnits = quantity && selectedProducts.length > 0 ? quantity * selectedProducts.length : null;
-        const cost = quantity
-          ? selectedProducts.reduce((sum, item) => sum + (getBaseAmounts(item).finalUnitCost || 0), 0) * quantity
+        const productCosts = selectedProducts.map((item) => getBaseAmounts(item).finalUnitCost);
+        const cost = quantity && productCosts.length > 0 && productCosts.every(Number.isFinite)
+          ? productCosts.reduce((sum, value) => sum + value, 0) * quantity
           : null;
         const sellingPrice = parseNumber(scenario.bundleSellingPrice);
-        const margin = sellingPrice !== null && cost !== null ? sellingPrice - cost : null;
+        const profit = calculateProfitBreakdown({
+          revenue: sellingPrice,
+          costOfGoods: cost,
+          sellingAdminExpenseRate: parseNumber(scenario.sellingAdminExpenseRate)
+        });
         return {
           type: "묶음 판매",
           label: scenario.label,
@@ -427,14 +438,11 @@ export default function DistributionStructureTab({
           quantity: quantity && totalUnits
             ? `${selectedProducts.length}종 × 각 ${quantity.toLocaleString("ko-KR")}개 = 총 ${totalUnits.toLocaleString("ko-KR")}개`
             : `${selectedProducts.length}종 · 수량 미입력`,
-          cost,
+          cost: cost !== null && totalUnits ? cost / totalUnits : null,
           sellingPrice,
           unitSellingPrice: sellingPrice !== null && totalUnits ? sellingPrice / totalUnits : null,
-          margin,
-          marginExVat: margin === null ? null : margin / 1.1,
-          marginRate: sellingPrice && margin !== null ? (margin / sellingPrice) * 100 : null,
+          ...profit,
           pharmacySellingPrice: null,
-          purchaseTotal: sellingPrice
         };
       }
       const sellingPrice = calculateSellingPriceFromMarginRate(baseAmounts.finalUnitCost, parseNumber(scenario.chamyaksaMarginRate));
@@ -443,23 +451,31 @@ export default function DistributionStructureTab({
           unitCost: baseAmounts.finalUnitCost, sellingPrice,
           paidQuantity: scenario.minimumQuantity, bonusQuantity: scenario.bonusQuantity
         });
+        const profit = calculateProfitBreakdown({
+          revenue: bonus.purchaseTotal,
+          costOfGoods: bonus.totalCost,
+          sellingAdminExpenseRate: parseNumber(scenario.sellingAdminExpenseRate)
+        });
         return {
           type: "할증 판매",
           label: scenario.label,
           products: getItemLabel(selectedItem),
           basis: `주문 전체 (증정 포함) · 유상 1개 기준 판매가 ${formatWon(sellingPrice)}`,
           quantity: bonusPromotionQuantityLabel(scenario),
-          cost: bonus.totalCost,
-          sellingPrice: bonus.purchaseTotal,
+          cost: bonus.totalQuantity && bonus.totalCost !== null ? bonus.totalCost / bonus.totalQuantity : null,
+          sellingPrice,
           unitSellingPrice: bonus.effectiveUnitPrice,
-          margin: bonus.totalMargin,
-          marginExVat: bonus.totalMargin === null ? null : bonus.totalMargin / 1.1,
-          marginRate: bonus.marginRate,
+          ...profit,
           pharmacySellingPrice,
-          purchaseTotal: bonus.purchaseTotal
         };
       }
-      const margin = sellingPrice !== null && baseAmounts.finalUnitCost !== null ? sellingPrice - baseAmounts.finalUnitCost : null;
+      const salesRevenue = calculateDisplayedPriceTotal(sellingPrice, quantity);
+      const totalCost = quantity && baseAmounts.finalUnitCost !== null ? baseAmounts.finalUnitCost * quantity : null;
+      const profit = calculateProfitBreakdown({
+        revenue: salesRevenue,
+        costOfGoods: totalCost,
+        sellingAdminExpenseRate: parseNumber(scenario.sellingAdminExpenseRate)
+      });
       return {
         type: "개별 판매",
         label: scenario.label,
@@ -469,19 +485,18 @@ export default function DistributionStructureTab({
         cost: baseAmounts.finalUnitCost,
         sellingPrice,
         unitSellingPrice: sellingPrice,
-        margin,
-        marginExVat: margin === null ? null : margin / 1.1,
-        marginRate: parseNumber(scenario.chamyaksaMarginRate),
+        ...profit,
         pharmacySellingPrice,
-        purchaseTotal: calculateDisplayedPriceTotal(sellingPrice, quantity)
       };
     });
-    const headCells = ["판매 구분", "가격대/프로모션", "적용 제품", "판매·금액 기준", "적용 물량", "공급 원가(VAT 포함)", "참약사 판매가(VAT 포함)", "개당 판매가(VAT 포함)", "마진액(VAT 포함)", "마진액(VAT 미포함)", "마진율", "약국 판매가(VAT 포함)", "약국 구입 총액(VAT 포함)"];
-    const rowHtml = rows.map((row) => `<tr>${[
-      row.type, row.label, row.products || "-", row.basis, row.quantity, formatWon(row.cost), formatWon(row.sellingPrice),
-      formatWon(row.unitSellingPrice), formatWon(row.margin), formatWon(row.marginExVat), formatPercent(row.marginRate),
-      formatWon(row.pharmacySellingPrice), formatWon(row.purchaseTotal)
-    ].map((value) => `<td>${escapeReportMarkup(value)}</td>`).join("")}</tr>`).join("");
+    const headCells = ["판매 구분", "가격대/프로모션", "적용 제품", "판매·금액 기준", "적용 물량", "개당 매출원가(VAT 포함)", "개당 참약사 판매가(VAT 포함)", "총 매출(VAT 포함)", "매출원가(VAT 포함)", "매출이익(VAT 포함)", "매출이익률", "판관비율", "판관비(VAT 포함)", "영업이익(VAT 포함)", "약국 판매가(VAT 포함)"];
+    const rowValues = (row) => [
+      row.type, row.label, row.products || "-", row.basis, row.quantity, formatWon(row.cost), formatWon(row.unitSellingPrice),
+      formatWon(row.salesRevenue), formatWon(row.costOfGoods), formatWon(row.grossProfit), formatPercent(row.grossProfitRate),
+      formatPercent(row.sellingAdminExpenseRate), formatWon(row.sellingAdminExpense), formatWon(row.operatingProfit),
+      formatWon(row.pharmacySellingPrice)
+    ];
+    const rowHtml = rows.map((row) => `<tr>${rowValues(row).map((value) => `<td>${escapeReportMarkup(value)}</td>`).join("")}</tr>`).join("");
     const comparisonQuotes = comparisonGroupItems.map((item) => {
       const itemDistribution = getDistribution(item);
       const itemPricingScenarios = getPricingScenariosForItem(item, items);
@@ -561,7 +576,9 @@ export default function DistributionStructureTab({
     const comparisonHtml = `<h3>견적·경쟁제품 비교</h3><h4>제조사 견적 비교${distribution.comparisonCategory ? ` · ${escapeReportMarkup(distribution.comparisonCategory)}` : ""}</h4><table><thead><tr>${comparisonQuoteHeaders.map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${comparisonQuoteRows}</tbody></table><h4>경쟁제품 비교</h4><table><thead><tr>${["기준일", "경쟁제품명", "판매처", "포장단위", "판매구간 및 단가", "비고"].map((value) => `<th>${value}</th>`).join("")}</tr></thead><tbody>${competitorRows || '<tr><td colspan="6">등록된 경쟁제품 없음</td></tr>'}</tbody></table>`;
     return {
       title: getItemLabel(selectedItem),
+      headers: headCells,
       rows,
+      rowValues: rows.map(rowValues),
       comparisonQuotes,
       competitors,
       selectedSections,
@@ -614,9 +631,9 @@ export default function DistributionStructureTab({
         context.font = "700 22px 'Malgun Gothic', Arial, sans-serif";
         context.fillText("판매가 및 마진 설정", margin, y + 34);
         y = drawCanvasTable(context, {
-          headers: ["판매 구분", "가격대/프로모션", "적용 제품", "판매·금액 기준", "적용 물량", "공급 원가(VAT 포함)", "참약사 판매가(VAT 포함)", "개당 판매가(VAT 포함)", "마진액 VAT 포함", "마진액 VAT 미포함", "마진율", "약국 판매가(VAT 포함)", "약국 구입 총액(VAT 포함)"],
-          rows: report.rows.map((row) => [row.type, row.label, row.products || "-", row.basis, row.quantity, formatWon(row.cost), formatWon(row.sellingPrice), formatWon(row.unitSellingPrice), formatWon(row.margin), formatWon(row.marginExVat), formatPercent(row.marginRate), formatWon(row.pharmacySellingPrice), formatWon(row.purchaseTotal)]),
-          widths: [105, 130, 260, 185, 170, 145, 160, 145, 145, 150, 100, 140, 155], x: margin, y: y + 70
+          headers: report.headers,
+          rows: report.rowValues,
+          widths: [110, 130, 220, 170, 160, 130, 145, 145, 140, 145, 105, 100, 130, 140, 140], x: margin, y: y + 70
         });
       }
       if (report.selectedSections.comparison) {
@@ -1487,7 +1504,7 @@ export default function DistributionStructureTab({
                         </div>
                       </div>
                       <div className="calculated-cell">
-                        <span>결합 공급 원가 (VAT 포함)</span>
+                        <span>매출원가 (VAT 포함)</span>
                         <strong>{formatWon(bundleCostTotal)}</strong>
                         <small style={{ color: "#64748b", fontWeight: 700 }}>
                           {bundleTotalUnits ? `총 ${bundleTotalUnits.toLocaleString("ko-KR")}개 기준` : "최소 구매수량 입력 시 계산"}
@@ -1501,14 +1518,19 @@ export default function DistributionStructureTab({
                         </small>
                       </div>
                       <div className="calculated-cell">
-                        <span>참약사 묶음 총 마진액 (VAT 포함)</span>
-                        <strong>{formatWon(bundleMarginAmount)}</strong>
-                        <small style={{ color: "#64748b", fontWeight: 700 }}>VAT 미포함 {formatWon(bundleMarginAmountExcludingVat)}</small>
+                        <span>총 매출 (VAT 포함)</span>
+                        <strong>{formatWon(bundleProfit.salesRevenue)}</strong>
+                        <small style={{ color: "#64748b", fontWeight: 700 }}>묶음 일괄 판매가 기준</small>
                       </div>
                       <div className="calculated-cell">
-                        <span>참약사 묶음 실질 마진율</span>
+                        <span>매출이익 (VAT 포함)</span>
+                        <strong style={{ color: bundleMarginAmount < 0 ? "#dc2626" : undefined }}>{formatWon(bundleMarginAmount)}</strong>
+                        <small style={{ color: "#64748b", fontWeight: 700 }}>총 매출 − 매출원가</small>
+                      </div>
+                      <div className="calculated-cell">
+                        <span>매출이익률</span>
                         <strong>{formatPercent(bundleMarginRate)}</strong>
-                        <small style={{ color: "#64748b", fontWeight: 700 }}>총 마진액 ÷ 묶음 판매가</small>
+                        <small style={{ color: "#64748b", fontWeight: 700 }}>매출이익 ÷ 총 매출</small>
                       </div>
                       <div className="calculated-cell">
                         <span>묶음 개당 판매가 (VAT 포함)</span>
@@ -1516,11 +1538,26 @@ export default function DistributionStructureTab({
                         <small style={{ color: "#64748b", fontWeight: 700 }}>묶음 일괄 판매가 ÷ 묶음 총 판매수량</small>
                       </div>
                       <div>
-                        <label style={labelStyle}>묶음 일괄 판매가 (약국 구입 총액, VAT 포함)</label>
+                        <label style={labelStyle}>묶음 총 매출 설정 (약국 구입 총액, VAT 포함)</label>
                         <input value={activePricingScenario?.bundleSellingPrice || ""} onChange={(event) => updatePricingScenario({ bundleSellingPrice: event.target.value })} inputMode="numeric" placeholder="예: 3종 합계 120,000원" style={inputStyle} />
                         <div style={{ marginTop: 5, color: "#64748b", fontSize: 11, fontWeight: 700 }}>
                           {bundleTotalUnits ? `${bundleItems.length}종 × 각 ${bundleQuantity.toLocaleString("ko-KR")}개 · 총 ${bundleTotalUnits.toLocaleString("ko-KR")}개` : "선택 제품 전체 묶음 금액"}
                         </div>
+                      </div>
+                      <div>
+                        <label style={labelStyle}>판관비 비율 (매출이익 대비, %)</label>
+                        <input type="number" min="0" step="0.01" value={activePricingScenario?.sellingAdminExpenseRate ?? "0"} onChange={(event) => updatePricingScenario({ sellingAdminExpenseRate: event.target.value })} placeholder="예: 25" style={inputStyle} />
+                        <div style={{ marginTop: 5, color: "#64748b", fontSize: 11 }}>이 가격대 탭에 저장 · 판관비 = 매출이익 × 비율</div>
+                      </div>
+                      <div className="calculated-cell">
+                        <span>판관비 (VAT 포함)</span>
+                        <strong>{formatWon(bundleProfit.sellingAdminExpense)}</strong>
+                        <small style={{ color: "#64748b" }}>매출이익에서 차감</small>
+                      </div>
+                      <div className="calculated-cell">
+                        <span>최종 영업이익 (VAT 포함)</span>
+                        <strong style={{ color: bundleProfit.operatingProfit < 0 ? "#dc2626" : "#047857" }}>{formatWon(bundleProfit.operatingProfit)}</strong>
+                        <small style={{ color: "#64748b" }}>매출이익 − 판관비</small>
                       </div>
                     </>
                   ) : (
@@ -1570,11 +1607,48 @@ export default function DistributionStructureTab({
                     <small style={{ color: "#64748b", fontWeight: 700 }}>약국 사입 금액</small>
                   </div>
                   <div className="calculated-cell">
-                    <span>{isBonusPromotion ? "할증 반영 참약사 총 마진액 (VAT 포함)" : "적용물량 참약사 총 마진액 (VAT 포함)"}</span>
-                    <strong style={{ color: totalChamyaksaMarginAmount < 0 ? "#dc2626" : undefined }}>{formatWon(totalChamyaksaMarginAmount)}</strong>
+                    <span>총 매출 (약국 구입 총액, VAT 포함)</span>
+                    <strong>{formatWon(pharmacyPurchaseTotal)}</strong>
                     <small style={{ color: "#64748b", fontWeight: 700 }}>
-                      {appliedQuantity ? `VAT 미포함 ${formatWon(totalChamyaksaMarginAmountExcludingVat)}` : "적용 물량 입력 시 계산"}
+                      {appliedQuantity ? `참약사 판매가 × ${appliedQuantity.toLocaleString("ko-KR")}개${isBonusPromotion ? " (유상 구매분만 결제)" : ""}` : "적용 물량 입력 시 계산"}
                     </small>
+                  </div>
+                  <div className="calculated-cell">
+                    <span>매출원가 (VAT 포함)</span>
+                    <strong>{formatWon(pricingProfit.costOfGoods)}</strong>
+                    <small style={{ color: "#64748b", fontWeight: 700 }}>
+                      {isBonusPromotion ? "유상 + 증정 수량 기준" : appliedQuantity > 0 ? `${appliedQuantity.toLocaleString("ko-KR")}개 기준` : "적용 물량 입력 시 계산"}
+                    </small>
+                  </div>
+                  <div className="calculated-cell">
+                    <span>매출이익 (VAT 포함)</span>
+                    <strong style={{ color: pricingProfit.grossProfit < 0 ? "#dc2626" : undefined }}>{formatWon(pricingProfit.grossProfit)}</strong>
+                    <small style={{ color: "#64748b", fontWeight: 700 }}>총 매출 − 매출원가</small>
+                  </div>
+                  <div className="calculated-cell">
+                    <span>매출이익률</span>
+                    <strong>{formatPercent(pricingProfit.grossProfitRate)}</strong>
+                    <small style={{ color: "#64748b", fontWeight: 700 }}>매출이익 ÷ 총 매출</small>
+                  </div>
+                  <div>
+                    <label style={labelStyle}>판관비 비율 (매출이익 대비, %)</label>
+                    <input
+                      type="number" min="0" step="0.01"
+                      value={activePricingScenario?.sellingAdminExpenseRate ?? "0"}
+                      onChange={(event) => updatePricingScenario({ sellingAdminExpenseRate: event.target.value })}
+                      placeholder="예: 25" style={inputStyle}
+                    />
+                    <div style={{ marginTop: 5, color: "#64748b", fontSize: 11 }}>이 가격대 탭에 저장 · 판관비 = 매출이익 × 비율</div>
+                  </div>
+                  <div className="calculated-cell">
+                    <span>판관비 (VAT 포함)</span>
+                    <strong>{formatWon(pricingProfit.sellingAdminExpense)}</strong>
+                    <small style={{ color: "#64748b" }}>매출이익에서 차감</small>
+                  </div>
+                  <div className="calculated-cell">
+                    <span>최종 영업이익 (VAT 포함)</span>
+                    <strong style={{ color: pricingProfit.operatingProfit < 0 ? "#dc2626" : "#047857" }}>{formatWon(pricingProfit.operatingProfit)}</strong>
+                    <small style={{ color: "#64748b" }}>매출이익 − 판관비</small>
                   </div>
                   <div>
                     <label style={labelStyle}>약국 판매가 (VAT 포함)</label>
@@ -1598,24 +1672,12 @@ export default function DistributionStructureTab({
                       {formatWon(pharmacyMarginAmount)}
                     </strong>
                   </div>
-                  <div className="calculated-cell">
-                    <span>약국 구입 총액 (VAT 포함)</span>
-                    <strong>{formatWon(pharmacyPurchaseTotal)}</strong>
-                    <small style={{ color: "#64748b", fontWeight: 700 }}>
-                      {appliedQuantity ? `참약사 판매가 × ${appliedQuantity.toLocaleString("ko-KR")}개${isBonusPromotion ? " (유상 구매분만 결제)" : ""}` : "적용 물량 입력 시 계산"}
-                    </small>
-                  </div>
                   {isBonusPromotion && (
                     <>
                       <div className="calculated-cell">
                         <span>최종 개당 공급가격 (할증 반영, VAT 포함)</span>
                         <strong>{formatWon(bonusPromotion.effectiveUnitPrice)}</strong>
                         <small style={{ color: "#64748b" }}>약국 결제 총액 ÷ 총 공급수량 (증정 포함)</small>
-                      </div>
-                      <div className="calculated-cell">
-                        <span>참약사 실질 마진율 (할증 반영)</span>
-                        <strong style={{ color: bonusPromotion.totalMargin < 0 ? "#dc2626" : undefined }}>{formatPercent(bonusPromotion.marginRate)}</strong>
-                        <small style={{ color: "#64748b" }}>총 마진액 ÷ 약국 결제 총액</small>
                       </div>
                       <div className="calculated-cell">
                         <span>총 공급 원가 (증정 포함, VAT 포함)</span>

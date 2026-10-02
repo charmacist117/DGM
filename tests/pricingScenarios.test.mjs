@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizePricingScenario, clonePricingScenario, calculateBonusPromotion, calculateDisplayedPriceTotal, bonusPromotionQuantityLabel, pricingScenarioGroup } from "../lib/pms/pricingScenarios.js";
+import { normalizePricingScenario, clonePricingScenario, calculateBonusPromotion, calculateDisplayedPriceTotal, calculateProfitBreakdown, bonusPromotionQuantityLabel, pricingScenarioGroup } from "../lib/pms/pricingScenarios.js";
 import { calculateMarketAnalysis } from "../lib/pms/marketAnalysis.js";
 
 const calculate = (patch = {}) => calculateBonusPromotion({
@@ -22,6 +22,33 @@ test("totals use the displayed whole-won unit price", () => {
   assert.equal(calculateDisplayedPriceTotal(1200.4, 10), 12000);
   assert.equal(calculateDisplayedPriceTotal(1200, 0), null);
   assert.equal(calculate({ sellingPrice: 1200.4 }).purchaseTotal, 12000);
+});
+test("profit breakdown calculates gross profit, persisted selling/admin expense and operating profit", () => {
+  const result = calculateProfitBreakdown({ revenue: "1,000", costOfGoods: 600, sellingAdminExpenseRate: "25" });
+  assert.equal(result.salesRevenue, 1000);
+  assert.equal(result.costOfGoods, 600);
+  assert.equal(result.grossProfit, 400);
+  assert.equal(result.grossProfitRate, 40);
+  assert.equal(result.sellingAdminExpense, 100);
+  assert.equal(result.operatingProfit, 300);
+});
+test("financial subtotals use whole-won displayed figures", () => {
+  const result = calculateProfitBreakdown({ revenue: 1000.4, costOfGoods: 600.5, sellingAdminExpenseRate: 25 });
+  assert.equal(result.salesRevenue, 1000);
+  assert.equal(result.costOfGoods, 601);
+  assert.equal(result.grossProfit, 399);
+  assert.equal(result.sellingAdminExpense, 100);
+  assert.equal(result.operatingProfit, 299);
+});
+test("expense ratio cannot turn a gross loss into negative expenses", () => {
+  const result = calculateProfitBreakdown({ revenue: 500, costOfGoods: 600, sellingAdminExpenseRate: 25 });
+  assert.equal(result.sellingAdminExpense, 0);
+  assert.equal(result.operatingProfit, -100);
+});
+test("invalid expense ratios do not produce an operating profit", () => {
+  const result = calculateProfitBreakdown({ revenue: 1000, costOfGoods: 600, sellingAdminExpenseRate: -5 });
+  assert.equal(result.sellingAdminExpense, null);
+  assert.equal(result.operatingProfit, null);
 });
 test("zero bonus keeps the ordinary unit price and margin", () => {
   const result = calculate({ bonusQuantity: 0 });
@@ -61,12 +88,13 @@ test("zero price has no percentage denominator", () => {
 test("comma-separated values are accepted", () => {
   assert.equal(calculate({ paidQuantity: "1,000", bonusQuantity: "200" }).totalQuantity, 1200);
 });
-test("bonus type, counts and empty draft name survive normalization and JSON persistence", () => {
-  const original = normalizePricingScenario({ id: "b1", label: "", scenarioType: "bonus", minimumQuantity: 10, bonusQuantity: 2 });
+test("bonus type, counts, selling/admin expense and empty draft name survive normalization and JSON persistence", () => {
+  const original = normalizePricingScenario({ id: "b1", label: "", scenarioType: "bonus", minimumQuantity: 10, bonusQuantity: 2, sellingAdminExpenseRate: 17.5 });
   const saved = normalizePricingScenario(JSON.parse(JSON.stringify(original)));
   assert.deepEqual(saved, original);
   assert.equal(saved.scenarioType, "bonus");
   assert.equal(saved.bonusQuantity, "2");
+  assert.equal(saved.sellingAdminExpenseRate, "17.5");
   assert.equal(saved.label, "");
 });
 test("bundle ordering survives the same save pipeline", () => {
@@ -82,6 +110,7 @@ test("ordinary and bonus pricing tabs can be copied but bundle tabs cannot", () 
     scenarioType: "bonus",
     minimumQuantity: "10",
     bonusQuantity: "2",
+    sellingAdminExpenseRate: "15.25",
     bundleItemIds: ["source-product", "linked-product"],
     bundleOrder: 4
   });
@@ -91,6 +120,7 @@ test("ordinary and bonus pricing tabs can be copied but bundle tabs cannot", () 
   assert.equal(copy.label, source.label);
   assert.equal(copy.minimumQuantity, source.minimumQuantity);
   assert.equal(copy.bonusQuantity, source.bonusQuantity);
+  assert.equal(copy.sellingAdminExpenseRate, source.sellingAdminExpenseRate);
   assert.deepEqual(copy.bundleItemIds, []);
   assert.equal(copy.bundleOrder, null);
   assert.deepEqual(source.bundleItemIds, ["source-product", "linked-product"]);
