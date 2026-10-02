@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizePricingScenario, clonePricingScenario, calculateBonusPromotion, calculateDisplayedPriceTotal, calculateProfitBreakdown, bonusPromotionQuantityLabel, pricingScenarioGroup } from "../lib/pms/pricingScenarios.js";
+import { normalizePricingScenario, clonePricingScenario, calculateBonusPromotion, calculateDisplayedPriceTotal, calculateProfitBreakdown, getSellingAdminExpenseRate, bonusPromotionQuantityLabel, pricingScenarioGroup } from "../lib/pms/pricingScenarios.js";
 import { calculateMarketAnalysis } from "../lib/pms/marketAnalysis.js";
 
 const calculate = (patch = {}) => calculateBonusPromotion({
@@ -50,6 +50,11 @@ test("invalid expense ratios do not produce an operating profit", () => {
   assert.equal(result.sellingAdminExpense, null);
   assert.equal(result.operatingProfit, null);
 });
+test("selling/admin expense ratio is shared by a product and migrates legacy tier values", () => {
+  assert.equal(getSellingAdminExpenseRate({ sellingAdminExpenseRate: "0", pricingScenarios: [{ sellingAdminExpenseRate: "25" }] }), "0");
+  assert.equal(getSellingAdminExpenseRate({ pricingScenarios: [{ sellingAdminExpenseRate: "0" }, { sellingAdminExpenseRate: "15.5" }] }), "15.5");
+  assert.equal(getSellingAdminExpenseRate({ pricingScenarios: [{ sellingAdminExpenseRate: "0" }] }), "0");
+});
 test("zero bonus keeps the ordinary unit price and margin", () => {
   const result = calculate({ bonusQuantity: 0 });
   assert.equal(result.effectiveUnitPrice, 1000);
@@ -88,13 +93,12 @@ test("zero price has no percentage denominator", () => {
 test("comma-separated values are accepted", () => {
   assert.equal(calculate({ paidQuantity: "1,000", bonusQuantity: "200" }).totalQuantity, 1200);
 });
-test("bonus type, counts, selling/admin expense and empty draft name survive normalization and JSON persistence", () => {
-  const original = normalizePricingScenario({ id: "b1", label: "", scenarioType: "bonus", minimumQuantity: 10, bonusQuantity: 2, sellingAdminExpenseRate: 17.5 });
+test("bonus type, counts and empty draft name survive normalization and JSON persistence", () => {
+  const original = normalizePricingScenario({ id: "b1", label: "", scenarioType: "bonus", minimumQuantity: 10, bonusQuantity: 2 });
   const saved = normalizePricingScenario(JSON.parse(JSON.stringify(original)));
   assert.deepEqual(saved, original);
   assert.equal(saved.scenarioType, "bonus");
   assert.equal(saved.bonusQuantity, "2");
-  assert.equal(saved.sellingAdminExpenseRate, "17.5");
   assert.equal(saved.label, "");
 });
 test("bundle ordering survives the same save pipeline", () => {
@@ -110,7 +114,6 @@ test("ordinary and bonus pricing tabs can be copied but bundle tabs cannot", () 
     scenarioType: "bonus",
     minimumQuantity: "10",
     bonusQuantity: "2",
-    sellingAdminExpenseRate: "15.25",
     bundleItemIds: ["source-product", "linked-product"],
     bundleOrder: 4
   });
@@ -120,7 +123,6 @@ test("ordinary and bonus pricing tabs can be copied but bundle tabs cannot", () 
   assert.equal(copy.label, source.label);
   assert.equal(copy.minimumQuantity, source.minimumQuantity);
   assert.equal(copy.bonusQuantity, source.bonusQuantity);
-  assert.equal(copy.sellingAdminExpenseRate, source.sellingAdminExpenseRate);
   assert.deepEqual(copy.bundleItemIds, []);
   assert.equal(copy.bundleOrder, null);
   assert.deepEqual(source.bundleItemIds, ["source-product", "linked-product"]);

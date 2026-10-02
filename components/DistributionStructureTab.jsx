@@ -11,7 +11,7 @@ import {
   composeDistributionReportSections,
   normalizeDistributionExportSections
 } from "@/lib/pms/distributionExport";
-import { normalizePricingScenario, clonePricingScenario, calculateBonusPromotion, calculateDisplayedPriceTotal, calculateProfitBreakdown, bonusPromotionQuantityLabel, pricingScenarioGroup } from "@/lib/pms/pricingScenarios";
+import { normalizePricingScenario, clonePricingScenario, calculateBonusPromotion, calculateDisplayedPriceTotal, calculateProfitBreakdown, getSellingAdminExpenseRate, bonusPromotionQuantityLabel, pricingScenarioGroup } from "@/lib/pms/pricingScenarios";
 import {
   marketDecisionBadgeStyle,
   marketDecisionLabel
@@ -139,6 +139,7 @@ function getDistribution(item) {
   }
   return {
     pricingScenarios,
+    sellingAdminExpenseRate: getSellingAdminExpenseRate(source),
     pharmacySellingPrice: String(source.pharmacySellingPrice ?? pricingScenarios.find((scenario) => scenario.scenarioType !== "bundle")?.pharmacySellingPrice ?? ""),
     competitors: Array.isArray(source.competitors) ? source.competitors : [],
     comparisonCategory: String(source.comparisonCategory || "").trim(),
@@ -335,6 +336,8 @@ export default function DistributionStructureTab({
   const activePricingScenario = visiblePricingScenarios.find((scenario) => (
     String(scenario.id) === String(activePricingScenarioId)
   )) || visiblePricingScenarios[0];
+  const activePricingOwner = items.find((item) => String(item.id) === String(activePricingScenario?._ownerItemId || selectedItem?.id)) || selectedItem;
+  const activePricingDistribution = getDistribution(activePricingOwner);
   const baseAmounts = getBaseAmounts(selectedItem);
   const hasPermitCompanyFee = selectedItem?.category === "OTC" && selectedItem?.permitCompanyFee;
   const permitFeeRate = parseNumber(selectedItem?.permitCompanyFeeRate);
@@ -358,7 +361,7 @@ export default function DistributionStructureTab({
     : chamyaksaSellingPrice - baseAmounts.finalUnitCost;
   const appliedQuantity = parseNumber(activePricingScenario?.minimumQuantity);
   const isBonusPromotion = activePricingScenario?.scenarioType === "bonus";
-  const sellingAdminExpenseRate = parseNumber(activePricingScenario?.sellingAdminExpenseRate);
+  const sellingAdminExpenseRate = parseNumber(activePricingDistribution.sellingAdminExpenseRate);
   const bonusPromotion = calculateBonusPromotion({
     unitCost: baseAmounts.finalUnitCost,
     sellingPrice: chamyaksaSellingPrice,
@@ -414,6 +417,8 @@ export default function DistributionStructureTab({
     const selectedSections = normalizeDistributionExportSections(sectionSelection);
     const rows = visiblePricingScenarios.map((scenario) => {
       const quantity = parseNumber(scenario.minimumQuantity);
+      const scenarioOwner = items.find((item) => String(item.id) === String(scenario._ownerItemId || selectedItem.id)) || selectedItem;
+      const scenarioExpenseRate = parseNumber(getDistribution(scenarioOwner).sellingAdminExpenseRate);
       if (scenario.scenarioType === "bundle") {
         const selectedIds = new Set((scenario.bundleItemIds || []).map(String));
         const selectedProducts = items.filter((item) => selectedIds.has(String(item.id)));
@@ -426,7 +431,7 @@ export default function DistributionStructureTab({
         const profit = calculateProfitBreakdown({
           revenue: sellingPrice,
           costOfGoods: cost,
-          sellingAdminExpenseRate: parseNumber(scenario.sellingAdminExpenseRate)
+          sellingAdminExpenseRate: scenarioExpenseRate
         });
         return {
           type: "묶음 판매",
@@ -454,7 +459,7 @@ export default function DistributionStructureTab({
         const profit = calculateProfitBreakdown({
           revenue: bonus.purchaseTotal,
           costOfGoods: bonus.totalCost,
-          sellingAdminExpenseRate: parseNumber(scenario.sellingAdminExpenseRate)
+          sellingAdminExpenseRate: scenarioExpenseRate
         });
         return {
           type: "할증 판매",
@@ -474,7 +479,7 @@ export default function DistributionStructureTab({
       const profit = calculateProfitBreakdown({
         revenue: salesRevenue,
         costOfGoods: totalCost,
-        sellingAdminExpenseRate: parseNumber(scenario.sellingAdminExpenseRate)
+        sellingAdminExpenseRate: scenarioExpenseRate
       });
       return {
         type: "개별 판매",
@@ -770,12 +775,15 @@ export default function DistributionStructureTab({
     const ownerItem = items.find((item) => String(item.id) === ownerId);
     if (!ownerItem) return;
     const ownerDistribution = getDistribution(ownerItem);
+    const distributionPatch = Object.prototype.hasOwnProperty.call(patch, "sellingAdminExpenseRate")
+      ? { sellingAdminExpenseRate: patch.sellingAdminExpenseRate }
+      : { pricingScenarios: ownerDistribution.pricingScenarios.map((scenario) => (
+          String(scenario.id) === String(activePricingScenario.id) ? { ...scenario, ...patch } : scenario
+        )) };
     onUpdateItem?.(ownerItem.id, {
       distributionStructure: {
         ...ownerDistribution,
-        pricingScenarios: ownerDistribution.pricingScenarios.map((scenario) => (
-        String(scenario.id) === String(activePricingScenario.id) ? { ...scenario, ...patch } : scenario
-        )),
+        ...distributionPatch,
         updatedAt: new Date().toISOString()
       }
     });
@@ -1546,8 +1554,8 @@ export default function DistributionStructureTab({
                       </div>
                       <div>
                         <label style={labelStyle}>판관비 비율 (매출이익 대비, %)</label>
-                        <input type="number" min="0" step="0.01" value={activePricingScenario?.sellingAdminExpenseRate ?? "0"} onChange={(event) => updatePricingScenario({ sellingAdminExpenseRate: event.target.value })} placeholder="예: 25" style={inputStyle} />
-                        <div style={{ marginTop: 5, color: "#64748b", fontSize: 11 }}>이 가격대 탭에 저장 · 판관비 = 매출이익 × 비율</div>
+                        <input type="number" min="0" step="0.01" value={activePricingDistribution.sellingAdminExpenseRate} onChange={(event) => updatePricingScenario({ sellingAdminExpenseRate: event.target.value })} placeholder="예: 25" style={inputStyle} />
+                        <div style={{ marginTop: 5, color: "#64748b", fontSize: 11 }}>가격대 공통 비율 · 해당 품목에 저장</div>
                       </div>
                       <div className="calculated-cell">
                         <span>판관비 (VAT 포함)</span>
@@ -1634,11 +1642,11 @@ export default function DistributionStructureTab({
                     <label style={labelStyle}>판관비 비율 (매출이익 대비, %)</label>
                     <input
                       type="number" min="0" step="0.01"
-                      value={activePricingScenario?.sellingAdminExpenseRate ?? "0"}
+                      value={activePricingDistribution.sellingAdminExpenseRate}
                       onChange={(event) => updatePricingScenario({ sellingAdminExpenseRate: event.target.value })}
                       placeholder="예: 25" style={inputStyle}
                     />
-                    <div style={{ marginTop: 5, color: "#64748b", fontSize: 11 }}>이 가격대 탭에 저장 · 판관비 = 매출이익 × 비율</div>
+                    <div style={{ marginTop: 5, color: "#64748b", fontSize: 11 }}>가격대 공통 비율 · 해당 품목에 저장</div>
                   </div>
                   <div className="calculated-cell">
                     <span>판관비 (VAT 포함)</span>
