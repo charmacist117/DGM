@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { normalizePricingScenario as normalizeDistributionPricingScenario } from "@/lib/pms/pricingScenarios";
+import { normalizePricingScenario as normalizeDistributionPricingScenario, getSellingAdminExpenseRate } from "@/lib/pms/pricingScenarios";
 import { useRouter } from "next/navigation";
 import ProjectSidebar from "@/components/ProjectSidebar";
 import DesktopProjectPathControl from "@/components/DesktopProjectPathControl";
@@ -903,6 +903,7 @@ function normalizeDistributionStructure(value = {}) {
   }
   return {
     pricingScenarios,
+    sellingAdminExpenseRate: getSellingAdminExpenseRate(source),
     pharmacySellingPrice: String(source.pharmacySellingPrice ?? pricingScenarios.find((scenario) => scenario.scenarioType !== "bundle")?.pharmacySellingPrice ?? ""),
     competitors: (Array.isArray(source.competitors) ? source.competitors : [])
       .filter((competitor) => competitor && typeof competitor === "object")
