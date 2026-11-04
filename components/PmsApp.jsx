@@ -60,6 +60,7 @@ import {
   supplyCostBreakdownCsvText,
   supplyCostBreakdownPerPackage,
   supplyCostBreakdownTotal,
+  initialPackagingQuote,
   supportsSupplyCostBreakdown
 } from "@/lib/pms/supplyCostBreakdown";
 import { normalizeProjectPromotion, projectPromotionTotalExpectedCost } from "@/lib/pms/projectPromotion";
@@ -929,6 +930,7 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     category,
     productName: String(source.productName || source.itemName || ""),
     manufacturer: String(source.manufacturer || ""),
+    licenseCompany: String(source.licenseCompany || ""),
     permitCompany: supportsPermitCompanyFee
       ? String(source.permitCompany || source.licenseCompany || source.approvalCompany || "")
       : "",
@@ -943,6 +945,8 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
       source.minimumOrderBatchQuantity || source.minOrderBatchQuantity || source.minimumBatchQuantity || source.moq || ""
     ),
     supplyUnitPrice: String(source.supplyUnitPrice || ""),
+    extraPackagingQuantity: String(source.extraPackagingQuantity ?? ""),
+    extraPackagingUnitPrice: String(source.extraPackagingUnitPrice ?? ""),
     vatIncluded: normalizeSupplyCheckedValue(source.vatIncluded ?? source.includeVat ?? source.hasVat),
     permitCompanyFee: supportsPermitCompanyFee && normalizeSupplyCheckedValue(
       source.permitCompanyFee ?? source.licenseCompanyFee ?? source.approvalCompanyFee ?? source.authorizationCompanyFee
@@ -990,6 +994,7 @@ function isSupplyPriceItemEmpty(item = {}) {
   const fieldHasValue = [
     item.productName,
     item.manufacturer,
+    item.licenseCompany,
     item.permitCompany,
     item.packagingUnit,
     item.packagingForm,
@@ -2317,9 +2322,9 @@ function SupplyPriceTab({
       return;
     }
     const headers = [
-      "카테고리", "제품명", "제조사", "허가사", "공급 성분", "함량/규격", "원료 원산지", "브랜드/공급처", "kg당 가격대",
+      "카테고리", "제품명", "제조사", "허가사", "라이선스사", "공급 성분", "함량/규격", "원료 원산지", "브랜드/공급처", "kg당 가격대",
       "포장단위", "포장형태", "배치 당 포장단위 개수", "최소 주문 배치 수량", "견적 원가 구성", "원가 구성 합계(원)",
-      "포장단위당 원가 구성(원)", "배치 당 공급단가", "총 금액", "허가사 수수료", "수수료 산정 방식",
+      "포장단위당 원가 구성(원)", "배치 당 공급단가", "총 금액", "별도 부자재 수량", "별도 부자재 단가", "별도 부자재 금액", "초도 총 지급액(VAT 별도)", "허가사 수수료", "수수료 산정 방식",
       "입력 수수료율(%) / 상태", "환산 수수료율(%)", "허가사 공급단가(VAT 제외)", "허가사 1배치 총액(VAT 제외)",
       "VAT 포함", "VAT 포함 가격", "1배치 VAT 포함 총액", "최소 주문 기준 VAT 포함 총액",
       "견적일자", "사용기한", "비고", "견적 채택 예상", "시장 분석 검토결과"
@@ -2342,6 +2347,7 @@ function SupplyPriceTab({
         item.productName,
         item.manufacturer,
         item.permitCompany,
+        item.licenseCompany,
         ...ingredientCells,
         item.packagingUnit,
         item.packagingForm,
@@ -2352,6 +2358,10 @@ function SupplyPriceTab({
         costBreakdownPerPackage ?? "",
         item.supplyUnitPrice,
         totalPrice,
+        item.extraPackagingQuantity,
+        item.extraPackagingUnitPrice,
+        initialPackagingQuote(item).packagingTotal ?? "",
+        initialPackagingQuote(item).total ?? "",
         supportsPermitCompanyFee ? (item.permitCompanyFee ? "해당" : "미해당 (제조사·허가사 동일)") : "",
         supportsPermitCompanyFee ? (rateType === "margin" ? "허가사 마진율" : "가산수수료율") : "",
         supportsPermitCompanyFee ? (!item.permitCompanyFee ? "미적용 (0%)" : (permitFeeRateUnknown ? "알 수 없음 (공급단가에 포함)" : item.permitCompanyFeeRate)) : "",
@@ -2831,6 +2841,7 @@ function SupplyPriceTab({
           const costBreakdownUnitAmount = supplyCostBreakdownPerPackage(costBreakdown, item.quantity);
           const supportsPermitCompanyFee = isPermitCompanyFeeCategory(item.category);
           const baseAmounts = getBaseAmounts(item);
+          const packagingQuote = initialPackagingQuote(item);
           const totalPrice = formatTotalPrice(item.supplyUnitPrice, item.quantity);
           const permitFeeRateUnknown = supportsPermitCompanyFee && item.permitCompanyFee && item.permitCompanyFeeRateUnknown;
           const permitFeeRateType = item.permitCompanyFeeRateType === "margin" ? "margin" : "markup";
@@ -2938,6 +2949,10 @@ function SupplyPriceTab({
                                 }}
                               />
                             </div>
+                            <div>
+                              <label style={supplyFieldLabelStyle}>라이선스사</label>
+                              <input value={item.licenseCompany} onChange={(event) => updateItem(item.id, { licenseCompany: event.target.value })} placeholder="브랜드 라이선스사" style={supplyCompactInputStyle} />
+                            </div>
                           </div>
                         ) : (
                           <div style={{ display: "grid", gap: 5 }}>
@@ -2948,6 +2963,7 @@ function SupplyPriceTab({
                                 허가사: {item.permitCompany || "미입력"}
                               </div>
                             )}
+                            {item.licenseCompany && <div style={{ ...supplyTextCellStyle, color: "#64748b", fontSize: 12 }}>라이선스사: {item.licenseCompany}</div>}
                           </div>
                         )}
                       </td>
@@ -3175,6 +3191,18 @@ function SupplyPriceTab({
                   <button onClick={() => startEditing(item)} style={supplySubtleButtonStyle}>수정</button>
                 </>}
               </div>
+
+              {item.category === "화장품" && (
+                <div style={{ padding: "12px", borderTop: "1px solid #cbd5e1", background: "#f8fafc" }}>
+                  <div style={{ fontWeight: 900, color: "#0f172a", marginBottom: 8 }}>초도 별도 부자재 (VAT 별도)</div>
+                  {isEditing ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <label style={supplyFieldLabelStyle}>별도 부자재 수량 <input type="number" min="0" value={item.extraPackagingQuantity} onChange={(event) => updateItem(item.id, { extraPackagingQuantity: event.target.value })} placeholder="예: 2000" style={supplyCompactInputStyle} /></label>
+                    <label style={supplyFieldLabelStyle}>부자재 개당 단가 (원) <input type="number" min="0" step="any" value={item.extraPackagingUnitPrice} onChange={(event) => updateItem(item.id, { extraPackagingUnitPrice: event.target.value })} placeholder="예: 2230" style={supplyCompactInputStyle} /></label>
+                  </div> : <div style={supplyTextCellStyle}>별도 부자재 {item.extraPackagingQuantity || "-"}개 × {item.extraPackagingUnitPrice || "-"}원</div>}
+                  <div style={{ marginTop: 8, fontWeight: 800 }}>별도 부자재 금액: {packagingQuote.packagingTotal === null ? "-" : `${supplyPriceFormat.format(packagingQuote.packagingTotal)}원`} · 초도 총 지급액: {packagingQuote.total === null ? "-" : `${supplyPriceFormat.format(packagingQuote.total)}원`}</div>
+                  <div style={{ marginTop: 4, color: "#64748b", fontSize: 12 }}>초도 총 지급액 = 생산수량 × 제품 단가 + 별도 부자재 수량 × 부자재 단가. 잔여 부자재는 제품 개당 원가 및 다른 분석에 자동 합산하지 않습니다.</div>
+                </div>
+              )}
 
               {showsCostBreakdown && (
                 <div style={{ borderTop: "1px solid #cbd5e1", background: "#fff" }}>
