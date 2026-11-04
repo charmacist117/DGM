@@ -31,6 +31,7 @@ import {
   parseModuleBackup,
   supplyItemIdentityKey
 } from "@/lib/pms/moduleBackup";
+import { supplyIngredientCsvCells } from "@/lib/pms/supplyIngredientCsv";
 import {
   contractModuleToCsv,
   developmentModuleToCsv,
@@ -69,6 +70,7 @@ import {
   matchesPermitCompanyFilter,
   permitCompanyFilterOptions
 } from "@/lib/pms/permitCompanyFilter";
+import { matchesManufacturerSearch } from "@/lib/pms/supplyManufacturerSearch";
 
 const tabLoading = () => <div style={{ padding: 24, color: "#64748b", fontSize: 13 }}>화면을 불러오는 중...</div>;
 const DistributionStructureTab = dynamic(() => import("@/components/DistributionStructureTab"), { loading: tabLoading });
@@ -2164,8 +2166,7 @@ function SupplyPriceTab({
     () => categoryFilteredItems.filter((item) => (
       editingIds.has(String(item.id))
       || isSupplyPriceItemEmpty(item)
-      || !manufacturerQuery
-      || String(item.manufacturer || "").toLowerCase().includes(manufacturerQuery)
+      || matchesManufacturerSearch(item, manufacturerQuery)
     )),
     [categoryFilteredItems, editingIds, manufacturerQuery]
   );
@@ -2323,8 +2324,8 @@ function SupplyPriceTab({
       "VAT 포함", "VAT 포함 가격", "1배치 VAT 포함 총액", "최소 주문 기준 VAT 포함 총액",
       "견적일자", "사용기한", "비고", "견적 채택 예상", "시장 분석 검토결과"
     ];
-    const rows = exportItems.flatMap((item) => {
-      const ingredients = item.ingredients?.length ? item.ingredients : [normalizeSupplyIngredient()];
+    const rows = exportItems.map((item) => {
+      const ingredientCells = supplyIngredientCsvCells(item.ingredients);
       const totalPrice = formatTotalPrice(item.supplyUnitPrice, item.quantity);
       const supportsPermitCompanyFee = isPermitCompanyFeeCategory(item.category);
       const amounts = getBaseAmounts(item);
@@ -2336,16 +2337,12 @@ function SupplyPriceTab({
       const permitFeeRateUnknown = supportsPermitCompanyFee && item.permitCompanyFee && item.permitCompanyFeeRateUnknown;
       const rateType = item.permitCompanyFeeRateType === "margin" ? "margin" : "markup";
       const rates = getPermitFeeRates(item.permitCompanyFeeRate, rateType);
-      return ingredients.map((ingredient) => [
+      return [
         SUPPLY_PRICE_CATEGORY_LABEL_BY_ID[item.category] || item.category,
         item.productName,
         item.manufacturer,
         item.permitCompany,
-        ingredient.name,
-        ingredient.content,
-        ingredient.origin,
-        ingredient.brand,
-        ingredient.kilogramPriceRange,
+        ...ingredientCells,
         item.packagingUnit,
         item.packagingForm,
         item.quantity,
@@ -2370,7 +2367,7 @@ function SupplyPriceTab({
         item.memo,
         item.quoteAdoptionExpected ? "채택 예상" : "채택 재고",
         marketDecisionLabel(item.marketDecisionStatus)
-      ]);
+      ];
     });
     const escapeCsvValue = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
     const csvText = [headers, ...rows].map((row) => row.map(escapeCsvValue).join(",")).join("\r\n");
