@@ -2645,9 +2645,9 @@ function SupplyPriceTab({
       <div style={{ ...supplyPanelStyle, padding: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
           <div>
-            <div style={{ fontSize: 23, fontWeight: 900 }}>공급단가</div>
+            <div style={{ fontSize: 23, fontWeight: 900 }}>공급조건</div>
             <div style={{ fontSize: 15, color: "#64748b", marginTop: 2 }}>
-              {currentCategoryLabel} 공급단가를 건별로 추가하고 제품명·성분명 또는 제조사로 검색합니다.
+              {currentCategoryLabel} 공급조건을 건별로 추가하고 제품명·성분명 또는 제조사로 검색합니다.
             </div>
           </div>
           <div style={{ display: "grid", justifyItems: "end", gap: 7 }}>
@@ -2728,7 +2728,7 @@ function SupplyPriceTab({
               />
             </div>
           </div>
-          <button onClick={addItem} style={supplyPrimaryButtonStyle}>+ 공급단가 건 추가</button>
+          <button onClick={addItem} style={supplyPrimaryButtonStyle}>+ 공급조건 건 추가</button>
           <button
             type="button"
             disabled={!canUseIngredientComparison}
@@ -3199,7 +3199,7 @@ function SupplyPriceTab({
                     <label style={supplyFieldLabelStyle}>별도 부자재 수량 <input type="number" min="0" value={item.extraPackagingQuantity} onChange={(event) => updateItem(item.id, { extraPackagingQuantity: event.target.value })} placeholder="예: 2000" style={supplyCompactInputStyle} /></label>
                     <label style={supplyFieldLabelStyle}>부자재 개당 단가 (원) <input type="number" min="0" step="any" value={item.extraPackagingUnitPrice} onChange={(event) => updateItem(item.id, { extraPackagingUnitPrice: event.target.value })} placeholder="예: 2230" style={supplyCompactInputStyle} /></label>
                   </div> : <div style={supplyTextCellStyle}>별도 부자재 {item.extraPackagingQuantity || "-"}개 × {item.extraPackagingUnitPrice || "-"}원</div>}
-                  <div style={{ marginTop: 8, fontWeight: 800 }}>별도 부자재 금액: {packagingQuote.packagingTotal === null ? "-" : `${supplyPriceFormat.format(packagingQuote.packagingTotal)}원`} · 초도 총 지급액: {packagingQuote.total === null ? "-" : `${supplyPriceFormat.format(packagingQuote.total)}원`}</div>
+                  <div style={{ marginTop: 8, fontWeight: 800 }}>별도 부자재 금액: {packagingQuote.packagingTotal === null ? "-" : `${supplyPriceFormat.format(packagingQuote.packagingTotal)}원`} · 초도 총 지급액 (VAT 별도): {packagingQuote.total === null ? "-" : `${supplyPriceFormat.format(packagingQuote.total)}원`} · 초도 총 지급액 (VAT 포함): {packagingQuote.total === null ? "-" : `${supplyPriceFormat.format(packagingQuote.total * 1.1)}원`}</div>
                   <div style={{ marginTop: 4, color: "#64748b", fontSize: 12 }}>초도 총 지급액 = 생산수량 × 제품 단가 + 별도 부자재 수량 × 부자재 단가. 잔여 부자재는 제품 개당 원가 및 다른 분석에 자동 합산하지 않습니다.</div>
                 </div>
               )}
@@ -3441,7 +3441,7 @@ function SupplyPriceTab({
       {isCsvExportDialogOpen && (
         <div style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(15,23,42,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div style={{ width: 460, maxWidth: "94vw", background: "#fff", borderRadius: 10, border: "1px solid #bfdbfe", boxShadow: "0 20px 60px rgba(0,0,0,.22)", padding: 18 }}>
-            <div style={{ fontSize: 19, fontWeight: 900, color: "#0f172a", marginBottom: 8 }}>공급단가 CSV 다운로드</div>
+            <div style={{ fontSize: 19, fontWeight: 900, color: "#0f172a", marginBottom: 8 }}>공급조건 CSV 다운로드</div>
             <div style={{ fontSize: 15, color: "#475569", lineHeight: 1.5, marginBottom: 14 }}>
               내려받을 카테고리를 선택하세요. 전체 카테고리도 그대로 받을 수 있습니다.
             </div>
@@ -5653,7 +5653,7 @@ export default function PmsApp() {
           {[
             ["home", "홈"],
             ["development", "제품개발"],
-            ["supply", "공급단가"],
+            ["supply", "공급조건"],
             ["distribution", "유통 구조 설정"],
             ["market", "시장 규모 분석"],
             ["promotion", "프로젝트 추진"],
