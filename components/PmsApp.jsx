@@ -66,7 +66,7 @@ import {
 import { normalizeProjectPromotion, projectPromotionTotalExpectedCost } from "@/lib/pms/projectPromotion";
 import { createCompactPmsPayload } from "@/lib/pms/storageCompact";
 import { getBaseAmounts, getPermitFeeRates } from "@/lib/pms/distributionAmounts";
-import { tabletsPerPack, convertTabletPrice } from "@/lib/pms/tabletPrice";
+import { tabletsPerPack, convertTabletPrice, adjustedPackPriceToBase } from "@/lib/pms/tabletPrice";
 import {
   MISSING_PERMIT_COMPANY_FILTER,
   matchesPermitCompanyFilter,
@@ -813,12 +813,13 @@ function formatCalculatedSupplyPrice(value) {
   return Number.isFinite(value) ? `${supplyPriceFormat.format(value)}원` : "";
 }
 
-function TabletPriceInput({ count, packPrice, onPackPriceChange }) {
+function TabletPriceInput({ count, packPrice, onPackPriceChange, disabled = false }) {
   const [draft, setDraft] = useState(null);
   const tabletPrice = convertTabletPrice(packPrice, count, "tablet");
   return <input
     value={draft ?? (tabletPrice === null ? "" : String(tabletPrice))}
     inputMode="decimal"
+    disabled={disabled}
     placeholder="예: 45"
     style={supplyCompactInputStyle}
     onFocus={() => setDraft(tabletPrice === null ? "" : String(tabletPrice))}
@@ -2872,6 +2873,13 @@ function SupplyPriceTab({
           const permitFeeRateUnknown = supportsPermitCompanyFee && item.permitCompanyFee && item.permitCompanyFeeRateUnknown;
           const permitFeeRateType = item.permitCompanyFeeRateType === "margin" ? "margin" : "markup";
           const permitFeeRates = getPermitFeeRates(item.permitCompanyFeeRate, permitFeeRateType);
+          const feeMultiplier = !item.permitCompanyFee || permitFeeRateUnknown ? 1 : permitFeeRates.multiplier;
+          const updateAdjustedPrice = (value, multiplier) => {
+            const next = adjustedPackPriceToBase(value, multiplier);
+            if (next !== null) updateItem(item.id, { supplyUnitPrice: next });
+          };
+          const permitTabletPrice = convertTabletPrice(baseAmounts.permitFeeUnitPrice, tabletCount, "tablet");
+          const vatTabletPrice = convertTabletPrice(baseAmounts.finalUnitCost, tabletCount, "tablet");
           const convertedPermitFeeRate = item.permitCompanyFee && !permitFeeRateUnknown
             ? (permitFeeRateType === "margin" ? permitFeeRates.markupRate : permitFeeRates.marginRate)
             : null;
@@ -3152,8 +3160,14 @@ function SupplyPriceTab({
                             </>}
                             <div>
                               <label style={supplyFieldLabelStyle}>허가사 공급단가 (VAT 제외)</label>
-                              <input value={permitCompanyUnitPrice} readOnly placeholder="자동계산" style={{ ...supplyCompactInputStyle, background: "#f8fafc", fontWeight: 800 }} />
+                              {tabletCount ? <TabletPriceInput count={1} packPrice={baseAmounts.permitFeeUnitPrice} disabled={feeMultiplier === null} onPackPriceChange={(value) => updateAdjustedPrice(value, feeMultiplier)} /> : <input value={permitCompanyUnitPrice} readOnly placeholder="자동계산" style={{ ...supplyCompactInputStyle, background: "#f8fafc", fontWeight: 800 }} />}
                             </div>
+                            {tabletCount && <div>
+                              <label style={supplyFieldLabelStyle}>1정당 허가사 공급단가 (VAT 제외)</label>
+                              <TabletPriceInput count={tabletCount} packPrice={baseAmounts.permitFeeUnitPrice} disabled={feeMultiplier === null} onPackPriceChange={(value) => updateAdjustedPrice(value, feeMultiplier)} />
+                              <div style={{ color: "#64748b", fontSize: 11 }}>입력 시 수수료율을 유지하여 기본 팩당 단가를 역산합니다.</div>
+                              {feeMultiplier === null && <div style={{ color: "#dc2626", fontSize: 11 }}>먼저 유효한 수수료율을 입력해주세요.</div>}
+                            </div>}
                             <div>
                               <label style={supplyFieldLabelStyle}>1배치 총액 (VAT 제외)</label>
                               <input value={permitCompanyTotalPrice} readOnly placeholder="자동계산" style={{ ...supplyCompactInputStyle, background: "#f8fafc", fontWeight: 800 }} />
@@ -3170,6 +3184,7 @@ function SupplyPriceTab({
                             {permitFeeRateUnknown && <div style={supplyTextCellStyle}>수수료율: 알 수 없음 · 공급단가에 포함</div>}
                             {supportsPermitCompanyFee && !item.permitCompanyFee && <div style={supplyTextCellStyle}>수수료 미해당 · 제조사와 허가사 동일</div>}
                             <div style={supplyMoneyTextStyle}>허가사 공급단가: {permitCompanyUnitPrice || "-"}</div>
+                            {tabletCount && permitTabletPrice !== null && <div style={supplyTextCellStyle}>1정당: {permitTabletPrice.toLocaleString("ko-KR", { maximumFractionDigits: 6 })}원 (VAT 별도)</div>}
                             <div style={supplyMoneyTextStyle}>1배치 총액: {permitCompanyTotalPrice || "-"}</div>
                           </div>
                         )}
@@ -3182,12 +3197,12 @@ function SupplyPriceTab({
                               VAT 포함
                             </label>
                             <label style={supplyFieldLabelStyle}>포장단위당 VAT 포함 가격</label>
-                            <input
-                              value={vatIncludedPrice}
-                              readOnly
-                              placeholder="자동계산"
-                              style={{ ...supplyCompactInputStyle, background: "#f8fafc", color: item.vatIncluded ? "#0f172a" : "#94a3b8", fontWeight: 800 }}
-                            />
+                            {tabletCount ? <TabletPriceInput count={1} packPrice={item.vatIncluded ? baseAmounts.finalUnitCost : null} disabled={!item.vatIncluded || feeMultiplier === null} onPackPriceChange={(value) => updateAdjustedPrice(value, feeMultiplier * 1.1)} /> : <input value={vatIncludedPrice} readOnly placeholder="자동계산" style={{ ...supplyCompactInputStyle, background: "#f8fafc", color: item.vatIncluded ? "#0f172a" : "#94a3b8", fontWeight: 800 }} />}
+                            {tabletCount && <div>
+                              <label style={supplyFieldLabelStyle}>1정당 VAT 포함 가격</label>
+                              <TabletPriceInput count={tabletCount} packPrice={item.vatIncluded ? baseAmounts.finalUnitCost : null} disabled={!item.vatIncluded || feeMultiplier === null} onPackPriceChange={(value) => updateAdjustedPrice(value, feeMultiplier * 1.1)} />
+                              <div style={{ color: "#64748b", fontSize: 11 }}>입력 시 VAT와 수수료를 제외한 기본 팩당 단가를 역산합니다.</div>
+                            </div>}
                             <label style={supplyFieldLabelStyle}>1배치 VAT 포함 총액</label>
                             <input
                               value={vatTotalPrice}
@@ -3201,6 +3216,7 @@ function SupplyPriceTab({
                         ) : item.vatIncluded ? (
                           <div style={{ display: "grid", gap: 5 }}>
                             <div style={supplyMoneyTextStyle}>{vatIncludedPrice || "-"}</div>
+                            {tabletCount && vatTabletPrice !== null && <div style={supplyTextCellStyle}>1정당: {vatTabletPrice.toLocaleString("ko-KR", { maximumFractionDigits: 6 })}원 (VAT 포함)</div>}
                             <div style={supplyMoneyTextStyle}>1배치 총액: {vatTotalPrice || "-"}</div>
                             <div style={supplyMoneyTextStyle}>최소 주문 {minimumOrderBatchCount}배치: {minimumOrderVatTotalPrice || "-"}</div>
                           </div>
