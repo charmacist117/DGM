@@ -66,6 +66,7 @@ import {
 import { normalizeProjectPromotion, projectPromotionTotalExpectedCost } from "@/lib/pms/projectPromotion";
 import { createCompactPmsPayload } from "@/lib/pms/storageCompact";
 import { getBaseAmounts, getPermitFeeRates } from "@/lib/pms/distributionAmounts";
+import { tabletsPerPack, convertTabletPrice } from "@/lib/pms/tabletPrice";
 import {
   MISSING_PERMIT_COMPANY_FILTER,
   matchesPermitCompanyFilter,
@@ -810,6 +811,29 @@ function getMinimumOrderBatchCount(value) {
 
 function formatCalculatedSupplyPrice(value) {
   return Number.isFinite(value) ? `${supplyPriceFormat.format(value)}원` : "";
+}
+
+function TabletPriceInput({ count, packPrice, onPackPriceChange }) {
+  const [draft, setDraft] = useState(null);
+  const tabletPrice = convertTabletPrice(packPrice, count, "tablet");
+  return <input
+    value={draft ?? (tabletPrice === null ? "" : String(tabletPrice))}
+    inputMode="decimal"
+    placeholder="예: 45"
+    style={supplyCompactInputStyle}
+    onFocus={() => setDraft(tabletPrice === null ? "" : String(tabletPrice))}
+    onBlur={() => setDraft(null)}
+    onChange={(event) => {
+      const value = event.target.value;
+      if (!/^\d*(?:\.\d*)?$/.test(value)) return;
+      setDraft(value);
+      if (!value) onPackPriceChange("");
+      else if (value !== ".") {
+        const nextPrice = convertTabletPrice(value, count, "pack");
+        if (nextPrice !== null) onPackPriceChange(String(nextPrice));
+      }
+    }}
+  />;
 }
 
 function formatSupplyCostAmount(value) {
@@ -2842,6 +2866,8 @@ function SupplyPriceTab({
           const supportsPermitCompanyFee = isPermitCompanyFeeCategory(item.category);
           const baseAmounts = getBaseAmounts(item);
           const packagingQuote = initialPackagingQuote(item);
+          const tabletCount = item.category === "OTC" ? tabletsPerPack(item.packagingUnit, item.packagingForm) : null;
+          const tabletPrice = convertTabletPrice(item.supplyUnitPrice, tabletCount, "tablet");
           const totalPrice = formatTotalPrice(item.supplyUnitPrice, item.quantity);
           const permitFeeRateUnknown = supportsPermitCompanyFee && item.permitCompanyFee && item.permitCompanyFeeRateUnknown;
           const permitFeeRateType = item.permitCompanyFeeRateType === "margin" ? "margin" : "markup";
@@ -3071,6 +3097,10 @@ function SupplyPriceTab({
                               <label style={supplyFieldLabelStyle}>{isRawMaterialCategory ? "배치 당 전체 견적단가" : "포장단위 당 공급단가"}</label>
                               <input value={item.supplyUnitPrice} onChange={(event) => updateItem(item.id, { supplyUnitPrice: event.target.value })} placeholder={isRawMaterialCategory ? "예: 배치 당 전체 견적단가" : "예: 포장단위 당 1,250원"} style={supplyCompactInputStyle} />
                             </div>
+                            {item.category === "OTC" && (tabletCount ? <div>
+                              <label style={supplyFieldLabelStyle}>1정당 공급단가 (VAT 별도 · 1팩 {tabletCount}정)</label>
+                              <TabletPriceInput count={tabletCount} packPrice={item.supplyUnitPrice} onPackPriceChange={(value) => updateItem(item.id, { supplyUnitPrice: value })} />
+                            </div> : <div style={{ color: "#64748b", fontSize: 11 }}>정당 단가는 포장단위를 ‘20정’ 또는 포장단위 ‘20’·포장형태 ‘정’으로 입력하면 계산됩니다.</div>)}
                             <div>
                               <label style={supplyFieldLabelStyle}>총 견적금액</label>
                               <input
@@ -3084,6 +3114,7 @@ function SupplyPriceTab({
                         ) : (
                           <div style={{ display: "grid", gap: 4 }}>
                             <div style={supplyTextCellStyle}>{item.supplyUnitPrice || "-"}</div>
+                            {tabletCount && tabletPrice !== null && <div style={supplyTextCellStyle}>1정당: {tabletPrice.toLocaleString("ko-KR", { maximumFractionDigits: 6 })}원 (VAT 별도)</div>}
                             {totalPrice && (
                               <div style={supplyMoneyTextStyle}>
                                 {isRawMaterialCategory ? "총 견적금액" : "총 금액"}: {totalPrice}
