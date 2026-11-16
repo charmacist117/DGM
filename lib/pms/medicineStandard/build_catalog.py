@@ -90,6 +90,28 @@ def category(values):
         return match[1].replace(' ','')
     return next((g for g in '가나다라' if re.match(fr'^{g}\s*(란|$)',original)),'')
 
+def heading_label(values, code):
+    text = unicodedata.normalize('NFKC', ''.join(values or [])).lstrip('※').strip()
+    if code:
+        prefix = r'\s*'.join(map(re.escape, code))
+        text = re.sub(fr'^{prefix}\s*(?:항목|란|항)?\s*', '', text, count=1)
+    return text.strip(' ()')
+
+def auxiliary_categories(chapter, tables):
+    if chapter == 8:
+        header = tables[3]['rows'][0]
+        return {(category(vals), ''): heading_label(vals, category(vals))
+                for _, _, _, vals in header if category(vals)}
+    if chapter in (9, 10):
+        group_names = {}
+        for row in cells(tables[2 if chapter == 9 else 1])[3:]:
+            group = category(row[0])
+            item = re.match(r'(\d+)항', ''.join(row[1] or [])) if chapter == 9 else None
+            if group:
+                group_names[group, item[1] if item else ''] = ''.join(row[2 if chapter == 9 else 1] or [])
+        return group_names
+    return {}
+
 def row_values(values, names):
     vals = list(values or [])
     if len(names) == 1:
@@ -103,6 +125,13 @@ def row_values(values, names):
 def build(chapters):
     for chapter_no,chapter in enumerate(chapters,1):
         tables = [b for b in chapter['blocks'] if isinstance(b,dict)]
+        named_categories = auxiliary_categories(chapter_no, tables)
+        if chapter_no == 4:
+            chapter['effectScopes'] = {
+                category(group): {'name': heading_label(group, category(group)),
+                                  'text': ', '.join(line.rstrip(', ') for line in effect)}
+                for group,effect in cells(tables[12])[1:]
+            }
         records = []
         for table_no,header,name_col,source,*limits in CONFIG[chapter_no]:
             table = tables[table_no-1]
@@ -115,17 +144,26 @@ def build(chapters):
                 if name_col > 0 and row_idx > header and row[name_col] is grid[row_idx-1][name_col]:
                     if (chapter_no,table_no,row_idx) not in ((4,5,4),(9,1,8)):
                         continue
-                group=category(row[0]) if name_col else ''
-                if chapter_no == 6 and table_no == 5:
-                    group = category(row[1])
+                group_cell = row[1 if chapter_no == 6 and table_no == 5 else 0] if name_col else None
+                group=category(group_cell)
                 if chapter_no == 7 and not group:
                     group_match = re.search(r'\d+(?=\s*항)', ' '.join(row[0] or []))
                     group = group_match[0] if group_match else ''
-                subsection=' '.join(row[1] or []) if name_col >= 2 else ''
+                item_cell = row[2 if chapter_no == 8 and group == 'IX' else 1] if name_col >= 2 else None
+                subsection=' '.join(item_cell or [])
                 item=re.search(r'(\d+(?:-\d+)?)\s*(?:항|란)',subsection)
                 item=item[1] if item else ''
+                item_code=item
                 if (chapter_no,table_no) in ((4,2),(4,3)) and subsection.startswith('Ⅰ'):
                     item = '1'
+                    item_code = 'I'
+                group_name = heading_label(group_cell, group) or named_categories.get((group, ''), '')
+                item_name = heading_label(item_cell, item_code) if item else ''
+                item_name = item_name or named_categories.get((group, item), '')
+                if chapter_no == 4 and table_no in (9, 10, 11):
+                    group_name = {9: '건위제·소화제', 10: '정장제', 11: '지사제'}[table_no] + ' 배합용 비타민류'
+                if chapter_no == 8 and group == 'XI':
+                    group_name = '완화제 성분'
                 if (chapter_no,table_no,row_idx) == (4,5,2):
                     continue
                 # Some source paragraphs are line continuations within one cell.
@@ -142,6 +180,8 @@ def build(chapters):
                             continue
                         if col == 3 and row[3] is row[4]:
                             key = 'day'
+                            if table_no == 7:
+                                unit = 'mg'
                     if chapter_no == 4 and table_no == 5:
                         key = 'minimum' if row_idx == 1 else key
                         unit = '개' if row_idx == 1 else 'g'
@@ -164,6 +204,10 @@ def build(chapters):
                     record={'id':f'{table_no}-{row_idx+1}-{j+1}', 'name':name.removeprefix('△').strip(),
                             'mark':name.startswith('△'), 'group':group,'item':item,
                             'table':source,'tableIndex':table_no,'row':row_idx+1,'values':values}
+                    if group_name:
+                        record['groupName'] = group_name
+                    if item_name:
+                        record['itemName'] = item_name
                     if shared:
                         record['shared']=sorted(shared)
                     records.append(record)

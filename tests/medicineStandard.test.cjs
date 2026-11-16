@@ -88,3 +88,74 @@ test('DGM imports only an unambiguous amount for the selected form',()=>{
   const mismatch=matchSupplyIngredients(1,'캡슐제','',catalog,inputs,[]);
   assert.deepEqual(mismatch.added[0].entries,{});
 });
+
+const { categoryLabel, classificationRef, adultSpecs, chapterFourClaims } = require('../lib/pms/medicineStandard/rules.mjs');
+const { reviewAlternatives } = require('../lib/pms/medicineStandard/reportData.mjs');
+const chapterFour = ANNEX[3];
+const scopolia = group => chapterFour.ingredients.find(row=>row.name==='스코폴리아엑스'&&row.group===group);
+
+test('scopolia is identified by its statutory category and both maxima are in milligrams',()=>{
+  const antacid={...scopolia('I'),primary:true};
+  const antispasmodic={...scopolia('VI'),primary:true};
+  assert.equal(classificationRef(4,antacid),'표 1 · Ⅰ란 3항목');
+  assert.equal(categoryLabel(antispasmodic),'진통진경제 · 부교감신경차단제');
+  assert.deepEqual([antacid,antispasmodic].map(r=>[r.values.day.max,r.values.day.unit]),[[30,'mg'],[60,'mg']]);
+  assert.match(chapterFourClaims([antacid],chapterFour.effectScopes)[0].blocked,/표방할 수 없습니다/);
+  assert.match(chapterFourClaims([antispasmodic],chapterFour.effectScopes)[0].text,/복통.*산통/);
+  assert.deepEqual(regimen(4,'정제','',[antacid]).counts,[3]);
+  assert.deepEqual(regimen(4,'정제','',[antispasmodic]).counts,[1,2,3]);
+  const basis=fieldOptions(4,antispasmodic,'정제','')[0];
+  assert.equal(basis.unit,'mg');
+  const base = adultSpecs(4,antispasmodic,[antispasmodic],'정제','',3);
+  assert.equal(base.find(limit=>limit.basis==='day').min,30);
+  assert.equal(base.find(limit=>limit.basis==='single').max,20);
+  const adjunct={...antispasmodic,primary:false};
+  const caps=adultSpecs(4,adjunct,[adjunct,{group:'V',primary:true}],'정제','',3);
+  assert.deepEqual(caps.filter(limit=>limit.basis==='day').map(limit=>[limit.min,limit.max,limit.unit]),[[12,30,'mg']]);
+});
+
+test('intestinal-regulator scenarios follow the actual active role and show the applicable frequency first',()=>{
+  const probiotic={...chapterFour.ingredients.find(r=>r.group==='IV'&&r.item==='1'),entries:{day:600000},primary:true};
+  const antacid={...scopolia('I'),entries:{day:4},primary:false};
+  const input={n:4,form:'정제',variant:'',freq:3,perDose:2,increment:1,adultAge:15,rows:[probiotic,antacid]};
+  const [possible,,blocked]=reviewAlternatives(input,assess(input));
+  assert.deepEqual(possible.frequencies.map(option=>option.freq),[3]);
+  assert.deepEqual(blocked.frequencies.map(option=>[option.freq,option.allowed]),[[1,false],[2,false]]);
+  assert.deepEqual(blocked.frequencies.map(option=>option.quantities.find(q=>q.id===probiotic.id).value),[1200000,2400000]);
+  const diarrhea={...chapterFour.ingredients.find(r=>r.group==='V'&&r.item==='2'),entries:{day:1},primary:true};
+  const flexible={...input,perDose:1,rows:[{...probiotic,entries:{day:1000000},primary:false},diarrhea]};
+  const verdict=assess(flexible);
+  assert.deepEqual(verdict.rule.counts,[1,2,3]);
+  assert.ok(!reviewAlternatives(flexible,verdict)[2].frequencies.some(option=>!option.allowed));
+});
+
+test('A4 workbook places possible results above blocked results and stores numeric doses',async()=>{
+  const ExcelJS=require('exceljs');
+  const {reviewWorkbook}=require('../lib/pms/medicineStandard/reviewWorkbook.mjs');
+  const rows=[ingredient(1,'아스코르브산',{day:30}),ingredient(1,'티아민염산염',{day:2})];
+  const input={n:1,form:'정제',variant:'',freq:2,perDose:2,increment:1,adultAge:15,rows};
+  const result=assess(input);
+  const bytes=await reviewWorkbook({input,result,chapter:ANNEX[0],sections:reviewAlternatives(input,result)});
+  const roundtrip=new ExcelJS.Workbook();
+  await roundtrip.xlsx.load(bytes);
+  assert.deepEqual(roundtrip.worksheets.map(sheet=>sheet.name),['검토 요약','성분별 분량']);
+  for (const sheet of roundtrip.worksheets) {
+    assert.equal(sheet.pageSetup.paperSize,9);
+    assert.equal(sheet.pageSetup.orientation,'landscape');
+    assert.equal(sheet.pageSetup.fitToPage,true);
+    assert.equal(sheet.pageSetup.fitToWidth,1);
+    assert.equal(sheet.pageSetup.fitToHeight,0);
+    assert.match(sheet.pageSetup.printArea,/^A1:[HJ]\d+$/);
+  }
+  const summary=roundtrip.getWorksheet('검토 요약');
+  const labels=summary.getColumn(1).values;
+  assert.ok(labels.indexOf('가능한 방안')<labels.indexOf('기준을 벗어난 방안'));
+  assert.ok(labels.indexOf('기준을 벗어난 방안')>0);
+  assert.equal(summary.getCell('C'+labels.indexOf('대안 · 성인 ½')).value,1);
+  const ingredientRow=labels.indexOf('아스코르브산');
+  assert.equal(summary.getCell('D'+ingredientRow).value,'1개당');
+  assert.equal(summary.getCell('H'+ingredientRow).value,null);
+  const detail=roundtrip.getWorksheet('성분별 분량');
+  assert.equal(detail.getCell('E4').value,120);
+  assert.equal(detail.getCell('H4').value,'mg');
+});
