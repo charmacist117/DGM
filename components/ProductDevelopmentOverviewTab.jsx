@@ -112,6 +112,7 @@ export default function ProductDevelopmentOverviewTab({
   projects = [],
   syncState,
   onOpenSupply,
+  onOpenMedicineStandard,
   onOpenDistribution,
   onOpenMarket,
   onOpenPromotion,
@@ -260,6 +261,11 @@ export default function ProductDevelopmentOverviewTab({
                       <IngredientAmountTitle label={row.label} maxFontSize={13} minFontSize={11} />
                       <div style={{ marginTop: 5, color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>{item.manufacturer || "제조사 미입력"} · {item.category || "카테고리 미입력"}</div>
                       <div style={{ marginTop: 2, color: "#64748b", fontSize: 11 }}>포장단위 {item.packagingUnit || "-"} · 수량 {item.quantity || "-"}</div>
+                      {item.category === "OTC" && item.ingredients?.some(ingredient => ingredient.name) && (
+                        <button type="button" onClick={() => onOpenMedicineStandard?.(item.id)} style={{ ...controlStyle, minHeight: 0, padding: "3px 7px", marginTop: 6, cursor: "pointer", color: "#0f766e" }}>
+                          이 구성 검토
+                        </button>
+                      )}
                     </td>
                     <td style={{ padding: 8 }}><StageButton complete={readiness.supplyReady} label={readiness.supplyReady ? "구성 완료" : "미완료"} detail={item.supplyUnitPrice ? `배치 당 ${Number(String(item.supplyUnitPrice).replace(/,/g, "") || 0).toLocaleString("ko-KR")}원` : "단가·수량 확인 필요"} onClick={() => onOpenSupply?.(item.id)} /></td>
                     <td style={{ padding: 8 }}><StageButton complete={readiness.distributionReady} label={readiness.distributionReady ? "구성 완료" : "미완료"} detail={readiness.distributionReady ? "판매가·마진 설정됨" : "유통 구조 설정 필요"} onClick={() => onOpenDistribution?.(item.id)} /></td>

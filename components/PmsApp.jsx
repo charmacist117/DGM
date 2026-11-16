@@ -80,6 +80,7 @@ const MarketSizeAnalysisTab = dynamic(() => import("@/components/MarketSizeAnaly
 const ContractManagementTab = dynamic(() => import("@/components/ContractManagementTab"), { loading: tabLoading });
 const ProjectPromotionTab = dynamic(() => import("@/components/ProjectPromotionTab"), { loading: tabLoading });
 const ProductDevelopmentOverviewTab = dynamic(() => import("@/components/ProductDevelopmentOverviewTab"), { loading: tabLoading });
+const MedicineStandardTab = dynamic(() => import("@/components/MedicineStandardTab"), { loading: tabLoading });
 
 const LOCAL_CACHE_KEY = "pharmadev_pms_cache_v2";
 const DEVELOP_TASK_ID = "develop";
@@ -5170,6 +5171,8 @@ export default function PmsApp() {
   } = useProjectsStore();
   const [userRole, setUserRole] = useState(ROLE_GUEST);
   const [moduleTab, setModuleTab] = useState("development");
+  const [medicineTabOpened, setMedicineTabOpened] = useState(false);
+  const [selectedMedicineSupplyId, setSelectedMedicineSupplyId] = useState("");
   const [settingsSection, setSettingsSection] = useState("server");
   const [supplyCategory, setSupplyCategory] = useState("all");
   const [developmentStageFilter, setDevelopmentStageFilter] = useState("all");
@@ -5700,6 +5703,7 @@ export default function PmsApp() {
           {[
             ["home", "홈"],
             ["development", "제품개발"],
+            ["medicine-standard", "표준제조기준 검토"],
             ["supply", "공급조건"],
             ["distribution", "유통 구조 설정"],
             ["market", "시장 규모 분석"],
@@ -5712,6 +5716,7 @@ export default function PmsApp() {
               key={id}
               onClick={() => {
                 setModuleTab(id);
+                if (id === "medicine-standard") setMedicineTabOpened(true);
                 if (id === "home" || id === "development" || id === "schedule") {
                   setIsHome(true);
                   setTab("overview");
@@ -5738,7 +5743,7 @@ export default function PmsApp() {
       </div>
 
       <div className="pms-body-layout" style={{ display: "flex", minHeight: "calc(100vh - var(--app-topbar-height))" }}>
-        <ProjectSidebar
+        {moduleTab !== "medicine-standard" && <ProjectSidebar
         isHome={isHome}
         setIsHome={setIsHome}
         setTab={setTab}
@@ -5765,10 +5770,19 @@ export default function PmsApp() {
         openProject={openProject}
         formatOwners={formatOwners}
         TODAY={TODAY}
-      />
+      />}
 
       <main className="pms-main-content" style={{ flex: 1, padding: 16, minWidth: 0, overflowX: "hidden" }}>
-        {moduleTab === "home" ? (
+        {medicineTabOpened && (
+          <div hidden={moduleTab !== "medicine-standard"}>
+            <MedicineStandardTab
+              items={normalizedSupplyPriceItems}
+              selectedId={selectedMedicineSupplyId}
+              onSelectedIdChange={setSelectedMedicineSupplyId}
+            />
+          </div>
+        )}
+        {moduleTab === "medicine-standard" ? null : moduleTab === "home" ? (
           <>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12 }}>
               <div>
@@ -5802,6 +5816,12 @@ export default function PmsApp() {
             stageFilter={developmentStageFilter}
             onStageFilterChange={setDevelopmentStageFilter}
             onOpenSupply={openSupplyPriceItem}
+            onOpenMedicineStandard={itemId => {
+              setSelectedMedicineSupplyId(itemId);
+              setMedicineTabOpened(true);
+              setModuleTab("medicine-standard");
+              window.scrollTo(0, 0);
+            }}
             onOpenDistribution={openDistributionStructure}
             onOpenMarket={openMarketSizeAnalysis}
             onOpenPromotion={openProjectPromotion}
