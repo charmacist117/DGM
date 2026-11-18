@@ -1,4 +1,5 @@
 import { readSession } from "@/lib/server/auth";
+import { loadProjects } from "@/lib/server/projectStore";
 import {
   assertSameOrigin,
   readJsonRequest,
@@ -19,19 +20,6 @@ function requireAdmin(session) {
   if (!session) return secureJson({ ok: false, message: "로그인이 필요합니다." }, { status: 401 });
   if (session.role !== "admin") return secureJson({ ok: false, message: "관리자 권한이 필요합니다." }, { status: 403 });
   return null;
-}
-
-function normalizeBackupPayload(payload) {
-  if (Array.isArray(payload)) {
-    return { projects: payload, adminLogs: [] };
-  }
-  if (payload && typeof payload === "object") {
-    return {
-      projects: Array.isArray(payload.projects) ? payload.projects : [],
-      adminLogs: Array.isArray(payload.adminLogs) ? payload.adminLogs : []
-    };
-  }
-  return { projects: [], adminLogs: [] };
 }
 
 export async function GET(request) {
@@ -61,8 +49,7 @@ export async function GET(request) {
       const payload = await downloadGoogleDriveBackup(fileId);
       return secureJson({
         ok: true,
-        ...normalizeBackupPayload(payload),
-        raw: payload
+        ...payload
       });
     }
 
@@ -86,13 +73,7 @@ export async function POST(request) {
       return secureJson({ ok: false, message: "지원하지 않는 백업 요청입니다." }, { status: 400 });
     }
 
-    const projects = Array.isArray(body?.projects) ? body.projects : null;
-    const adminLogs = Array.isArray(body?.adminLogs) ? body.adminLogs : [];
-    if (!projects) {
-      return secureJson({ ok: false, message: "projects 배열이 필요합니다." }, { status: 400 });
-    }
-
-    const file = await uploadGoogleDriveBackup(projects, adminLogs, session.role || "user");
+    const file = await uploadGoogleDriveBackup(await loadProjects(), session.role);
     return secureJson({ ok: true, file });
   } catch (error) {
     console.error("[POST /api/backup/google-drive] failed:", error);

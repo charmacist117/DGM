@@ -24,7 +24,7 @@ import {
   normalizeRegulatoryDirections
 } from "@/lib/pms/defaults";
 import { TODAY, addDays, diff, fmt, toStr } from "@/lib/pms/date";
-import { parseFullBackup } from "@/lib/pms/fullBackup";
+import { createFullBackup, parseFullBackup } from "@/lib/pms/fullBackup";
 import {
   MODULE_BACKUP_TYPES,
   createModuleBackup,
@@ -42,7 +42,7 @@ import {
 } from "@/lib/pms/moduleCsv";
 import { normalizeContractRecords } from "@/lib/pms/contracts";
 import { calcSchedule } from "@/lib/pms/schedule";
-import { downloadFile } from "@/lib/pms/exporters";
+import { downloadFile, toCsv } from "@/lib/pms/exporters";
 import { DASHBOARD_CHANGE_NOTICE_TYPE, DASHBOARD_CHANGE_SEEDS, appendDashboardChangeSeeds, dashboardRevisionOrder } from "@/lib/pms/dashboardChanges";
 import {
   normalizeMarketAnalysisDefaults,
@@ -83,6 +83,7 @@ const ProductDevelopmentOverviewTab = dynamic(() => import("@/components/Product
 const MedicineStandardTab = dynamic(() => import("@/components/MedicineStandardTab"), { loading: tabLoading });
 
 const LOCAL_CACHE_KEY = "pharmadev_pms_cache_v2";
+const DRAFT_PREFIX = `${LOCAL_CACHE_KEY}:draft:`;
 const DEVELOP_TASK_ID = "develop";
 const MERGED_SAMPLE_QUALITY_TASK_ID = "sample_quality";
 const LEGACY_SAMPLE_TASK_ID = "sample";
@@ -690,7 +691,7 @@ function errorMessage(error, fallback = "알 수 없는 오류") {
   return String(error?.message || error || fallback);
 }
 
-function readLocalCacheState() {
+function readLocalCacheState(key = LOCAL_CACHE_KEY) {
   if (typeof window === "undefined") {
     return {
       projects: [],
@@ -702,7 +703,7 @@ function readLocalCacheState() {
     };
   }
   try {
-    const cached = window.localStorage.getItem(LOCAL_CACHE_KEY);
+    const cached = window.localStorage.getItem(key);
     if (!cached) return { projects: [], adminLogs: [], supplyPriceItems: [], contractRecords: [], hasData: false };
     const parsed = JSON.parse(cached);
     const projects = Array.isArray(parsed)
@@ -726,6 +727,7 @@ function readLocalCacheState() {
       supplyPriceItems,
       contractRecords,
       marketAnalysisDefaults,
+      revision: parsed?.revision ?? null,
       hasData: projects.length > 0
         || adminLogs.length > 0
         || supplyPriceItems.length > 0
@@ -1075,14 +1077,59 @@ function useProjectsStore() {
 
   const [syncState, setSyncState] = useState({ status: "loading", message: "서버 데이터 확인 중..." });
   const readyRef = useRef(false);
-  const serverAvailableRef = useRef(false);
-  const saveTimerRef = useRef(null);
+  const revisionRef = useRef(initialCacheRef.current.revision ?? null);
+  const draftKeyRef = useRef(null);
+  const [drafts, setDrafts] = useState([]);
+  const blockedRef = useRef(false);
+  const desiredPayloadRef = useRef("");
+  const savingRef = useRef(false);
   const lastSavedPayloadRef = useRef("");
+
+  function writeCache(key, serialized, revision) {
+    if (!key) return false;
+    try {
+      window.localStorage.setItem(key, JSON.stringify({ ...JSON.parse(serialized), revision }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function removeDraft() {
+    if (!draftKeyRef.current) return;
+    try { window.localStorage.removeItem(draftKeyRef.current); } catch {}
+  }
+
+  function downloadDraft(key = draftKeyRef.current) {
+    const data = key === draftKeyRef.current && desiredPayloadRef.current
+      ? JSON.parse(desiredPayloadRef.current)
+      : readLocalCacheState(key);
+    const backup = createFullBackup(data, { source: "local-draft" });
+    downloadFile(`PB_로컬수정본_${toStr(new Date())}.json`, JSON.stringify(backup, null, 2));
+  }
 
   useEffect(() => {
     let disposed = false;
 
     async function bootstrap() {
+      try {
+        let key = window.sessionStorage.getItem(DRAFT_PREFIX);
+        if (!key?.startsWith(DRAFT_PREFIX)) {
+          key = DRAFT_PREFIX + window.crypto.randomUUID();
+          window.sessionStorage.setItem(DRAFT_PREFIX, key);
+        }
+        draftKeyRef.current = key;
+        setDrafts(Object.keys(window.localStorage).filter((storedKey) => storedKey.startsWith(DRAFT_PREFIX) && storedKey !== key));
+      } catch {}
+      const draft = draftKeyRef.current && readLocalCacheState(draftKeyRef.current);
+      const local = draft?.hasData ? draft : initialCacheRef.current;
+      const apply = (state) => {
+        setProjects(state.projects);
+        setAdminLogs(state.adminLogs);
+        setSupplyPriceItems(state.supplyPriceItems);
+        setContractRecords(state.contractRecords);
+        setMarketAnalysisDefaults(state.marketAnalysisDefaults);
+      };
       try {
         const response = await fetch("/api/projects", { cache: "no-store" });
         const payload = await response.json().catch(() => ({}));
@@ -1091,59 +1138,43 @@ function useProjectsStore() {
         }
 
         if (!disposed) {
-          const localCache = readLocalCacheState();
           const nextProjects = normalizeProjects(Array.isArray(payload.projects) ? payload.projects : []);
           const nextAdminLogs = normalizeAdminLogs(Array.isArray(payload.adminLogs) ? payload.adminLogs : []);
           const nextSupplyPriceItems = normalizeSupplyPriceItems(Array.isArray(payload.supplyPriceItems) ? payload.supplyPriceItems : []);
           const nextContractRecords = normalizeContractRecords(Array.isArray(payload.contractRecords) ? payload.contractRecords : []);
           const nextMarketAnalysisDefaults = normalizeMarketAnalysisDefaults(payload.marketAnalysisDefaults);
-          const serverIsEmpty = nextProjects.length === 0
-            && nextAdminLogs.length === 0
-            && nextSupplyPriceItems.length === 0
-            && nextContractRecords.length === 0;
-          if (serverIsEmpty && localCache.hasData) {
-            setProjects(localCache.projects);
-            setAdminLogs(localCache.adminLogs);
-            setSupplyPriceItems(localCache.supplyPriceItems);
-            setContractRecords(localCache.contractRecords);
-            setMarketAnalysisDefaults(localCache.marketAnalysisDefaults);
-            serverAvailableRef.current = true;
-            setSyncState({
-              status: "warning",
-              message: "서버 DB가 비어 있어 이 브라우저의 로컬 캐시를 복구 대상으로 사용합니다. 곧 서버에 다시 저장합니다."
-            });
-            readyRef.current = true;
-            return;
-          }
-          setProjects(nextProjects);
-          setAdminLogs(nextAdminLogs);
-          setSupplyPriceItems(nextSupplyPriceItems);
-          setContractRecords(nextContractRecords);
-          setMarketAnalysisDefaults(nextMarketAnalysisDefaults);
-          lastSavedPayloadRef.current = JSON.stringify(createCompactPmsPayload({
+          const server = {
             projects: nextProjects,
             adminLogs: nextAdminLogs,
             supplyPriceItems: nextSupplyPriceItems,
             contractRecords: nextContractRecords,
             marketAnalysisDefaults: nextMarketAnalysisDefaults
-          }));
-          serverAvailableRef.current = true;
+          };
+          lastSavedPayloadRef.current = JSON.stringify(createCompactPmsPayload(server));
+          const draftDiffers = draft?.hasData && JSON.stringify(createCompactPmsPayload(draft)) !== lastSavedPayloadRef.current;
+          const legacyCacheDiffers = !draft?.hasData && local.hasData && !local.revision
+            && JSON.stringify(createCompactPmsPayload(local)) !== lastSavedPayloadRef.current;
+          const legacyKey = `${DRAFT_PREFIX}legacy`;
+          const legacySaved = legacyCacheDiffers && writeCache(legacyKey, JSON.stringify(createCompactPmsPayload(local)), null);
+          if (legacySaved) setDrafts((keys) => [...new Set([...keys, legacyKey])]);
+          const recover = draftDiffers || (legacyCacheDiffers && !legacySaved);
+          revisionRef.current = recover ? local.revision : payload.revision;
+          blockedRef.current = Boolean(recover && local.revision !== payload.revision);
+          if (!recover && draft?.hasData) removeDraft();
+          if (!legacyCacheDiffers || legacySaved) writeCache(LOCAL_CACHE_KEY, lastSavedPayloadRef.current, payload.revision);
+          apply(recover ? local : server);
           setSyncState({
-            status: "ready",
-            message: payload.source === "seeded" ? "서버 초기 데이터 로드 완료" : "서버 기존 데이터 로드 완료"
+            status: blockedRef.current ? "conflict" : "ready",
+            message: blockedRef.current ? "서버와 로컬 수정본의 버전이 다릅니다." : "서버 데이터 로드 완료"
           });
           readyRef.current = true;
         }
       } catch (error) {
         const reason = errorMessage(error, "서버 연결 실패");
         if (!disposed) {
-          const fallbackProjects = normalizeProjects(getInitialProjects());
-          setProjects((prev) => (prev.length ? normalizeProjects(prev) : fallbackProjects));
-          setAdminLogs((prev) => normalizeAdminLogs(prev));
-          setSupplyPriceItems((prev) => normalizeSupplyPriceItems(prev));
-          setContractRecords((prev) => normalizeContractRecords(prev));
-          setMarketAnalysisDefaults((prev) => normalizeMarketAnalysisDefaults(prev));
-          serverAvailableRef.current = false;
+          revisionRef.current = local.revision ?? null;
+          apply(local.hasData ? local : { ...local, projects: normalizeProjects(getInitialProjects()), marketAnalysisDefaults: normalizeMarketAnalysisDefaults() });
+          if (!draft?.hasData) lastSavedPayloadRef.current = JSON.stringify(createCompactPmsPayload(local));
           setSyncState({
             status: "warning",
             message: `${reason}: 로컬 캐시 모드로 동작합니다.`
@@ -1161,50 +1192,68 @@ function useProjectsStore() {
 
   useEffect(() => {
     if (!readyRef.current) return;
-
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(async () => {
-      const storagePayload = createCompactPmsPayload({
-        projects,
-        adminLogs,
-        supplyPriceItems,
-        contractRecords,
-        marketAnalysisDefaults
-      });
-      const serializedPayload = JSON.stringify(storagePayload);
-      if (serializedPayload === lastSavedPayloadRef.current) return;
-      if (typeof window !== "undefined") {
-        try {
-          window.localStorage.setItem(LOCAL_CACHE_KEY, serializedPayload);
-        } catch (error) {
-          setSyncState({ status: "warning", message: `로컬 캐시 저장 실패: ${errorMessage(error)}` });
-        }
+    const serialized = JSON.stringify(createCompactPmsPayload({ projects, adminLogs, supplyPriceItems, contractRecords, marketAnalysisDefaults }));
+    desiredPayloadRef.current = serialized;
+    if (serialized !== lastSavedPayloadRef.current || savingRef.current) {
+      if (!writeCache(draftKeyRef.current, serialized, revisionRef.current) && !blockedRef.current) {
+        setSyncState({ status: "warning", message: "로컬 수정본을 저장하지 못했습니다." });
       }
-      if (!serverAvailableRef.current) return;
+    } else {
+      removeDraft();
+    }
+
+    const save = async () => {
+      if (savingRef.current || blockedRef.current) return;
+      const pending = desiredPayloadRef.current;
+      if (pending === lastSavedPayloadRef.current) return;
+      if (!revisionRef.current) {
+        setSyncState({ status: "conflict", message: "로컬 수정본의 서버 버전을 확인할 수 없습니다." });
+        return;
+      }
+      savingRef.current = true;
+      let saved = false;
       try {
         setSyncState({ status: "saving", message: "서버 저장 중..." });
         const response = await fetch("/api/projects", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: serializedPayload
+          body: JSON.stringify({ ...JSON.parse(pending), revision: revisionRef.current })
         });
         const payload = await response.json().catch(() => ({}));
+        if (response.status === 409) {
+          blockedRef.current = true;
+          setSyncState({ status: "conflict", message: "서버에 다른 수정사항이 저장되었습니다." });
+          return;
+        }
         if (!response.ok || !payload.ok) {
           throw new Error(payload.error || payload.message || `저장 실패 (${response.status})`);
         }
-        setSyncState({ status: "saved", message: `저장 완료 (${new Date(payload.updatedAt).toLocaleString()})` });
-        lastSavedPayloadRef.current = serializedPayload;
+        saved = true;
+        revisionRef.current = payload.revision;
+        lastSavedPayloadRef.current = pending;
+        writeCache(LOCAL_CACHE_KEY, pending, payload.revision);
+        if (desiredPayloadRef.current === pending) {
+          removeDraft();
+          setSyncState({ status: "saved", message: `저장 완료 (${new Date(payload.updatedAt).toLocaleString()})` });
+        } else {
+          writeCache(draftKeyRef.current, desiredPayloadRef.current, payload.revision);
+        }
       } catch (error) {
-        serverAvailableRef.current = true;
         setSyncState({
           status: "warning",
-          message: `서버 저장 실패 (${errorMessage(error, "원인 확인 필요")}): 이 브라우저 로컬 캐시에 보관했고 다음 변경 시 서버 저장을 재시도합니다.`
+          message: `서버 저장 실패 (${errorMessage(error)}). 연결이 복구되거나 다음 변경 시 재시도합니다.`
         });
+      } finally {
+        savingRef.current = false;
+        if (saved && desiredPayloadRef.current !== pending) void save();
       }
-    }, 700);
+    };
 
+    const timer = setTimeout(save, 700);
+    window.addEventListener("online", save);
     return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      clearTimeout(timer);
+      window.removeEventListener("online", save);
     };
   }, [projects, adminLogs, supplyPriceItems, contractRecords, marketAnalysisDefaults]);
 
@@ -1219,7 +1268,18 @@ function useProjectsStore() {
     setContractRecords,
     marketAnalysisDefaults,
     setMarketAnalysisDefaults,
-    syncState
+    syncState,
+    revisionRef,
+    drafts,
+    downloadDraft,
+    openServerCopy: () => {
+      if (!writeCache(draftKeyRef.current, desiredPayloadRef.current, revisionRef.current)) {
+        downloadDraft();
+        return;
+      }
+      window.sessionStorage.removeItem(DRAFT_PREFIX);
+      window.location.reload();
+    }
   };
 }
 
@@ -2405,8 +2465,7 @@ function SupplyPriceTab({
         marketDecisionLabel(item.marketDecisionStatus)
       ];
     });
-    const escapeCsvValue = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
-    const csvText = [headers, ...rows].map((row) => row.map(escapeCsvValue).join(",")).join("\r\n");
+    const csvText = toCsv(headers, rows);
     const downloadUrl = URL.createObjectURL(new Blob([`\uFEFF${csvText}`], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = downloadUrl;
@@ -4094,7 +4153,7 @@ function AccessAccountSettingsTab({ isAdmin }) {
 }
 
 
-function BackupTab({ projects, adminLogs, supplyPriceItems, contractRecords, marketAnalysisDefaults, onRestore, isAdmin }) {
+function BackupTab({ projects, adminLogs, supplyPriceItems, contractRecords, marketAnalysisDefaults, revisionRef, onRestore, isAdmin }) {
   const fullBackupInputRef = useRef(null);
   const moduleBackupInputRefs = useRef({});
   const [transferState, setTransferState] = useState({ status: "idle", message: "" });
@@ -4148,12 +4207,13 @@ function BackupTab({ projects, adminLogs, supplyPriceItems, contractRecords, mar
       const response = await fetch("/api/backup/full", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ backup: pendingRestore.document })
+        body: JSON.stringify({ backup: pendingRestore.document, revision: revisionRef.current })
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) {
         throw new Error(payload.error || payload.message || `복원 실패 (${response.status})`);
       }
+      revisionRef.current = payload.revision;
       onRestore({
         projects: pendingRestore.data.projects,
         adminLogs: pendingRestore.data.adminLogs,
@@ -5167,7 +5227,11 @@ export default function PmsApp() {
     setContractRecords,
     marketAnalysisDefaults,
     setMarketAnalysisDefaults,
-    syncState
+    syncState,
+    revisionRef,
+    drafts,
+    downloadDraft,
+    openServerCopy
   } = useProjectsStore();
   const [userRole, setUserRole] = useState(ROLE_GUEST);
   const [moduleTab, setModuleTab] = useState("development");
@@ -5773,6 +5837,15 @@ export default function PmsApp() {
       />}
 
       <main className="pms-main-content" style={{ flex: 1, padding: 16, minWidth: 0, overflowX: "hidden" }}>
+        {syncState.status === "conflict" && <div role="alert" style={{ padding: 8, background: "#fef3c7", marginBottom: 8 }}>
+          <span>{syncState.message} 현재 화면에는 로컬 수정본이 표시됩니다. </span>
+          <button type="button" onClick={() => downloadDraft()}>로컬 수정본 다운로드</button>{" "}
+          <button type="button" onClick={openServerCopy}>수정본 보관 후 서버 데이터 열기</button>
+        </div>}
+        {drafts.length > 0 && <details style={{ marginBottom: 8 }}>
+          <summary>이 브라우저에 보관된 로컬 수정본 ({drafts.length}건)</summary>
+          {drafts.map((key, index) => <button type="button" key={key} onClick={() => downloadDraft(key)}>수정본 {index + 1} 다운로드</button>)}
+        </details>}
         {medicineTabOpened && (
           <div hidden={moduleTab !== "medicine-standard"}>
             <MedicineStandardTab
@@ -5913,6 +5986,7 @@ export default function PmsApp() {
               supplyPriceItems={supplyPriceItems}
               contractRecords={contractRecords}
               marketAnalysisDefaults={marketAnalysisDefaults}
+              revisionRef={revisionRef}
               isAdmin={isAdmin}
               onRestore={applyRestoredData}
             />}

@@ -49,15 +49,11 @@
 
 ## 5) 앱에서 동작 확인
 
-프로젝트 > `백업/복원` 탭에서:
-
-1. `Google Drive 백업 생성`
-2. `Drive 목록 새로고침`
-3. 목록에 백업 파일이 생성되었는지 확인
+관리자 세션에서 `POST /api/backup/google-drive`에 JSON `{ "action": "upload" }`를 보내면 서버의 전체 데이터가 백업됩니다.
+`GET /api/backup/google-drive`로 목록을 조회하고 `action=download`와 `fileId`로 다운로드할 수 있습니다.
 
 ## 권한 동작
 
-- `MANAGER`: Drive 백업 목록 조회/다운로드 가능
-- `ADMIN`: 조회/다운로드 + Drive 백업 복원 가능
+- `ADMIN`: Drive 백업 생성·조회·다운로드 및 전체 백업 복원 가능
 
-복원은 데이터 덮어쓰기이므로 `ADMIN`만 허용됩니다.
+기존 일부 Drive 파일은 프로젝트와 관리자 이력만 담고 있어 전체 복원에 사용할 수 없습니다.

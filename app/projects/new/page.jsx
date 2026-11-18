@@ -179,6 +179,7 @@ export default function NewProjectPage() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          revision: getPayload.revision,
           projects: [...currentProjects, newProject],
           adminLogs: [...currentAdminLogs, createLog],
           supplyPriceItems: nextSupplyPriceItems

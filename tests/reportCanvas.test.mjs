@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { drawCanvasTable, getCanvasTextLines } from "../lib/pms/exporters.js";
+import { drawCanvasTable, getCanvasTextLines, toCsv } from "../lib/pms/exporters.js";
+
+test("CSV exports formula-like text safely and keeps numbers and multiline fields", () => {
+  assert.equal(toCsv(["이름", "원가"], [[" =1+1", -15], ['성분A\n성분"B"', 10]]),
+    `"이름","원가"\r\n"' =1+1","-15"\r\n"성분A\n성분""B""","10"`);
+});
 
 function canvasContext(width = 1000) {
   return {

@@ -4,6 +4,7 @@ import { validateFullBackupData } from "@/lib/pms/fullBackup";
 import {
   assertSameOrigin,
   readJsonRequest,
+  RequestSecurityError,
   REQUEST_LIMITS,
   secureJson,
   securityErrorResponse
@@ -26,6 +27,7 @@ export async function GET() {
       contractRecords: result.contractRecords,
       marketAnalysisDefaults: result.marketAnalysisDefaults,
       updatedAt: result.updatedAt,
+      revision: result.revision,
       source: result.source
     });
   } catch (error) {
@@ -44,6 +46,9 @@ export async function PUT(request) {
     const body = await readJsonRequest(request, { maxBytes: REQUEST_LIMITS.projects });
     if (!body || !Array.isArray(body.projects)) {
       return secureJson({ ok: false, message: "projects 배열이 필요합니다." }, { status: 400 });
+    }
+    if (typeof body.revision !== "string" || !body.revision) {
+      throw new RequestSecurityError("저장하려면 화면을 새로고침해 주세요.", 409, "STALE_PROJECTS");
     }
 
     let adminLogs = Array.isArray(body.adminLogs) ? body.adminLogs : null;
@@ -95,9 +100,10 @@ export async function PUT(request) {
       validated.adminLogs,
       validated.supplyPriceItems,
       validated.marketAnalysisDefaults,
-      validated.contractRecords
+      validated.contractRecords,
+      body.revision
     );
-    return secureJson({ ok: true, updatedAt: result.updatedAt });
+    return secureJson({ ok: true, updatedAt: result.updatedAt, revision: result.revision });
   } catch (error) {
     console.error("[PUT /api/projects] failed:", error);
     return securityErrorResponse(error, "프로젝트 데이터를 저장하지 못했습니다.");

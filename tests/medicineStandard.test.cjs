@@ -90,7 +90,7 @@ test('DGM imports only an unambiguous amount for the selected form',()=>{
 });
 
 const { categoryLabel, classificationRef, adultSpecs, chapterFourClaims } = require('../lib/pms/medicineStandard/rules.mjs');
-const { reviewAlternatives } = require('../lib/pms/medicineStandard/reportData.mjs');
+const { assessReview, reviewAlternatives } = require('../lib/pms/medicineStandard/reportData.mjs');
 const chapterFour = ANNEX[3];
 const scopolia = group => chapterFour.ingredients.find(row=>row.name==='스코폴리아엑스'&&row.group===group);
 
@@ -118,8 +118,9 @@ test('intestinal-regulator scenarios follow the actual active role and show the 
   const probiotic={...chapterFour.ingredients.find(r=>r.group==='IV'&&r.item==='1'),entries:{day:600000},primary:true};
   const antacid={...scopolia('I'),entries:{day:4},primary:false};
   const input={n:4,form:'정제',variant:'',freq:3,perDose:2,increment:1,adultAge:15,rows:[probiotic,antacid]};
-  const [possible,,blocked]=reviewAlternatives(input,assess(input));
-  assert.deepEqual(possible.frequencies.map(option=>option.freq),[3]);
+  const [possible,manual,blocked]=reviewAlternatives(input,assess(input));
+  assert.deepEqual(possible.frequencies,[]);
+  assert.deepEqual(manual.frequencies.map(option=>option.freq),[3]);
   assert.deepEqual(blocked.frequencies.map(option=>[option.freq,option.allowed]),[[1,false],[2,false]]);
   assert.deepEqual(blocked.frequencies.map(option=>option.quantities.find(q=>q.id===probiotic.id).value),[1200000,2400000]);
   const diarrhea={...chapterFour.ingredients.find(r=>r.group==='V'&&r.item==='2'),entries:{day:1},primary:true};
@@ -127,6 +128,17 @@ test('intestinal-regulator scenarios follow the actual active role and show the 
   const verdict=assess(flexible);
   assert.deepEqual(verdict.rule.counts,[1,2,3]);
   assert.ok(!reviewAlternatives(flexible,verdict)[2].frequencies.some(option=>!option.allowed));
+});
+
+test('unresolved imports keep all otherwise valid alternatives in additional review',()=>{
+  const probiotic={...chapterFour.ingredients.find(r=>r.group==='IV'&&r.item==='1'),entries:{day:600000},primary:true};
+  const antacid={...scopolia('I'),entries:{day:4},primary:false};
+  const input={n:4,form:'정제',variant:'',freq:1,perDose:2,increment:1,adultAge:15,rows:[probiotic,antacid],importSummary:{pending:['미확인 성분']}};
+  const [possible,manual,blocked]=reviewAlternatives(input,assessReview(input));
+  assert.deepEqual(possible.frequencies,[]);
+  assert.deepEqual(manual.frequencies.map(option=>[option.freq,option.status]),[[3,'manual']]);
+  assert.ok(manual.frequencies[0].issues.some(issue=>issue.ref==='DGM 공급조건'));
+  assert.deepEqual(blocked.frequencies.map(option=>option.freq),[1,2]);
 });
 
 test('A4 workbook places possible results above blocked results and stores numeric doses',async()=>{

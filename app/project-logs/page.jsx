@@ -23,6 +23,7 @@ export default function ProjectLogsPage() {
   const router = useRouter();
   const [projects, setProjects] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [revision, setRevision] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -47,6 +48,7 @@ export default function ProjectLogsPage() {
         if (disposed) return;
         setProjects(Array.isArray(dataPayload.projects) ? dataPayload.projects : []);
         setLogs(normalizeLogs(Array.isArray(dataPayload.adminLogs) ? dataPayload.adminLogs : []));
+        setRevision(dataPayload.revision);
         setUserRole(sessionPayload?.role === "admin" ? "admin" : "guest");
       } catch (e) {
         if (!disposed) setError(String(e?.message || e));
@@ -74,13 +76,14 @@ export default function ProjectLogsPage() {
       const resp = await fetch("/api/projects", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projects, adminLogs: nextLogs })
+        body: JSON.stringify({ projects, adminLogs: nextLogs, revision })
       });
       const payload = await resp.json().catch(() => ({}));
       if (!resp.ok || !payload.ok) {
         throw new Error(payload.error || payload.message || "저장 실패");
       }
       setLogs(nextLogs);
+      setRevision(payload.revision);
     } catch (e) {
       setError(String(e?.message || e));
     } finally {

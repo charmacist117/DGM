@@ -4,6 +4,7 @@ import { loadProjects, saveProjects } from "@/lib/server/projectStore";
 import {
   assertSameOrigin,
   readJsonRequest,
+  RequestSecurityError,
   REQUEST_LIMITS,
   secureJson,
   securityErrorResponse
@@ -58,16 +59,20 @@ export async function POST(request) {
     if (denied) return denied;
 
     const body = await readJsonRequest(request, { maxBytes: REQUEST_LIMITS.backup });
+    if (typeof body?.revision !== "string" || !body.revision) {
+      throw new RequestSecurityError("최신 서버 데이터를 불러온 뒤 복원해 주세요.", 409, "STALE_PROJECTS");
+    }
     const parsed = parseFullBackup(body?.backup || body, { allowLegacy: true });
     const saved = await saveProjects(
       parsed.data.projects,
       parsed.data.adminLogs,
       parsed.data.supplyPriceItems,
       parsed.data.marketAnalysisDefaults,
-      parsed.data.contractRecords
+      parsed.data.contractRecords,
+      body.revision
     );
 
-    return secureJson({ ok: true, updatedAt: saved.updatedAt, summary: parsed.summary, legacy: parsed.legacy });
+    return secureJson({ ok: true, updatedAt: saved.updatedAt, revision: saved.revision, summary: parsed.summary, legacy: parsed.legacy });
   } catch (error) {
     console.error("[POST /api/backup/full] failed:", error);
     return securityErrorResponse(error, "전체 백업 파일을 복원하지 못했습니다.", 400);
