@@ -245,6 +245,8 @@ export default function DistributionStructureTab({
   selectedCategory = "all",
   selectedItemId,
   onSelectedItemChange,
+  activePricingScenarioId,
+  onPricingScenarioChange,
   onUpdateItem,
   onOpenSupply,
   onOpenMarket,
@@ -255,7 +257,7 @@ export default function DistributionStructureTab({
   const [adoptionStatusFilter, setAdoptionStatusFilter] = useState("all");
   const [structureStatusFilter, setStructureStatusFilter] = useState("all");
   const [editingItemId, setEditingItemId] = useState(null);
-  const [activePricingScenarioId, setActivePricingScenarioId] = useState(null);
+  const setActivePricingScenarioId = (id) => onPricingScenarioChange?.(id, { replace: true });
   const [pricingScenarioClipboard, setPricingScenarioClipboard] = useState(null);
   const [draggedPricingScenarioKey, setDraggedPricingScenarioKey] = useState(null);
   const [comparisonCategoryDraft, setComparisonCategoryDraft] = useState("");
@@ -305,12 +307,6 @@ export default function DistributionStructureTab({
       return haystack.includes(query);
     });
   }, [adoptionStatusFilter, categoryItems, permitCompanyFilter, query, structureStatusFilter]);
-
-  useEffect(() => {
-    if (visibleItems.length === 0) return;
-    const selectedItemIsVisible = visibleItems.some((item) => String(item.id) === String(selectedItemId));
-    if (!selectedItemIsVisible) onSelectedItemChange?.(visibleItems[0].id);
-  }, [onSelectedItemChange, selectedItemId, visibleItems]);
 
   const selectedItem = visibleItems.find((item) => String(item.id) === String(selectedItemId)) || visibleItems[0] || null;
   const isEditing = selectedItem && String(editingItemId) === String(selectedItem.id);
@@ -1420,7 +1416,7 @@ export default function DistributionStructureTab({
                         key={scenarioDragKey}
                         type="button"
                         draggable={canReorder}
-                        onClick={() => setActivePricingScenarioId(scenario.id)}
+                        onClick={() => onPricingScenarioChange?.(scenario.id)}
                         onDragStart={(event) => {
                           if (!canReorder) return;
                           setDraggedPricingScenarioKey(scenarioDragKey);

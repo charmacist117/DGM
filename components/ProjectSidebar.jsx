@@ -31,10 +31,8 @@ function contractSidebarStatusTone(status, active) {
 
 export default function ProjectSidebar({
   isHome,
-  setIsHome,
-  setTab,
   moduleTab,
-  setModuleTab,
+  openHome,
   isAdmin,
   goToNewProjectPage,
   goToProjectLogsPage,
@@ -155,16 +153,7 @@ export default function ProjectSidebar({
           </div>
         </div>
         <button
-          onClick={() => {
-            setModuleTab?.("home");
-            setIsHome(true);
-            setTab("overview");
-            if (typeof window !== "undefined") {
-              const url = new URL(window.location.href);
-              url.searchParams.delete("project");
-              window.history.replaceState({}, "", url.toString());
-            }
-          }}
+          onClick={openHome}
           style={{
             width: 30,
             height: 30,

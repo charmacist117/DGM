@@ -120,14 +120,15 @@ export default function ContractManagementTab({
   syncState,
   isAdmin = false,
   parentScope = "all",
-  onParentScopeChange
+  selectedRecordId = "",
+  onViewChange
 }) {
   const normalizedRecords = useMemo(() => normalizeContractRecords(records), [records]);
   const parentRecords = useMemo(
     () => normalizedRecords.filter((record) => record.recordType === "parent"),
     [normalizedRecords]
   );
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(selectedRecordId || (parentScope === "all" ? "" : parentScope));
   const [search, setSearch] = useState("");
   const [recordFilter, setRecordFilter] = useState("all");
   const [childTypeFilter, setChildTypeFilter] = useState("all");
@@ -136,33 +137,34 @@ export default function ContractManagementTab({
   const [draft, setDraft] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
-  const previousParentScopeRef = useRef(parentScope);
+  const previousView = useRef({ parentScope, selectedRecordId });
 
   useEffect(() => {
-    const previousScope = previousParentScopeRef.current;
-    if (String(previousScope) === String(parentScope)) return;
-    if (isEditing && !window.confirm("저장하지 않은 수정 내용을 취소하고 계약 범위를 변경하시겠습니까?")) {
-      onParentScopeChange?.(previousScope);
+    const previous = previousView.current;
+    const scopeChanged = String(previous.parentScope) !== String(parentScope);
+    if (!scopeChanged && String(previous.selectedRecordId) === String(selectedRecordId)) return;
+    if (isEditing && !window.confirm("저장하지 않은 수정 내용을 취소하고 다른 계약 화면을 보시겠습니까?")) {
+      onViewChange?.(previous.parentScope, previous.selectedRecordId, { replace: true, scroll: false });
       return;
     }
     if (isEditing) {
       setIsEditing(false);
       setDraft(null);
     }
-    previousParentScopeRef.current = parentScope;
-    setSearch("");
-    setRecordFilter("all");
-    setChildTypeFilter("all");
-    if (parentScope !== "all") {
-      const parent = parentRecords.find((record) => String(record.id) === String(parentScope));
-      if (parent) setSelectedId(parent.id);
+    previousView.current = { parentScope, selectedRecordId };
+    if (scopeChanged) {
+      setSearch("");
+      setRecordFilter("all");
+      setChildTypeFilter("all");
     }
-  }, [isEditing, onParentScopeChange, parentRecords, parentScope]);
+    setSelectedId(selectedRecordId || (parentScope === "all" ? "" : parentScope));
+  }, [isEditing, onViewChange, parentScope, selectedRecordId]);
 
   useEffect(() => {
     if (selectedId && normalizedRecords.some((record) => String(record.id) === String(selectedId))) return;
-    setSelectedId(normalizedRecords[0]?.id || "");
-  }, [normalizedRecords, selectedId]);
+    const requested = selectedRecordId || (parentScope === "all" ? "" : parentScope);
+    setSelectedId(normalizedRecords.find((record) => String(record.id) === String(requested))?.id || normalizedRecords[0]?.id || "");
+  }, [normalizedRecords, parentScope, selectedId, selectedRecordId]);
 
   const selectedRecord = normalizedRecords.find((record) => String(record.id) === String(selectedId)) || null;
   const projectsById = useMemo(() => new Map(projects.map((project) => [String(project.id), project])), [projects]);
@@ -277,11 +279,8 @@ export default function ContractManagementTab({
     onRecordsChange(exists
       ? normalizedRecords.map((record) => String(record.id) === String(next.id) ? next : record)
       : [next, ...normalizedRecords]);
-    if (next.recordType === "parent") {
-      onParentScopeChange?.(next.id);
-    } else if (parentScope !== "all" && String(next.parentId) !== String(parentScope)) {
-      onParentScopeChange?.(next.parentId);
-    }
+    const nextScope = next.recordType === "parent" ? next.id : parentScope === "all" ? "all" : next.parentId;
+    onViewChange?.(nextScope, next.id, { replace: true, scroll: false });
     setSelectedId(next.id);
     setDraft(null);
     setIsEditing(false);
@@ -302,10 +301,12 @@ export default function ContractManagementTab({
     const nextRecords = normalizedRecords.filter((record) => String(record.id) !== String(deleteTarget.id));
     onRecordsChange(nextRecords);
     if (deleteTarget.recordType === "parent" && String(parentScope) === String(deleteTarget.id)) {
-      onParentScopeChange?.("all");
+      onViewChange?.("all", nextRecords[0]?.id, { replace: true, scroll: false });
       setSelectedId(nextRecords[0]?.id || "");
     } else {
-      setSelectedId(parentScope !== "all" ? parentScope : (nextRecords[0]?.id || ""));
+      const nextId = parentScope !== "all" ? parentScope : (nextRecords[0]?.id || "");
+      setSelectedId(nextId);
+      onViewChange?.(parentScope, nextId, { replace: true, scroll: false });
     }
     setDeleteTarget(null);
     setDeleteConfirmation("");
@@ -362,12 +363,14 @@ export default function ContractManagementTab({
         title={compact ? `${contractDisplayTitle(record)} · ${contractStatusLabel(record.status)}` : undefined}
         aria-label={compact ? `하위 계약·문서 ${record.counterparty || "상대방 미입력"}: ${contractDisplayTitle(record)} · ${contractStatusLabel(record.status)}` : undefined}
         onClick={() => {
-          if (isEditing && String(record.id) !== String(selectedId)) {
+          if (active) return;
+          if (isEditing) {
             if (!window.confirm("저장하지 않은 수정 내용을 취소하고 다른 계약을 보시겠습니까?")) return;
             setIsEditing(false);
             setDraft(null);
           }
           setSelectedId(record.id);
+          onViewChange?.(parentScope, record.id, { scroll: false });
         }}
         style={{
           width: "100%",

@@ -69,7 +69,6 @@ export default function ProjectPromotionTab({ items = [], projects = [], marketA
   const [progressFilter, setProgressFilter] = useState("all");
   const [permitCompanyFilter, setPermitCompanyFilter] = useState("all");
   const [query, setQuery] = useState("");
-  const [selectedItemId, setSelectedItemId] = useState(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(normalizeProjectPromotion());
   const [linkingProject, setLinkingProject] = useState(false);
@@ -96,21 +95,7 @@ export default function ProjectPromotionTab({ items = [], projects = [], marketA
       || String(right.projectPromotion?.updatedAt || right.quoteDate || "").localeCompare(String(left.projectPromotion?.updatedAt || left.quoteDate || ""))
     ));
   }, [eligibleItems, permitCompanyFilter, progressFilter, query]);
-  const selectedItem = visibleItems.find((item) => String(item.id) === String(selectedItemId)) || visibleItems[0] || null;
-
-  useEffect(() => {
-    if (controlledSelectedItemId !== null && controlledSelectedItemId !== undefined) {
-      setSelectedItemId(controlledSelectedItemId);
-    }
-  }, [controlledSelectedItemId]);
-
-  useEffect(() => {
-    if (selectedItem && String(selectedItem.id) !== String(selectedItemId)) {
-      setSelectedItemId(selectedItem.id);
-      onSelectedItemChange?.(selectedItem.id);
-    }
-    if (!selectedItem) setSelectedItemId(null);
-  }, [selectedItem, selectedItemId]);
+  const selectedItem = visibleItems.find((item) => String(item.id) === String(controlledSelectedItemId)) || visibleItems[0] || null;
 
   useEffect(() => {
     setEditing(false);
@@ -319,7 +304,7 @@ export default function ProjectPromotionTab({ items = [], projects = [], marketA
           <select value={permitCompanyFilter} onChange={(event) => setPermitCompanyFilter(event.target.value)} style={inputStyle} aria-label="허가사 필터"><option value="all">전체 허가사</option>{permitCompanyOptions.map((permitCompany) => <option key={permitCompany} value={permitCompany}>{permitCompany}</option>)}<option value={MISSING_PERMIT_COMPANY_FILTER}>허가사 미입력</option></select>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="성분명, 제조사, 허가사 검색" style={inputStyle} />
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 7, marginTop: 10, maxHeight: "calc(100vh - 250px)", overflowY: "auto", overflowX: "hidden" }}>{visibleItems.map((item) => { const active = String(item.id) === String(selectedItem?.id); const itemPromotion = normalizeProjectPromotion(item.projectPromotion); const fullLabel = itemLabel(item); return <button key={item.id} type="button" onClick={() => setSelectedItemId(item.id)} style={{ width: "100%", minWidth: 0, maxWidth: "100%", overflow: "hidden", padding: 10, textAlign: "left", borderRadius: 7, border: `1px solid ${active ? "#2563eb" : "#cbd5e1"}`, background: active ? "#eff6ff" : "#fff", cursor: "pointer" }}><IngredientAmountTitle label={fullLabel} maxFontSize={13} minFontSize={11} /><div style={{ minWidth: 0, marginTop: 4, color: "#64748b", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.manufacturer || "제조사 미입력"} · {item.permitCompany || "허가사 미입력"}</div><div style={{ marginTop: 6 }}><span style={promotionProgressBadgeStyle(itemPromotion.progressDecision)}>{promotionProgressLabel(itemPromotion.progressDecision)}</span></div></button>; })}{visibleItems.length === 0 && <div style={{ padding: 18, color: "#94a3b8", textAlign: "center", fontSize: 12 }}>조건에 맞는 추진 품목이 없습니다.</div>}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 7, marginTop: 10, maxHeight: "calc(100vh - 250px)", overflowY: "auto", overflowX: "hidden" }}>{visibleItems.map((item) => { const active = String(item.id) === String(selectedItem?.id); const itemPromotion = normalizeProjectPromotion(item.projectPromotion); const fullLabel = itemLabel(item); return <button key={item.id} type="button" onClick={() => onSelectedItemChange?.(item.id)} style={{ width: "100%", minWidth: 0, maxWidth: "100%", overflow: "hidden", padding: 10, textAlign: "left", borderRadius: 7, border: `1px solid ${active ? "#2563eb" : "#cbd5e1"}`, background: active ? "#eff6ff" : "#fff", cursor: "pointer" }}><IngredientAmountTitle label={fullLabel} maxFontSize={13} minFontSize={11} /><div style={{ minWidth: 0, marginTop: 4, color: "#64748b", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.manufacturer || "제조사 미입력"} · {item.permitCompany || "허가사 미입력"}</div><div style={{ marginTop: 6 }}><span style={promotionProgressBadgeStyle(itemPromotion.progressDecision)}>{promotionProgressLabel(itemPromotion.progressDecision)}</span></div></button>; })}{visibleItems.length === 0 && <div style={{ padding: 18, color: "#94a3b8", textAlign: "center", fontSize: 12 }}>조건에 맞는 추진 품목이 없습니다.</div>}</div>
       </aside>
 
       <main style={{ minWidth: 0 }}>{!selectedItem ? <section style={{ ...panelStyle, padding: 32, textAlign: "center", color: "#64748b" }}>시장 검토결과가 ‘진행 추진’인 품목이 없습니다.</section> : <div style={{ display: "grid", gap: 12 }}>

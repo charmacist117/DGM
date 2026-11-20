@@ -1,9 +1,10 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { normalizePricingScenario as normalizeDistributionPricingScenario, getSellingAdminExpenseRate } from "@/lib/pms/pricingScenarios";
 import { useRouter } from "next/navigation";
+import usePmsNavigation from "@/components/usePmsNavigation";
 import ProjectSidebar from "@/components/ProjectSidebar";
 import DesktopProjectPathControl from "@/components/DesktopProjectPathControl";
 import SegmentedDateInput from "@/components/SegmentedDateInput";
@@ -65,6 +66,7 @@ import {
 } from "@/lib/pms/supplyCostBreakdown";
 import { normalizeProjectPromotion, projectPromotionTotalExpectedCost } from "@/lib/pms/projectPromotion";
 import { groupSupplyProjects } from "@/lib/pms/supplyProjectGroups";
+import { compareSupplyQuotes } from "@/lib/pms/supplyQuoteOrder";
 import { createCompactPmsPayload } from "@/lib/pms/storageCompact";
 import { getBaseAmounts, getPermitFeeRates } from "@/lib/pms/distributionAmounts";
 import { tabletsPerPack, convertTabletPrice, adjustedPackPriceToBase } from "@/lib/pms/tabletPrice";
@@ -2218,6 +2220,14 @@ function TasksTab({
   );
 }
 
+function supplyQuoteOrder(item) {
+  return {
+    empty: isSupplyPriceItemEmpty(item),
+    quoteDate: String(item.quoteDate || "").slice(0, 10),
+    createdAt: String(item.createdAt || "")
+  };
+}
+
 function SupplyPriceTab({
   items,
   onItemsChange,
@@ -2228,6 +2238,7 @@ function SupplyPriceTab({
   supplyProjectNames,
   onClearSupplyProject,
   focusedItemId = null,
+  skipFocusedScroll = false,
   onOpenDistribution,
   isAdmin = false
 }) {
@@ -2241,6 +2252,9 @@ function SupplyPriceTab({
   const [quickQuoteDateFilter, setQuickQuoteDateFilter] = useState("all");
   const [editingIds, setEditingIds] = useState(new Set());
   const [editSnapshots, setEditSnapshots] = useState({});
+  const [editedQuoteOrder, setEditedQuoteOrder] = useState(() => new Map());
+  const editScrollAnchor = useRef(null);
+  const editStartPositions = useRef(new Map());
   const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [isCsvExportDialogOpen, setIsCsvExportDialogOpen] = useState(false);
@@ -2331,23 +2345,23 @@ function SupplyPriceTab({
       || String(item.productName || "").toLowerCase().includes(query)
       || (item.ingredients || []).some((ingredient) => ingredient.name.toLowerCase().includes(query))
     ));
-    return [...searchedItems].sort((left, right) => {
-      const leftEditing = editingIds.has(String(left.id));
-      const rightEditing = editingIds.has(String(right.id));
-      if (leftEditing !== rightEditing) return leftEditing ? -1 : 1;
-      const leftEmpty = isSupplyPriceItemEmpty(left);
-      const rightEmpty = isSupplyPriceItemEmpty(right);
-      if (leftEmpty !== rightEmpty) return leftEmpty ? -1 : 1;
-      const leftQuoteDate = String(left.quoteDate || "").slice(0, 10);
-      const rightQuoteDate = String(right.quoteDate || "").slice(0, 10);
-      if (leftQuoteDate !== rightQuoteDate) {
-        if (!leftQuoteDate) return 1;
-        if (!rightQuoteDate) return -1;
-        return rightQuoteDate.localeCompare(leftQuoteDate);
-      }
-      return String(right.createdAt || "").localeCompare(String(left.createdAt || ""));
-    });
-  }, [editingIds, monthFilteredItems, query]);
+    return searchedItems.map((item) => ({ item, order: editedQuoteOrder.get(String(item.id)) ?? supplyQuoteOrder(item) }))
+      .sort((left, right) => compareSupplyQuotes(left.order, right.order))
+      .map(({ item }) => item);
+  }, [editedQuoteOrder, editingIds, monthFilteredItems, query]);
+
+  useLayoutEffect(() => {
+    const anchor = editScrollAnchor.current;
+    if (!anchor) return;
+    editScrollAnchor.current = null;
+    const card = anchor.card.isConnected ? anchor.card : anchor.neighbor;
+    if (!card?.isConnected) return;
+    const bounds = card.getBoundingClientRect();
+    const header = (parseFloat(getComputedStyle(card).getPropertyValue("--app-topbar-height")) || 0) + 8;
+    const top = anchor.opening || !anchor.card.isConnected || anchor.top + bounds.height <= header
+      ? Math.max(header, anchor.top) : anchor.top;
+    if (Math.abs(bounds.top - top) >= 1) window.scrollBy({ top: bounds.top - top, behavior: "instant" });
+  }, [editingIds]);
 
   useEffect(() => {
     if (!focusedItemId) return;
@@ -2371,6 +2385,7 @@ function SupplyPriceTab({
   }, [permitCompanyFilter, permitCompanyOptions]);
 
   useEffect(() => {
+    if (skipFocusedScroll) return;
     if (!focusedItemId) {
       focusedScrollHandledRef.current = null;
       return;
@@ -2382,7 +2397,7 @@ function SupplyPriceTab({
     if (!target) return;
     focusedScrollHandledRef.current = focusKey;
     target.scrollIntoView({ behavior: "auto", block: "center" });
-  }, [filteredItems, focusedItemId]);
+  }, [filteredItems, focusedItemId, skipFocusedScroll]);
 
   useEffect(() => {
     const copiedItemId = pendingCopiedItemScrollRef.current;
@@ -2632,7 +2647,27 @@ function SupplyPriceTab({
     });
   };
 
+  const rememberEditPosition = (itemId, opening = false) => {
+    const card = document.getElementById(`supply-price-item-${itemId}`);
+    const key = String(itemId);
+    const startPositions = editStartPositions.current;
+    if (card) {
+      const currentTop = card.getBoundingClientRect().top;
+      editScrollAnchor.current = {
+        card,
+        opening,
+        top: opening ? currentTop : (startPositions.get(key) ?? currentTop),
+        neighbor: card.nextElementSibling || card.previousElementSibling
+      };
+      if (opening) startPositions.set(key, currentTop);
+    }
+    if (!opening) startPositions.delete(key);
+  };
+
   const startEditing = (item) => {
+    rememberEditPosition(item.id, true);
+    const key = String(item.id);
+    setEditedQuoteOrder((previous) => previous.has(key) ? previous : new Map(previous).set(key, supplyQuoteOrder(item)));
     setEditSnapshots((prev) => ({
       ...prev,
       [String(item.id)]: cloneSupplyItem(item)
@@ -2641,6 +2676,7 @@ function SupplyPriceTab({
   };
 
   const cancelEditing = (itemId) => {
+    rememberEditPosition(itemId);
     const key = String(itemId);
     if (!Object.prototype.hasOwnProperty.call(editSnapshots, key)) {
       setEditing(itemId, false);
@@ -2677,6 +2713,7 @@ function SupplyPriceTab({
         return;
       }
     }
+    rememberEditPosition(itemId);
     updateItem(itemId, {});
     setEditing(itemId, false);
     clearEditSnapshot(itemId);
@@ -5272,27 +5309,15 @@ export default function PmsApp() {
     downloadDraft,
     openServerCopy
   } = useProjectsStore();
+  const [view, navigate] = usePmsNavigation();
+  const { moduleTab, category: supplyCategory, group: supplyProjectKey, stage: developmentStageFilter,
+    section: settingsSection, parent: contractParentScope, tab } = view;
   const [userRole, setUserRole] = useState(ROLE_GUEST);
-  const [moduleTab, setModuleTab] = useState("development");
   const [medicineTabOpened, setMedicineTabOpened] = useState(false);
-  const [selectedMedicineSupplyId, setSelectedMedicineSupplyId] = useState("");
-  const [settingsSection, setSettingsSection] = useState("server");
-  const [supplyCategory, setSupplyCategory] = useState("all");
-  const [supplyProjectKey, setSupplyProjectKey] = useState("");
-  const [developmentStageFilter, setDevelopmentStageFilter] = useState("all");
-  const [selectedDistributionItemId, setSelectedDistributionItemId] = useState(null);
-  const [selectedMarketItemId, setSelectedMarketItemId] = useState(null);
-  const [selectedPromotionItemId, setSelectedPromotionItemId] = useState(null);
-  const [focusedSupplyItemId, setFocusedSupplyItemId] = useState(null);
-  const [contractParentScope, setContractParentScope] = useState("all");
-  const [selectedId, setSelectedId] = useState(null);
-  const [tab, setTab] = useState("overview");
-  const initialUrlAppliedRef = useRef(false);
   const [forcedEdit, setForcedEdit] = useState(null);
-  const [isHome, setIsHome] = useState(() => {
-    if (typeof window === "undefined") return true;
-    return !new URLSearchParams(window.location.search).get("project");
-  });
+  useEffect(() => {
+    if (moduleTab === "medicine-standard") setMedicineTabOpened(true);
+  }, [moduleTab]);
   const isAdmin = canManage(userRole);
   const roleLabel = isAdmin ? "ADMIN" : "MANAGER";
   const settingsMeta = SETTINGS_SECTION_META[settingsSection] || SETTINGS_SECTION_META.server;
@@ -5314,19 +5339,9 @@ export default function PmsApp() {
   const supplyProjectGroups = supplyGroups.byCategory.get(supplyCategory);
   const selectedSupplyProject = supplyProjectGroups?.get(supplyProjectKey);
 
-  const selectSupplyProject = (key) => {
-    setSupplyProjectKey(key);
-    setFocusedSupplyItemId(null);
-    window.scrollTo({ top: 0 });
-  };
-
-  useEffect(() => {
-    if (contractParentScope === "all") return;
-    const parentExists = normalizeContractRecords(contractRecords).some((record) => (
-      record.recordType === "parent" && String(record.id) === String(contractParentScope)
-    ));
-    if (!parentExists) setContractParentScope("all");
-  }, [contractParentScope, contractRecords]);
+  const selectSupplyProject = (group) => navigate({ group, item: "" });
+  const setDevelopmentStageFilter = (stage) => navigate({ stage });
+  const setContractParentScope = (parent, options) => navigate({ parent, item: "" }, options);
 
   useEffect(() => {
     let disposed = false;
@@ -5345,31 +5360,12 @@ export default function PmsApp() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!projects.length) {
-      setSelectedId(null);
-      return;
-    }
-    setSelectedId((prev) => (prev && projects.some((project) => project.id === prev) ? prev : projects[0].id));
-  }, [projects]);
-
-  useEffect(() => {
-    if (initialUrlAppliedRef.current) return;
-    if (!projects.length || typeof window === "undefined") return;
-    const raw = new URLSearchParams(window.location.search).get("project");
-    const requestedId = Number(raw);
-    if (Number.isFinite(requestedId) && projects.some((project) => project.id === requestedId)) {
-      setSelectedId(requestedId);
-      setIsHome(false);
-      setModuleTab("schedule");
-    }
-    initialUrlAppliedRef.current = true;
-  }, [projects]);
-
   const selectedProject = useMemo(
-    () => projects.find((project) => project.id === selectedId),
-    [projects, selectedId]
+    () => projects.find((project) => String(project.id) === view.project),
+    [projects, view.project]
   );
+  const selectedId = selectedProject?.id ?? null;
+  const isHome = !selectedProject;
   const selectedProjectAdminLogs = useMemo(() => {
     if (!selectedProject) return [];
     const scopedLogs = (adminLogs || []).filter((log) => String(log?.projectId) === String(selectedProject.id));
@@ -5508,16 +5504,8 @@ export default function PmsApp() {
     router.push("/project-logs");
   };
 
-  const openProject = (projectId) => {
-    setModuleTab("schedule");
-    setSelectedId(projectId);
-    setIsHome(false);
-    if (typeof window !== "undefined") {
-      const url = new URL(window.location.href);
-      url.searchParams.set("project", String(projectId));
-      window.history.replaceState({}, "", url.toString());
-    }
-  };
+  const openProject = (projectId, projectTab = "overview") =>
+    navigate({ moduleTab: "schedule", project: String(projectId), tab: projectTab });
 
   const PROJECT_BUCKETS = [
     { id: "in_progress", label: "진행 프로젝트", color: "#0ea5e9" },
@@ -5641,8 +5629,7 @@ export default function PmsApp() {
       projectName: project.name,
       reason: `${task.name} 단계 점검 응답: N (지연 적용 필요)`
     });
-    openProject(project.id);
-    setTab("tasks");
+    openProject(project.id, "tasks");
     setForcedEdit({ projectId: project.id, taskId: task.id, token: Date.now() });
   };
 
@@ -5676,10 +5663,7 @@ export default function PmsApp() {
         createdAt: new Date().toISOString()
       }
     ]));
-    setSelectedId((prev) => (prev === projectId ? (remaining[0]?.id || null) : prev));
-    if (remaining.length === 0) {
-      setTab("overview");
-    }
+    if (selectedId === projectId) navigate({ project: remaining[0] ? String(remaining[0].id) : "", tab: "overview" }, { replace: true });
   };
 
   const handleLogout = async () => {
@@ -5695,16 +5679,12 @@ export default function PmsApp() {
     adminLogs: nextAdminLogs,
     supplyPriceItems: nextSupplyPriceItems,
     contractRecords: nextContractRecords,
-    marketAnalysisDefaults: nextMarketAnalysisDefaults,
-    selectedId: nextSelectedId
+    marketAnalysisDefaults: nextMarketAnalysisDefaults
   }) => {
     if (!isAdmin) return;
     if (Array.isArray(nextProjects)) {
       const normalizedProjects = normalizeProjects(nextProjects);
       setProjects(normalizedProjects);
-      if (nextSelectedId) setSelectedId(nextSelectedId);
-      else if (normalizedProjects.length > 0) setSelectedId(normalizedProjects[0].id);
-      else setSelectedId(null);
     }
     if (Array.isArray(nextAdminLogs)) setAdminLogs(normalizeAdminLogs(nextAdminLogs));
     if (Array.isArray(nextSupplyPriceItems)) setSupplyPriceItems(normalizeSupplyPriceItems(nextSupplyPriceItems));
@@ -5750,43 +5730,20 @@ export default function PmsApp() {
     })));
   };
 
-  const openDistributionStructure = (itemId) => {
+  const openSupplyView = (moduleTab, itemId) => {
     const target = normalizedSupplyPriceItems.find((item) => String(item.id) === String(itemId));
-    if (target) setSupplyCategory(target.category);
-    setFocusedSupplyItemId(null);
-    setSelectedDistributionItemId(itemId);
-    setModuleTab("distribution");
-    if (typeof window !== "undefined") window.scrollTo({ top: 0, left: 0 });
+    navigate({ moduleTab, item: String(itemId), category: target?.category || "all", group: "", scenario: "" });
   };
 
-  const openMarketSizeAnalysis = (itemId) => {
-    const target = normalizedSupplyPriceItems.find((item) => String(item.id) === String(itemId));
-    if (target) setSupplyCategory(target.category);
-    setFocusedSupplyItemId(null);
-    setSelectedMarketItemId(itemId);
-    setModuleTab("market");
-    if (typeof window !== "undefined") window.scrollTo({ top: 0, left: 0 });
-  };
-
-  const openSupplyPriceItem = (itemId) => {
-    const target = normalizedSupplyPriceItems.find((item) => String(item.id) === String(itemId));
-    if (target) setSupplyCategory(target.category);
-    setSupplyProjectKey("");
-    setFocusedSupplyItemId(itemId);
-    setModuleTab("supply");
-  };
-
-  const openProjectPromotion = (itemId) => {
-    setSelectedPromotionItemId(itemId);
-    setModuleTab("promotion");
-    if (typeof window !== "undefined") window.scrollTo({ top: 0, left: 0 });
-  };
-
-  const openScheduleDashboard = () => {
-    setModuleTab("schedule");
-    setIsHome(true);
-    setTab("overview");
-    if (typeof window !== "undefined") window.scrollTo({ top: 0, left: 0 });
+  const openDistributionStructure = (itemId) => openSupplyView("distribution", itemId);
+  const openMarketSizeAnalysis = (itemId) => openSupplyView("market", itemId);
+  const openSupplyPriceItem = (itemId) => openSupplyView("supply", itemId);
+  const openProjectPromotion = (itemId) => navigate({ moduleTab: "promotion", item: String(itemId) });
+  const openScheduleDashboard = () => navigate({ moduleTab: "schedule", project: "", tab: "overview" });
+  const selectItem = (itemId) => navigate({ item: String(itemId ?? ""), scenario: "" }, { scroll: false });
+  const openModule = (module) => {
+    if (module === "schedule") openScheduleDashboard();
+    else navigate({ moduleTab: module, category: supplyCategory });
   };
 
   return (
@@ -5838,20 +5795,7 @@ export default function PmsApp() {
           ].map(([id, label]) => (
             <button
               key={id}
-              onClick={() => {
-                setModuleTab(id);
-                if (id === "medicine-standard") setMedicineTabOpened(true);
-                if (id === "home" || id === "development" || id === "schedule") {
-                  setIsHome(true);
-                  setTab("overview");
-                  if (typeof window !== "undefined") {
-                    const url = new URL(window.location.href);
-                    url.searchParams.delete("project");
-                    window.history.replaceState({}, "", url.toString());
-                  }
-                }
-                if (typeof window !== "undefined") window.scrollTo({ top: 0, left: 0 });
-              }}
+              onClick={() => openModule(id)}
               style={id === "home"
                 ? homeModuleTabButtonStyle(moduleTab === id)
                 : {
@@ -5869,10 +5813,8 @@ export default function PmsApp() {
       <div className="pms-body-layout" style={{ display: "flex", minHeight: "calc(100vh - var(--app-topbar-height))" }}>
         {moduleTab !== "medicine-standard" && <ProjectSidebar
         isHome={isHome}
-        setIsHome={setIsHome}
-        setTab={setTab}
         moduleTab={moduleTab}
-        setModuleTab={setModuleTab}
+        openHome={() => openModule("home")}
         isAdmin={isAdmin}
         goToNewProjectPage={goToNewProjectPage}
         goToProjectLogsPage={goToProjectLogsPage}
@@ -5880,11 +5822,7 @@ export default function PmsApp() {
         projectBuckets={PROJECT_BUCKETS}
         supplyCategories={SUPPLY_PRICE_CATEGORIES}
         supplyCategory={supplyCategory}
-        setSupplyCategory={(category) => {
-          setSupplyCategory(category);
-          setSupplyProjectKey("");
-          setFocusedSupplyItemId(null);
-        }}
+        setSupplyCategory={(category) => navigate({ category, group: "", item: "", scenario: "" })}
         supplyCategoryCounts={supplyCategoryCounts}
         supplyProjectGroups={[...(supplyProjectGroups?.values() || [])].sort((a, b) => Number(b.assigned) - Number(a.assigned) || a.label.localeCompare(b.label, "ko"))}
         supplyProjectKey={selectedSupplyProject?.key}
@@ -5895,7 +5833,7 @@ export default function PmsApp() {
         contractParentScope={contractParentScope}
         setContractParentScope={setContractParentScope}
         settingsSection={settingsSection}
-        setSettingsSection={setSettingsSection}
+        setSettingsSection={(section) => navigate({ section })}
         reorderProject={reorderProject}
         selectedId={selectedId}
         openProject={openProject}
@@ -5913,12 +5851,12 @@ export default function PmsApp() {
           <summary>이 브라우저에 보관된 로컬 수정본 ({drafts.length}건)</summary>
           {drafts.map((key, index) => <button type="button" key={key} onClick={() => downloadDraft(key)}>수정본 {index + 1} 다운로드</button>)}
         </details>}
-        {medicineTabOpened && (
+        {(medicineTabOpened || moduleTab === "medicine-standard") && (
           <div hidden={moduleTab !== "medicine-standard"}>
             <MedicineStandardTab
               items={normalizedSupplyPriceItems}
-              selectedId={selectedMedicineSupplyId}
-              onSelectedIdChange={setSelectedMedicineSupplyId}
+              selectedId={moduleTab === "medicine-standard" ? view.item : ""}
+              onSelectedIdChange={selectItem}
             />
           </div>
         )}
@@ -5956,12 +5894,7 @@ export default function PmsApp() {
             stageFilter={developmentStageFilter}
             onStageFilterChange={setDevelopmentStageFilter}
             onOpenSupply={openSupplyPriceItem}
-            onOpenMedicineStandard={itemId => {
-              setSelectedMedicineSupplyId(itemId);
-              setMedicineTabOpened(true);
-              setModuleTab("medicine-standard");
-              window.scrollTo(0, 0);
-            }}
+            onOpenMedicineStandard={(itemId) => navigate({ moduleTab: "medicine-standard", item: String(itemId) })}
             onOpenDistribution={openDistributionStructure}
             onOpenMarket={openMarketSizeAnalysis}
             onOpenPromotion={openProjectPromotion}
@@ -5978,7 +5911,8 @@ export default function PmsApp() {
             supplyGroupsByItemId={supplyGroups.byItemId}
             supplyProjectNames={supplyProjectNames}
             onClearSupplyProject={() => selectSupplyProject("")}
-            focusedItemId={focusedSupplyItemId}
+            focusedItemId={view.item}
+            skipFocusedScroll={view.restoredScroll}
             onOpenDistribution={openDistributionStructure}
             isAdmin={isAdmin}
           />
@@ -5987,8 +5921,10 @@ export default function PmsApp() {
             items={normalizedSupplyPriceItems}
             categories={SUPPLY_PRICE_CATEGORIES}
             selectedCategory={supplyCategory}
-            selectedItemId={selectedDistributionItemId}
-            onSelectedItemChange={setSelectedDistributionItemId}
+            selectedItemId={view.item}
+            onSelectedItemChange={selectItem}
+            activePricingScenarioId={view.scenario}
+            onPricingScenarioChange={(scenarioId, options) => navigate({ scenario: String(scenarioId ?? "") }, { scroll: false, ...options })}
             onUpdateItem={updateSupplyPriceItem}
             onOpenSupply={openSupplyPriceItem}
             onOpenMarket={openMarketSizeAnalysis}
@@ -5999,8 +5935,8 @@ export default function PmsApp() {
             items={normalizedSupplyPriceItems}
             categories={SUPPLY_PRICE_CATEGORIES}
             selectedCategory={supplyCategory}
-            selectedItemId={selectedMarketItemId}
-            onSelectedItemChange={setSelectedMarketItemId}
+            selectedItemId={view.item}
+            onSelectedItemChange={selectItem}
             onUpdateItem={updateSupplyPriceItem}
             marketAnalysisDefaults={marketAnalysisDefaults}
             onMarketAnalysisDefaultsChange={(nextDefaults) => {
@@ -6015,8 +5951,8 @@ export default function PmsApp() {
           <ProjectPromotionTab
             items={normalizedSupplyPriceItems}
             projects={projects}
-            selectedItemId={selectedPromotionItemId}
-            onSelectedItemChange={setSelectedPromotionItemId}
+            selectedItemId={view.item}
+            onSelectedItemChange={selectItem}
             marketAnalysisDefaults={marketAnalysisDefaults}
             onUpdateItem={updateSupplyPriceItem}
             onLinkProject={linkProjectToSupplyItem}
@@ -6037,7 +5973,8 @@ export default function PmsApp() {
             syncState={syncState}
             isAdmin={isAdmin}
             parentScope={contractParentScope}
-            onParentScopeChange={setContractParentScope}
+            selectedRecordId={view.item}
+            onViewChange={(parent, item, options) => navigate({ parent, item: String(item ?? "") }, options)}
           />
         ) : moduleTab === "transfer" ? (
           <>
@@ -6146,7 +6083,7 @@ export default function PmsApp() {
                 ["basic", "기본정보 수정"],
                 ["project_logs", "이력 로그"]
               ].map(([id, label]) => (
-                <button key={id} onClick={() => setTab(id)} style={tabButtonStyle(tab === id)}>
+                <button key={id} onClick={() => navigate({ tab: id }, { scroll: false })} style={tabButtonStyle(tab === id)}>
                   {label}
                 </button>
               ))}
