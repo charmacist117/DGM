@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { diff } from "@/lib/pms/date";
 import {
   contractStatusLabel,
@@ -44,6 +44,9 @@ export default function ProjectSidebar({
   supplyCategory = "all",
   setSupplyCategory,
   supplyCategoryCounts = {},
+  supplyProjectGroups = [],
+  supplyProjectKey = "",
+  onSelectSupplyProject,
   developmentStageFilter = "all",
   setDevelopmentStageFilter,
   contractRecords = [],
@@ -141,7 +144,7 @@ export default function ProjectSidebar({
                   : (isPromotionMode
                   ? "추진 임박 프로젝트 관리"
                   : (isSupplyMode
-                  ? "공급단가 카테고리"
+                  ? "공급조건"
                   : (isContractMode
                       ? "모계약 탐색 및 계약 범위"
                       : (isTransferMode
@@ -329,13 +332,15 @@ export default function ProjectSidebar({
           paddingRight: 4
         }}>
           <div style={{ fontSize: 11, fontWeight: 900, color: "#94a3b8", padding: "0 4px 2px" }}>
-            {isDistributionMode ? "유통 구조 카테고리" : (isMarketMode ? "시장 분석 카테고리" : "공급단가 카테고리")}
+            {isDistributionMode ? "유통 구조 카테고리" : (isMarketMode ? "시장 분석 카테고리" : "공급조건 카테고리")}
           </div>
           {supplyCategoryOptions.map((category) => {
             const active = supplyCategory === category.id;
             return (
+              <Fragment key={category.id}>
               <button
-                key={category.id}
+                type="button"
+                aria-pressed={active && (moduleTab !== "supply" || !supplyProjectKey)}
                 onClick={() => setSupplyCategory?.(category.id)}
                 style={{
                   width: "100%",
@@ -362,6 +367,33 @@ export default function ProjectSidebar({
                   {category.count}건
                 </span>
               </button>
+              {moduleTab === "supply" && active && supplyProjectGroups.length > 0 && (
+                <details open={category.id !== "all" || Boolean(supplyProjectKey)} style={{ marginLeft: 12, paddingLeft: 8, borderLeft: "1px solid #475569" }}>
+                  <summary style={{ color: "#cbd5e1", fontSize: 12, cursor: "pointer", padding: "4px 0" }}>프로젝트·제품군 ({supplyProjectGroups.length})</summary>
+                  <div style={{ display: "grid", gap: 4, maxHeight: "min(320px, 40vh)", overflowY: "auto", padding: "3px 3px 3px 0" }}>
+                    {supplyProjectGroups.map((group) => (
+                      <button
+                        key={group.key}
+                        type="button"
+                        aria-pressed={supplyProjectKey === group.key}
+                        title={group.label}
+                        onClick={() => onSelectSupplyProject?.(group.key)}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 7, justifyContent: "space-between", minWidth: 0,
+                          padding: "6px 8px", border: "1px solid #475569", borderLeft: `4px solid ${group.color}`,
+                          borderRadius: 5, textAlign: "left", fontSize: 12, cursor: "pointer",
+                          background: supplyProjectKey === group.key ? "#e2e8f0" : "#1e293b",
+                          color: supplyProjectKey === group.key ? "#0f172a" : "#e2e8f0"
+                        }}
+                      >
+                        <span style={{ overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{group.label}</span>
+                        <span style={{ flexShrink: 0, fontSize: 11 }}>{group.count}건</span>
+                      </button>
+                    ))}
+                  </div>
+                </details>
+              )}
+              </Fragment>
             );
           })}
         </div>

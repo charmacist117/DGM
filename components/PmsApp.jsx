@@ -64,6 +64,7 @@ import {
   supportsSupplyCostBreakdown
 } from "@/lib/pms/supplyCostBreakdown";
 import { normalizeProjectPromotion, projectPromotionTotalExpectedCost } from "@/lib/pms/projectPromotion";
+import { groupSupplyProjects } from "@/lib/pms/supplyProjectGroups";
 import { createCompactPmsPayload } from "@/lib/pms/storageCompact";
 import { getBaseAmounts, getPermitFeeRates } from "@/lib/pms/distributionAmounts";
 import { tabletsPerPack, convertTabletPrice, adjustedPackPriceToBase } from "@/lib/pms/tabletPrice";
@@ -2221,6 +2222,9 @@ function SupplyPriceTab({
   onItemsChange,
   syncState,
   selectedCategory = "all",
+  selectedSupplyProject,
+  supplyGroupsByItemId,
+  onClearSupplyProject,
   focusedItemId = null,
   onOpenDistribution,
   isAdmin = false
@@ -2246,9 +2250,11 @@ function SupplyPriceTab({
     selectedCategory === "all" ? "all" : normalizeSupplyCategory(selectedCategory)
   ), [selectedCategory]);
   const categoryFilteredItems = useMemo(() => {
-    if (currentCategory === "all") return safeItems;
-    return safeItems.filter((item) => item.category === currentCategory);
-  }, [currentCategory, safeItems]);
+    return safeItems.filter((item) => (
+      (currentCategory === "all" || item.category === currentCategory)
+      && (!selectedSupplyProject || supplyGroupsByItemId.get(String(item.id))?.key === selectedSupplyProject.key || editingIds.has(String(item.id)))
+    ));
+  }, [currentCategory, editingIds, safeItems, selectedSupplyProject, supplyGroupsByItemId]);
   const manufacturerQuery = useMemo(
     () => manufacturerSearch.trim().toLowerCase(),
     [manufacturerSearch]
@@ -2346,6 +2352,7 @@ function SupplyPriceTab({
     setIngredientComparisonMode(false);
     setSearch("");
     setManufacturerSearch("");
+    setPermitCompanyFilter("all");
     setQuickQuoteDateFilter("all");
     setFromMonth("");
     setToMonth("");
@@ -2477,6 +2484,10 @@ function SupplyPriceTab({
   };
 
   const requestCsvExport = () => {
+    if (selectedSupplyProject) {
+      exportSupplyPriceCsv(filteredItems.filter((item) => supplyGroupsByItemId.get(String(item.id))?.key === selectedSupplyProject.key), currentCategoryLabel);
+      return;
+    }
     if (currentCategory !== "all") {
       exportSupplyPriceCsv(filteredItems, currentCategoryLabel);
       return;
@@ -2545,6 +2556,7 @@ function SupplyPriceTab({
   };
 
   const addItem = () => {
+    if (selectedSupplyProject) onClearSupplyProject();
     const nextItem = normalizeSupplyPriceItem({
       ...createSupplyPriceItem(),
       category: currentCategory === "all" ? DEFAULT_SUPPLY_PRICE_CATEGORY : currentCategory
@@ -2555,6 +2567,7 @@ function SupplyPriceTab({
   };
 
   const duplicateItem = (item) => {
+    if (selectedSupplyProject) onClearSupplyProject();
     const now = new Date().toISOString();
     const nextItem = normalizeSupplyPriceItem({
       ...cloneSupplyItem(item),
@@ -2734,6 +2747,10 @@ function SupplyPriceTab({
             <div style={{ fontSize: 15, color: "#64748b", marginTop: 2 }}>
               {currentCategoryLabel} 공급조건을 건별로 추가하고 제품명·성분명 또는 제조사로 검색합니다.
             </div>
+            {selectedSupplyProject && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+              <strong style={{ borderLeft: `4px solid ${selectedSupplyProject.color}`, paddingLeft: 8 }}>{selectedSupplyProject.label}</strong>
+              <button type="button" onClick={onClearSupplyProject} style={supplySubtleButtonStyle}>전체 보기</button>
+            </div>}
           </div>
           <div style={{ display: "grid", justifyItems: "end", gap: 7 }}>
             <SyncBadge syncState={syncState} />
@@ -2913,6 +2930,7 @@ function SupplyPriceTab({
 
       <div style={{ display: "grid", gap: 16 }}>
         {!ingredientComparisonMode && filteredItems.map((item) => {
+          const supplyGroup = supplyGroupsByItemId.get(String(item.id));
           const isEditing = editingIds.has(String(item.id));
           const ingredients = item.ingredients || [normalizeSupplyIngredient()];
           const isRawMaterialCategory = isRawMaterialSupplyCategory(item.category);
@@ -2955,6 +2973,7 @@ function SupplyPriceTab({
               id={`supply-price-item-${item.id}`}
               style={{
                 ...supplyCardStyle,
+                borderLeft: `5px solid ${supplyGroup?.color || "#64748b"}`,
                 boxShadow: String(item.id) === String(focusedItemId)
                   ? "0 0 0 3px rgba(37, 99, 235, .32), 0 12px 28px rgba(15, 23, 42, .12)"
                   : supplyCardStyle.boxShadow
@@ -3004,7 +3023,10 @@ function SupplyPriceTab({
                             ))}
                           </select>
                         ) : (
-                          <div style={supplyTextCellStyle}>{SUPPLY_PRICE_CATEGORY_LABEL_BY_ID[item.category] || item.category || "-"}</div>
+                          <div style={supplyTextCellStyle}>
+                            {SUPPLY_PRICE_CATEGORY_LABEL_BY_ID[item.category] || item.category || "-"}
+                            {supplyGroup?.linked && <div title={supplyGroup.label} style={{ marginTop: 4, fontSize: 11, color: "#475569", overflowWrap: "anywhere" }}>{supplyGroup.label}</div>}
+                          </div>
                         )}
                       </td>
                       <td style={{ padding: 8 }}>
@@ -3540,7 +3562,7 @@ function SupplyPriceTab({
         })}
         {!ingredientComparisonMode && filteredItems.length === 0 && (
           <div style={{ ...supplyPanelStyle, padding: 24, fontSize: 15, color: "#94a3b8", textAlign: "center" }}>
-            {safeItems.length === 0 ? "아직 등록된 공급단가가 없습니다." : "현재 카테고리에서 표시할 공급단가가 없습니다."}
+            {safeItems.length === 0 ? "아직 등록된 공급조건이 없습니다." : "현재 선택 및 검색 조건에 맞는 공급조건이 없습니다."}
           </div>
         )}
       </div>
@@ -5239,6 +5261,7 @@ export default function PmsApp() {
   const [selectedMedicineSupplyId, setSelectedMedicineSupplyId] = useState("");
   const [settingsSection, setSettingsSection] = useState("server");
   const [supplyCategory, setSupplyCategory] = useState("all");
+  const [supplyProjectKey, setSupplyProjectKey] = useState("");
   const [developmentStageFilter, setDevelopmentStageFilter] = useState("all");
   const [selectedDistributionItemId, setSelectedDistributionItemId] = useState(null);
   const [selectedMarketItemId, setSelectedMarketItemId] = useState(null);
@@ -5260,6 +5283,18 @@ export default function PmsApp() {
     () => normalizeSupplyPriceItems(supplyPriceItems),
     [supplyPriceItems]
   );
+  const supplyGroups = useMemo(
+    () => groupSupplyProjects(normalizedSupplyPriceItems, projects),
+    [normalizedSupplyPriceItems, projects]
+  );
+  const supplyProjectGroups = supplyGroups.byCategory.get(supplyCategory);
+  const selectedSupplyProject = supplyProjectGroups?.get(supplyProjectKey);
+
+  const selectSupplyProject = (key) => {
+    setSupplyProjectKey(key);
+    setFocusedSupplyItemId(null);
+    window.scrollTo({ top: 0 });
+  };
 
   useEffect(() => {
     if (contractParentScope === "all") return;
@@ -5712,6 +5747,7 @@ export default function PmsApp() {
   const openSupplyPriceItem = (itemId) => {
     const target = normalizedSupplyPriceItems.find((item) => String(item.id) === String(itemId));
     if (target) setSupplyCategory(target.category);
+    setSupplyProjectKey("");
     setFocusedSupplyItemId(itemId);
     setModuleTab("supply");
   };
@@ -5820,8 +5856,15 @@ export default function PmsApp() {
         projectBuckets={PROJECT_BUCKETS}
         supplyCategories={SUPPLY_PRICE_CATEGORIES}
         supplyCategory={supplyCategory}
-        setSupplyCategory={setSupplyCategory}
+        setSupplyCategory={(category) => {
+          setSupplyCategory(category);
+          setSupplyProjectKey("");
+          setFocusedSupplyItemId(null);
+        }}
         supplyCategoryCounts={supplyCategoryCounts}
+        supplyProjectGroups={[...(supplyProjectGroups?.values() || [])].sort((a, b) => Number(b.linked) - Number(a.linked) || a.label.localeCompare(b.label, "ko"))}
+        supplyProjectKey={selectedSupplyProject?.key}
+        onSelectSupplyProject={selectSupplyProject}
         developmentStageFilter={developmentStageFilter}
         setDevelopmentStageFilter={setDevelopmentStageFilter}
         contractRecords={contractRecords}
@@ -5907,6 +5950,9 @@ export default function PmsApp() {
             onItemsChange={setSupplyPriceItems}
             syncState={syncState}
             selectedCategory={supplyCategory}
+            selectedSupplyProject={selectedSupplyProject}
+            supplyGroupsByItemId={supplyGroups.byItemId}
+            onClearSupplyProject={() => selectSupplyProject("")}
             focusedItemId={focusedSupplyItemId}
             onOpenDistribution={openDistributionStructure}
             isAdmin={isAdmin}
