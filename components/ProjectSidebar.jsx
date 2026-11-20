@@ -369,7 +369,7 @@ export default function ProjectSidebar({
               </button>
               {moduleTab === "supply" && active && supplyProjectGroups.length > 0 && (
                 <details open={category.id !== "all" || Boolean(supplyProjectKey)} style={{ marginLeft: 12, paddingLeft: 8, borderLeft: "1px solid #475569" }}>
-                  <summary style={{ color: "#cbd5e1", fontSize: 12, cursor: "pointer", padding: "4px 0" }}>프로젝트·제품군 ({supplyProjectGroups.length})</summary>
+                  <summary style={{ color: "#cbd5e1", fontSize: 12, cursor: "pointer", padding: "4px 0" }}>프로젝트 ({supplyProjectGroups.length})</summary>
                   <div style={{ display: "grid", gap: 4, maxHeight: "min(320px, 40vh)", overflowY: "auto", padding: "3px 3px 3px 0" }}>
                     {supplyProjectGroups.map((group) => (
                       <button

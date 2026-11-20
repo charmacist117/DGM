@@ -958,6 +958,7 @@ function normalizeSupplyPriceItem(item = {}, fallbackId = Date.now()) {
     id,
     category,
     productName: String(source.productName || source.itemName || ""),
+    supplyProjectName: String(source.supplyProjectName ?? "").trim(),
     manufacturer: String(source.manufacturer || ""),
     licenseCompany: String(source.licenseCompany || ""),
     permitCompany: supportsPermitCompanyFee
@@ -2224,6 +2225,7 @@ function SupplyPriceTab({
   selectedCategory = "all",
   selectedSupplyProject,
   supplyGroupsByItemId,
+  supplyProjectNames,
   onClearSupplyProject,
   focusedItemId = null,
   onOpenDistribution,
@@ -2556,10 +2558,10 @@ function SupplyPriceTab({
   };
 
   const addItem = () => {
-    if (selectedSupplyProject) onClearSupplyProject();
     const nextItem = normalizeSupplyPriceItem({
       ...createSupplyPriceItem(),
-      category: currentCategory === "all" ? DEFAULT_SUPPLY_PRICE_CATEGORY : currentCategory
+      category: currentCategory === "all" ? DEFAULT_SUPPLY_PRICE_CATEGORY : currentCategory,
+      supplyProjectName: selectedSupplyProject?.assigned ? selectedSupplyProject.label : ""
     });
     replaceItems([nextItem, ...safeItems]);
     setEditingIds((prev) => new Set([...prev, String(nextItem.id)]));
@@ -2567,7 +2569,6 @@ function SupplyPriceTab({
   };
 
   const duplicateItem = (item) => {
-    if (selectedSupplyProject) onClearSupplyProject();
     const now = new Date().toISOString();
     const nextItem = normalizeSupplyPriceItem({
       ...cloneSupplyItem(item),
@@ -2929,6 +2930,9 @@ function SupplyPriceTab({
       )}
 
       <div style={{ display: "grid", gap: 16 }}>
+        <datalist id="supply-project-names">
+          {supplyProjectNames.map((name) => <option key={name} value={name} />)}
+        </datalist>
         {!ingredientComparisonMode && filteredItems.map((item) => {
           const supplyGroup = supplyGroupsByItemId.get(String(item.id));
           const isEditing = editingIds.has(String(item.id));
@@ -3025,13 +3029,26 @@ function SupplyPriceTab({
                         ) : (
                           <div style={supplyTextCellStyle}>
                             {SUPPLY_PRICE_CATEGORY_LABEL_BY_ID[item.category] || item.category || "-"}
-                            {supplyGroup?.linked && <div title={supplyGroup.label} style={{ marginTop: 4, fontSize: 11, color: "#475569", overflowWrap: "anywhere" }}>{supplyGroup.label}</div>}
+                            {supplyGroup?.assigned && <div title={supplyGroup.label} style={{ marginTop: 4, fontSize: 11, color: "#475569", overflowWrap: "anywhere" }}>{supplyGroup.label}</div>}
                           </div>
                         )}
                       </td>
                       <td style={{ padding: 8 }}>
                         {isEditing ? (
                           <div style={{ display: "grid", gap: 8 }}>
+                            <label style={supplyFieldLabelStyle}>
+                              공급조건 프로젝트
+                              <input
+                                defaultValue={item.supplyProjectName}
+                                list="supply-project-names"
+                                placeholder="선택 또는 입력"
+                                style={supplyCompactInputStyle}
+                                onBlur={(event) => {
+                                  const name = event.currentTarget.value.trim();
+                                  if (name !== item.supplyProjectName) updateItem(item.id, { supplyProjectName: name });
+                                }}
+                              />
+                            </label>
                             <div>
                               <label style={supplyFieldLabelStyle}>제품명</label>
                               <input
@@ -5284,7 +5301,14 @@ export default function PmsApp() {
     [supplyPriceItems]
   );
   const supplyGroups = useMemo(
-    () => groupSupplyProjects(normalizedSupplyPriceItems, projects),
+    () => groupSupplyProjects(normalizedSupplyPriceItems),
+    [normalizedSupplyPriceItems]
+  );
+  const supplyProjectNames = useMemo(
+    () => [...new Set([
+      ...projects.map((project) => String(project.name || "").trim()),
+      ...normalizedSupplyPriceItems.map((item) => item.supplyProjectName)
+    ].filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko")),
     [normalizedSupplyPriceItems, projects]
   );
   const supplyProjectGroups = supplyGroups.byCategory.get(supplyCategory);
@@ -5862,7 +5886,7 @@ export default function PmsApp() {
           setFocusedSupplyItemId(null);
         }}
         supplyCategoryCounts={supplyCategoryCounts}
-        supplyProjectGroups={[...(supplyProjectGroups?.values() || [])].sort((a, b) => Number(b.linked) - Number(a.linked) || a.label.localeCompare(b.label, "ko"))}
+        supplyProjectGroups={[...(supplyProjectGroups?.values() || [])].sort((a, b) => Number(b.assigned) - Number(a.assigned) || a.label.localeCompare(b.label, "ko"))}
         supplyProjectKey={selectedSupplyProject?.key}
         onSelectSupplyProject={selectSupplyProject}
         developmentStageFilter={developmentStageFilter}
@@ -5952,6 +5976,7 @@ export default function PmsApp() {
             selectedCategory={supplyCategory}
             selectedSupplyProject={selectedSupplyProject}
             supplyGroupsByItemId={supplyGroups.byItemId}
+            supplyProjectNames={supplyProjectNames}
             onClearSupplyProject={() => selectSupplyProject("")}
             focusedItemId={focusedSupplyItemId}
             onOpenDistribution={openDistributionStructure}
